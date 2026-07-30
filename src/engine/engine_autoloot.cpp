@@ -102,7 +102,7 @@ void Engine::autoEquipBackpack(u8 lane) {
     // Gated on m_autoplayActive too: the flag alone once suppressed re-gearing in a NORMAL game
     // after an autoplay run ended mid-swap (exitAutoplayRun now restores the melee weapon and
     // clears the flag — this is the belt-and-braces half).
-    if (m_autoplayActive && m_autoplaySidearmActive && lane == 0) return;
+    if (m_autoplayActive && ap().sidearmActive && lane == 0) return;
     bool changed = true;
     u32 guard = 0;
     while (changed && guard++ < 64) {                      // 64 >> slots; loops only on real swaps
@@ -133,7 +133,16 @@ bool Engine::autoEvictWorst(u8 lane) {
         // Max over all nine cells: the bag deliberately holds gear for OTHER builds now, so "worst"
         // means "least useful to any build", not "worst for the one I'm wearing".
         const f32 s = BuildScore::maxCellScore(it, m_itemDefs[it.defId]);
-        if (s < worstScore) { worstScore = s; worst = bi; }
+        // ...but NEVER evict something that is the best we own for some slot+cell while an ordinary
+        // duplicate is still on hand. maxCellScore is the item's score in ISOLATION, so on its own it
+        // discards the unique best-in-slot for a defensive or caster cell (those pieces score lower in
+        // absolute terms than a big weapon) and the bag quietly loses the ability to field the build
+        // the player is about to switch to. Protected items are ranked behind everything else rather
+        // than made un-evictable, so a bag where EVERYTHING is best-at-something still makes room.
+        const bool bis = BuildScore::isBestInSlotForAnyCell(inv, m_itemDefs, m_itemDefCount, bi,
+                                                            lanePreferredWeapon(m_playerClasses[lane]));
+        const f32 rank = bis ? s + 1e6f : s;
+        if (rank < worstScore) { worstScore = rank; worst = bi; }
     }
     if (worst < 0) return false;                           // nothing evictable — bag stays full
 

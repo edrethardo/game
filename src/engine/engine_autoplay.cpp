@@ -48,7 +48,7 @@
 // is how the bot once froze for 60 s against two body-blocking enemies it silently refused to shoot.
 //
 // The driver also owns two pieces of COMBAT MEMORY the pure policy deliberately does not: the bot-side
-// DODGE LEASHES (m_autoplayDodgeCd / m_autoplayGapCloseCd — the engine's 1 s dodge cooldown is a balance
+// DODGE LEASHES (ap().dodgeCd / ap().gapCloseCd — the engine's 1 s dodge cooldown is a balance
 // number, and a bot that rolls whenever it is legal reads as panic) and the STICKY TARGET (the engaged
 // enemy's identity + how long it has been engaged, so the crosshair stops flipping between similar-range
 // hostiles). Both reach the policy as plain booleans/indices on BotView, keeping the brain engine-free.
@@ -56,9 +56,9 @@
 // AIM STEADINESS is a driver concern for the same reason — it is all MEMORY. The bot's camera IS the
 // player camera, so a desired aim that jumps is a screen that shakes, and the measurement said the jumps
 // were never "jitter" in any single signal: they were the aim's SOURCE changing. Three pieces of state
-// answer that, and all three live here: the TARGET LOS GRACE (m_autoplayTargetBlind — a target's LOS
+// answer that, and all three live here: the TARGET LOS GRACE (ap().targetBlind — a target's LOS
 // raycast flickers, and releasing on the flicker threw the brain between FIGHT and TRAVEL ~25 times a
-// second), the TRAVEL-HEADING COMMIT (m_autoplayTravelDir/Hold — the flow byte and the detour fan both
+// second), the TRAVEL-HEADING COMMIT (ap().travelDir/Hold — the flow byte and the detour fan both
 // toggle across a cell boundary), and the aim DEADZONE in applyBotIntent. Measured on paired 2-minute
 // live runs: mean |per-tick change of the desired yaw| 5.0 deg -> 1.9, applied-yaw direction reversals
 // 4.5/s -> 1.2 (marksman); 2.8 -> 2.2 and 1.6/s -> 0.9 (warrior).
@@ -223,8 +223,8 @@ void Engine::updateAutoplay(f32 dt) {
 
     // Tick the bot-side DODGE LEASHES before building the view — the policy only ever sees
     // "allowed / not allowed", so the timers themselves stay entirely on this side.
-    if (m_autoplayDodgeCd    > 0.0f) m_autoplayDodgeCd    -= dt;
-    if (m_autoplayGapCloseCd > 0.0f) m_autoplayGapCloseCd -= dt;
+    if (ap().dodgeCd    > 0.0f) ap().dodgeCd    -= dt;
+    if (ap().gapCloseCd > 0.0f) ap().gapCloseCd -= dt;
 
     // TOWN: its own tiny policy, entirely on this side. The pure brain idles OFF a normal floor
     // (`onNormalFloor` covers town + arena + Source chamber) and the town's flow field points at the
@@ -270,7 +270,7 @@ void Engine::updateAutoplay(f32 dt) {
             LOG_INFO("[TELEM-HB] cls=%s fl=%u eff=%u elapsed=%.0f secs_fl=%.0f deaths=%u kills=%u hp=%.0f/%.0f wdps=%.0f wedges=%u",
                      cls, m_level.currentFloor, m_level.currentFloor + m_difficulty * 50u, m_autoplayRunTime,
                      m_autoplayFloorTime, m_autoplayDeaths, m_totalKills[0], m_localPlayer.health,
-                     m_localPlayer.maxHealth, weaponDps(), m_autoplayWedgeCount);
+                     m_localPlayer.maxHealth, weaponDps(), ap().wedgeCount);
         }
     }
 
@@ -282,10 +282,10 @@ void Engine::updateAutoplay(f32 dt) {
     // (measured: 45-57 of every 60 ticks in a corridor fight) and each release dropped the brain out
     // of FIGHT into TRAVEL, swinging the desired aim ~55° some 25 times a second — the camera shake.
     if (v.currentTargetIdx >= 0 && !v.targets[(u32)v.currentTargetIdx].hasLOS)
-        m_autoplayTargetBlind += dt;
+        ap().targetBlind += dt;
     else
-        m_autoplayTargetBlind = 0.0f;
-    v.targetBlindGrace = m_autoplayTargetBlind <= Autoplay::TARGET_LOS_GRACE;
+        ap().targetBlind = 0.0f;
+    v.targetBlindGrace = ap().targetBlind <= Autoplay::TARGET_LOS_GRACE;
 
     // Floor-type facts shared by several blocks below. VHALL-UPPER-EXIT is the "protect the climb"
     // scope (the fall veto + the commit's edge release); the pad carve-outs mirror the travel veto
@@ -294,7 +294,7 @@ void Engine::updateAutoplay(f32 dt) {
                                 m_level.floorDoorPos.y > 1.5f;
     const bool commitAvoidPads = m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY &&
                                  !Autoplay::onJumpPad(m_level.grid, m_localPlayer.position) &&
-                                 !m_autoplayDescent.paddedOnly;
+                                 !ap().descent.paddedOnly;
 
     // TRAVEL-HEADING COMMIT (aim steadiness, the other half). Hold whichever heading we committed to
     // rather than re-deciding the flow byte + detour fan every tick. Four release conditions, all of
@@ -314,22 +314,22 @@ void Engine::updateAutoplay(f32 dt) {
     {
         constexpr f32 kTravelCommitSec = 0.40f;   // ~2.4 m at walking speed: a cell or two
         constexpr f32 kRouteReversed   = -0.5f;   // dot < this = more than 120° apart
-        if (m_autoplayTravelHold > 0.0f) m_autoplayTravelHold -= dt;
+        if (ap().travelHold > 0.0f) ap().travelHold -= dt;
         const bool haveFresh = lengthSq(v.flowDir) > 1e-6f;
-        const bool haveHeld  = lengthSq(m_autoplayTravelDir) > 1e-6f;
+        const bool haveHeld  = lengthSq(ap().travelDir) > 1e-6f;
         if (!haveFresh) {                                     // at the exit / boxed in: drop the commit
-            m_autoplayTravelDir = Vec3{0, 0, 0}; m_autoplayTravelHold = 0.0f;
-        } else if (m_autoplayTravelHold > 0.0f && haveHeld &&
-                   dot(m_autoplayTravelDir, v.flowDir) > kRouteReversed &&
+            ap().travelDir = Vec3{0, 0, 0}; ap().travelHold = 0.0f;
+        } else if (ap().travelHold > 0.0f && haveHeld &&
+                   dot(ap().travelDir, v.flowDir) > kRouteReversed &&
                    Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, m_localPlayer.position.y,
-                                         m_autoplayTravelDir, m_level.lavaFloor, commitAvoidPads) &&
+                                         ap().travelDir, m_level.lavaFloor, commitAvoidPads) &&
                    !(vhallUpperExit &&
                      Autoplay::wouldFall(m_level.grid, m_localPlayer.position,
-                                         m_localPlayer.position.y, m_autoplayTravelDir))) {
-            v.flowDir = m_autoplayTravelDir;                  // keep walking the committed heading
+                                         m_localPlayer.position.y, ap().travelDir))) {
+            v.flowDir = ap().travelDir;                  // keep walking the committed heading
         } else {
-            m_autoplayTravelDir  = v.flowDir;                 // re-commit to this tick's choice
-            m_autoplayTravelHold = kTravelCommitSec;
+            ap().travelDir  = v.flowDir;                 // re-commit to this tick's choice
+            ap().travelHold = kTravelCommitSec;
         }
     }
 
@@ -355,13 +355,35 @@ void Engine::updateAutoplay(f32 dt) {
     // entirely — so a fighting bot could never crest the ramp and roamed the floor forever (measured: 5
     // of 6 deep-floor stalls in a 9-seed benchmark). Allow the hop while firing on VHALL upper-exit; the
     // ~1.2 s cadence keeps it from being a constant bounce, and applyBotIntent still gates it on grounded.
-    // AND require the bot to be at the ramp (m_autoplayVhOnRamp): the pos.y gate alone is true across the
+    // AND require the bot to be at the ramp (ap().vhOnRamp): the pos.y gate alone is true across the
     // whole flat void (ground pos.y≈0 < 1.5), so without this the bot bunny-hops the entire approach.
-    const bool vhClimbHop = m_autoplayVhClimbing && m_autoplayVhOnRamp && m_localPlayer.position.y < 1.5f &&
+    // Gate on "still below the exit storey", NOT on an absolute 1.5 m.
+    //
+    // The old `position.y < 1.5f` dated from when this hop had no other gate and fired across the
+    // whole flat void (the bunny-hop-the-approach bug). `vhOnRamp` — added later — is what actually
+    // stops that, and it does it properly: the hop only fires on a ramp slab. The height clause was
+    // left in place and became actively harmful, because it switches the hop OFF over the upper half
+    // of every ramp.
+    //
+    // That is fatal on the last riser. A ramp's final step onto the balcony is ~0.5 m and
+    // STEP_UP_HEIGHT is 0.4 m, so walking CANNOT make it — a hop is the only way up. Measured, twice:
+    // bots pinned at y = 2.49-2.50 against a 3.0 m balcony, moving, with a valid heading and
+    // distance-to-door frozen for the whole floor. Both times it looked like a routing failure and
+    // both times the route was fine; the bot simply could not perform the last step.
+    const bool vhClimbHop = ap().vhClimbing && ap().vhOnRamp &&
+                            m_localPlayer.position.y < m_level.floorDoorPos.y - 0.2f &&
                             !in.potion && !in.descend &&
                             (vhallUpperExit || !in.fire);
     if (vhClimbHop) {
-        const u32 phase = currentLocalTick() % 72;
+        // The pulse is deliberately slow (4 ticks in 72, ~5%) so a climb reads as walking up a ramp
+        // rather than bunny-hopping it. But on the FINAL riser that duty cycle is far too thin: the
+        // step is unwalkable (0.5 m vs STEP_UP_HEIGHT 0.4) so a hop is the ONLY way up, the bot is
+        // grounded only about half the time on a slab, and on a dense floor combat owns most ticks —
+        // so the few pulses that land on a grounded frame can be minutes apart. Within one riser of
+        // the exit storey, pulse hard: there is nothing left to climb after this step, so a rapid hop
+        // there costs no readability and is the difference between cresting and standing at 2.50 m.
+        const bool lastRiser = m_localPlayer.position.y > m_level.floorDoorPos.y - 0.75f;
+        const u32 phase = currentLocalTick() % (lastRiser ? 8u : 72u);
         if (phase < 4) in.jump = true;
     }
 
@@ -372,8 +394,8 @@ void Engine::updateAutoplay(f32 dt) {
     {
         const s32 chosen = Autoplay::pickTarget(v, Autoplay::doctrineFor(v.buildCell));
         const u32 chosenId = (chosen >= 0) ? v.targets[(u32)chosen].id : 0u;
-        if (chosenId != m_autoplayTargetId) { m_autoplayTargetId = chosenId; m_autoplayTargetDwell = 0.0f; }
-        else                                 m_autoplayTargetDwell += dt;
+        if (chosenId != ap().targetId) { ap().targetId = chosenId; ap().targetDwell = 0.0f; }
+        else                                 ap().targetDwell += dt;
     }
 
     // CHARGE the leash on the REQUEST, not on the roll actually starting. The policy already
@@ -381,19 +403,19 @@ void Engine::updateAutoplay(f32 dt) {
     // and on the rare tick it doesn't (mid-air, a state change later in the frame) charging anyway
     // is the conservative direction — it delays the next ask rather than letting it re-fire.
     if (in.dodge) {
-        if (in.dodgeIsGapClose) m_autoplayGapCloseCd = Autoplay::GAP_CLOSE_COOLDOWN;
-        else                    m_autoplayDodgeCd    = Autoplay::doctrineFor(v.buildCell).dodgeCooldownSec;
+        if (in.dodgeIsGapClose) ap().gapCloseCd = Autoplay::GAP_CLOSE_COOLDOWN;
+        else                    ap().dodgeCd    = Autoplay::doctrineFor(v.buildCell).dodgeCooldownSec;
     }
 
     // --- 8b driver backstops applied on top of the pure decision -----------------------------------
     // (1) LOOT-SETTLE dwell. When a fight just ended (hostile count fell to zero), hold position for a
     // beat so the auto-loot vacuum can sweep the drops before the bot walks off them. We only gate the
     // forward move; the vacuum/equip/prune are existing systems. Armed on the >0->0 edge, capped ~3 s.
-    if (v.targetCount == 0 && m_autoplayLastTargetCount > 0)
-        m_autoplayLootDwell = fminf(m_autoplayLootDwell + 1.5f, 3.0f);
-    if (m_autoplayLootDwell > 0.0f) m_autoplayLootDwell -= dt;
-    m_autoplayLastTargetCount = v.targetCount;
-    if (m_autoplayLootDwell > 0.0f && v.targetCount == 0)
+    if (v.targetCount == 0 && ap().lastTargetCount > 0)
+        ap().lootDwell = fminf(ap().lootDwell + 1.5f, 3.0f);
+    if (ap().lootDwell > 0.0f) ap().lootDwell -= dt;
+    ap().lastTargetCount = v.targetCount;
+    if (ap().lootDwell > 0.0f && v.targetCount == 0)
         in.moveFwd = in.moveBack = in.moveLeft = in.moveRight = false;   // dwell: let loot settle
 
     // (2) STUCK detection (anti-livelock backstop; should almost never fire in normal play). Progress
@@ -410,8 +432,8 @@ void Engine::updateAutoplay(f32 dt) {
                                    // distinct from mere chip damage; releases the exit bull back to combat
     {
         const Vec3 p  = m_localPlayer.position;
-        const f32  dx = p.x - m_autoplayLastPos.x, dz = p.z - m_autoplayLastPos.z;
-        const f32  dy = p.y - m_autoplayLastPos.y;
+        const f32  dx = p.x - ap().lastPos.x, dz = p.z - ap().lastPos.z;
+        const f32  dy = p.y - ap().lastPos.y;
         // 3D displacement, so CLIMBING counts as progress. The old XZ-only test read a bot walking up
         // a ramp (much of whose motion is vertical) as "stuck", tripped the escape ladder, and the
         // escape headings walked it off the ramp — climb, stall, get shoved off, repeat. Vertical
@@ -425,13 +447,13 @@ void Engine::updateAutoplay(f32 dt) {
         // is livelocked in place however much it churns. XZ only (a stacked climb is handled by `dy`
         // above and rarely oscillates).
         constexpr f32 kSlowWin = 2.5f, kSlowMin = 2.5f;
-        m_autoplaySlowAnchorT += dt;
-        if (m_autoplaySlowAnchorT >= kSlowWin) {
-            const f32 sdx = p.x - m_autoplaySlowAnchor.x, sdz = p.z - m_autoplaySlowAnchor.z;
-            m_autoplaySlowNetStuck = (sdx * sdx + sdz * sdz) < kSlowMin * kSlowMin;
-            m_autoplaySlowAnchor = p; m_autoplaySlowAnchorT = 0.0f;
+        ap().slowAnchorT += dt;
+        if (ap().slowAnchorT >= kSlowWin) {
+            const f32 sdx = p.x - ap().slowAnchor.x, sdz = p.z - ap().slowAnchor.z;
+            ap().slowNetStuck = (sdx * sdx + sdz * sdz) < kSlowMin * kSlowMin;
+            ap().slowAnchor = p; ap().slowAnchorT = 0.0f;
         }
-        const bool netStuck = m_autoplaySlowNetStuck;
+        const bool netStuck = ap().slowNetStuck;
 
         // In-band fight = an LOS target the bot is SHOOTING AT, so this must track decideCombat's fire
         // gate exactly: within engageMax x range, no engageMin term (the kite floor moves the bot, it
@@ -447,30 +469,30 @@ void Engine::updateAutoplay(f32 dt) {
         // Combat progress = we dealt damage (summed HP fell past a small epsilon) OR scored a kill
         // (fewer hostiles gathered than last tick). Comparing against the previous tick's snapshot; a
         // RISE (a new enemy walked into range) is not progress, so we only test for a drop.
-        killedThisTick = (v.targetCount < m_autoplayLastEnemyCount);
-        combatProgress = killedThisTick || (enemyHp < m_autoplayLastEnemyHp - 0.5f);
-        m_autoplayLastEnemyHp    = enemyHp;
-        m_autoplayLastEnemyCount = v.targetCount;
+        killedThisTick = (v.targetCount < ap().lastEnemyCount);
+        combatProgress = killedThisTick || (enemyHp < ap().lastEnemyHp - 0.5f);
+        ap().lastEnemyHp    = enemyHp;
+        ap().lastEnemyCount = v.targetCount;
 
         if (progressed && !netStuck) {
             // Real progress resumed (moved > 0.5 m from the wedge anchor AND actually getting somewhere
             // NET): re-anchor and DROP the whole escape ladder so the bot returns to plain flow-field
             // travel. The !netStuck gate is what stops an in-place slide/orbit from masquerading as
             // progress and starving the escape ladder — the wall-pinned-swarm livelock.
-            m_autoplayLastPos = p; m_autoplayNoProgressTimer = 0.0f;
-            m_autoplayNudgeTimer = 0.0f; m_autoplayEscapeTimer = 0.0f;
-            m_autoplayLookBehindDone = false;   // new episode gets a fresh look-behind
+            ap().lastPos = p; ap().noProgressTimer = 0.0f;
+            ap().nudgeTimer = 0.0f; ap().escapeTimer = 0.0f;
+            ap().lookBehindDone = false;   // new episode gets a fresh look-behind
         } else if (combatProgress) {
             // Dealing damage in place is progress too (a real fight, not a wedge): hold the timer + escape
             // ladder at zero WITHOUT moving the anchor (the bot hasn't travelled, it's killing things).
-            m_autoplayNoProgressTimer = 0.0f;
-            m_autoplayNudgeTimer = 0.0f; m_autoplayEscapeTimer = 0.0f;
-            m_autoplayLookBehindDone = false;
-        } else if (m_autoplayLootDwell <= 0.0f) {
-            m_autoplayNoProgressTimer += dt;                  // no move, no damage, not dwelling: wedged
+            ap().noProgressTimer = 0.0f;
+            ap().nudgeTimer = 0.0f; ap().escapeTimer = 0.0f;
+            ap().lookBehindDone = false;
+        } else if (ap().lootDwell <= 0.0f) {
+            ap().noProgressTimer += dt;                  // no move, no damage, not dwelling: wedged
         }
     }
-    const bool stuck = m_autoplayNoProgressTimer > 4.0f;
+    const bool stuck = ap().noProgressTimer > 4.0f;
 
     // (2b) BREAK OFF a stalled fight — the fix for the combat livelock. When the bot has been firing in
     // place at an in-band target for ~3 s but dealt no damage (combatStalled), suppress FIGHT and force
@@ -482,7 +504,7 @@ void Engine::updateAutoplay(f32 dt) {
     // the no-progress timer each tick, so a PURE combat standoff never reaches the 4 s geometry ladder;
     // only a bot that is ALSO physically wedged (travel forced but walls block the step) climbs to 4 s
     // and escalates to Remedy B — exactly the intended split.
-    if (m_autoplayBreakoffTimer > 0.0f) m_autoplayBreakoffTimer -= dt;
+    if (ap().breakoffTimer > 0.0f) ap().breakoffTimer -= dt;
     const bool bossGate     = v.hasBoss && v.bossAlive;
 
     // (2c) EXIT-PROGRESS WATCHDOG. The stuck timer above keys off XZ displacement, so a bot that keeps
@@ -506,26 +528,26 @@ void Engine::updateAutoplay(f32 dt) {
     constexpr f32 kDoorApproachMin = 1.0f;   // must close at least 1 m toward the door per window
     if (m_level.currentFloor != m_autoplayLastFloor) {   // new floor: re-anchor the window, drop the latch
         m_autoplayLastFloor      = m_level.currentFloor;
-        m_autoplayDoorCheckDist  = v.distToDoor;
-        m_autoplayExitStallTimer = 0.0f;
-        m_autoplayExitBull       = false;
-        m_autoplayFloorCheckDist  = v.distToDoor;        // and the long, kill-agnostic window below
-        m_autoplayFloorStallTimer = 0.0f;
-        m_autoplaySlowAnchor      = m_localPlayer.position;   // net-progress anchor: don't carry a stale
-        m_autoplaySlowAnchorT     = 0.0f;                     // net-stuck flag across the descent teleport
-        m_autoplaySlowNetStuck    = false;
-        m_autoplayVhCommit        = false;                    // the climb is done once we've descended
-        m_autoplayDescentCommit   = false;                    // ...and so is the Descent push
-        m_autoplayWedgeAnchor     = m_localPlayer.position;   // a floor change teleports the body: without
-        m_autoplayWedgeWinT       = 0.0f;                     // re-anchoring, the first window after it
-        m_autoplayWedgeCmdT       = 0.0f;                     // measures a huge phantom "travel" and the
-        m_autoplayWedgeEscT       = 0.0f;                     // one after that inherits a stale escalation
-        m_autoplayWedgeVetoT      = 0.0f;
-        m_autoplayWedgeTry        = 0;
-        m_autoplayWedgeCount      = 0;
+        ap().doorCheckDist  = v.distToDoor;
+        ap().exitStallTimer = 0.0f;
+        ap().exitBull       = false;
+        ap().floorCheckDist  = v.distToDoor;        // and the long, kill-agnostic window below
+        ap().floorStallTimer = 0.0f;
+        ap().slowAnchor      = m_localPlayer.position;   // net-progress anchor: don't carry a stale
+        ap().slowAnchorT     = 0.0f;                     // net-stuck flag across the descent teleport
+        ap().slowNetStuck    = false;
+        ap().vhCommit        = false;                    // the climb is done once we've descended
+        ap().descentCommit   = false;                    // ...and so is the Descent push
+        ap().wedgeAnchor     = m_localPlayer.position;   // a floor change teleports the body: without
+        ap().wedgeWinT       = 0.0f;                     // re-anchoring, the first window after it
+        ap().wedgeCmdT       = 0.0f;                     // measures a huge phantom "travel" and the
+        ap().wedgeEscT       = 0.0f;                     // one after that inherits a stale escalation
+        ap().wedgeVetoT      = 0.0f;
+        ap().wedgeTry        = 0;
+        ap().wedgeCount      = 0;
     }
     if (v.doorActive && !bossGate) {
-        if (m_autoplayExitBull) {
+        if (ap().exitBull) {
             // ALREADY LATCHED — a COMMITTED shove to the door, held until the bot reaches it and the
             // descend fires (the floor-change reset above clears the latch). The bull is a LAST RESORT,
             // not a run-to-the-exit default: the bot must still FIGHT its way through floors. So it is
@@ -538,24 +560,24 @@ void Engine::updateAutoplay(f32 dt) {
             // kill never latched the bull in the first place — the pre-latch window resets on any damage —
             // so this only re-opens a fight the bot regained the ability to win.)
             if (killedThisTick) {
-                m_autoplayExitBull = false;
-                m_autoplayDoorCheckDist = v.distToDoor; m_autoplayExitStallTimer = 0.0f;
+                ap().exitBull = false;
+                ap().doorCheckDist = v.distToDoor; ap().exitStallTimer = 0.0f;
             }
         } else if (combatProgress) {   // PRE-LATCH ONLY: a fight that IS closing on the exit shouldn't arm it
-            m_autoplayDoorCheckDist = v.distToDoor; m_autoplayExitStallTimer = 0.0f;
+            ap().doorCheckDist = v.distToDoor; ap().exitStallTimer = 0.0f;
         } else {
-            m_autoplayExitStallTimer += dt;
-            if (m_autoplayExitStallTimer >= kDoorCheckWindow) {
+            ap().exitStallTimer += dt;
+            if (ap().exitStallTimer >= kDoorCheckWindow) {
                 // Window elapsed with no exit-approach: did we close > 1 m toward the door in it? If not,
                 // latch the bull (which now PERSISTS, per the branch above, until the bot descends). A
                 // RATE check, not a best-distance one, so a slow inward spiral that never arrives still trips.
-                m_autoplayExitBull      = (m_autoplayDoorCheckDist - v.distToDoor) < kDoorApproachMin;
-                m_autoplayDoorCheckDist = v.distToDoor; m_autoplayExitStallTimer = 0.0f;   // next window
+                ap().exitBull      = (ap().doorCheckDist - v.distToDoor) < kDoorApproachMin;
+                ap().doorCheckDist = v.distToDoor; ap().exitStallTimer = 0.0f;   // next window
             }
         }
     } else {
-        m_autoplayDoorCheckDist = v.distToDoor; m_autoplayExitStallTimer = 0.0f;
-        m_autoplayExitBull      = false;   // no eligible exit (boss alive / town): idle the watchdog
+        ap().doorCheckDist = v.distToDoor; ap().exitStallTimer = 0.0f;
+        ap().exitBull      = false;   // no eligible exit (boss alive / town): idle the watchdog
     }
 
     // (2c-ii) FLOOR-STALL WATCHDOG — the same question over a much longer window, and DELIBERATELY
@@ -590,29 +612,29 @@ void Engine::updateAutoplay(f32 dt) {
     constexpr f32 kFloorApproachMin = 2.0f;   // metres of closure required in that window
     constexpr f32 kFloorPushLeg     = 3.0f;   // disengage-and-travel leg when it fails (> the 1.5 s de-fixate)
     if (v.doorActive && !bossGate) {
-        m_autoplayFloorStallTimer += dt;
-        if (m_autoplayFloorStallTimer >= kFloorWindow) {
-            if ((m_autoplayFloorCheckDist - v.distToDoor) < kFloorApproachMin) {
+        ap().floorStallTimer += dt;
+        if (ap().floorStallTimer >= kFloorWindow) {
+            if ((ap().floorCheckDist - v.distToDoor) < kFloorApproachMin) {
                 // The break-off's 3 s leg is too short on a dense STACKED floor — it walks a bit then
                 // FIGHT re-owns the feet in place, and the bot never descends/crosses. Latch a PERSISTENT
                 // commit instead (holds until the bot leaves the floor): the VHALL climb commit upstairs,
                 // the FOUR_STORY descend commit on a Descent maze (fight your way DOWN to the next hole).
                 // Everywhere else (flat/lava), the short de-fixate leg is right.
-                if (vhallUpperExit)                                            m_autoplayVhCommit      = true;
-                else if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) m_autoplayDescentCommit = true;
-                else                                                           m_autoplayBreakoffTimer = kFloorPushLeg;
+                if (vhallUpperExit)                                            ap().vhCommit      = true;
+                else if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) ap().descentCommit = true;
+                else                                                           ap().breakoffTimer = kFloorPushLeg;
             }
-            m_autoplayFloorCheckDist  = v.distToDoor;
-            m_autoplayFloorStallTimer = 0.0f;
+            ap().floorCheckDist  = v.distToDoor;
+            ap().floorStallTimer = 0.0f;
         }
     } else {
-        m_autoplayFloorCheckDist = v.distToDoor; m_autoplayFloorStallTimer = 0.0f;
+        ap().floorCheckDist = v.distToDoor; ap().floorStallTimer = 0.0f;
     }
     // Suppress the combat break-off while bulling for the exit or standing on it — leaving the floor wins
     // over re-angling a fight we've already given up on.
-    if (Autoplay::combatStalled(m_autoplayNoProgressTimer, inBandFight, combatProgress) &&
-        !m_autoplayExitBull && !v.atExit && m_autoplayBreakoffTimer <= 0.0f)
-        m_autoplayBreakoffTimer = 1.5f;   // arm a relocation leg (re-armed only after the timer expires)
+    if (Autoplay::combatStalled(ap().noProgressTimer, inBandFight, combatProgress) &&
+        !ap().exitBull && !v.atExit && ap().breakoffTimer <= 0.0f)
+        ap().breakoffTimer = 1.5f;   // arm a relocation leg (re-armed only after the timer expires)
         // NB: no flowDir requirement — the break-off STRAFES around the target (unstickCombatMove), which
         // needs no exit heading, so it works even when the bot is boxed and flowDir is vetoed to zero
         // (exactly the pocket the bot froze in: firing at an unhittable target with no flow to walk).
@@ -623,16 +645,16 @@ void Engine::updateAutoplay(f32 dt) {
     // that walks into one and — being an ordinary hostile in its target list — stares at it while
     // firing has built a wedge that can never clear itself. Turning around un-watches it. One-shot per
     // stuck episode; the latch is re-armed by the progress branches above.
-    if (m_autoplayLookBehindTimer > 0.0f) m_autoplayLookBehindTimer -= dt;
+    if (ap().lookBehindTimer > 0.0f) ap().lookBehindTimer -= dt;
     // Scoped to floors 1-10 (Aaron): the look-behind exists for the dormant STONE GARGOYLE standoff —
     // an unkillable statue the bot pins asleep by staring at it — and those appear on the early floors.
     // Off the early floors the spin-around reads as odd and the escape ladder handles other wedges, so
     // the one watchdog whose whole job is "shooting an untriggered gargoyle forever" is early-floor only.
     if (m_level.currentFloor <= 10 &&
-        Autoplay::lookBehindDue(m_autoplayNoProgressTimer, m_autoplayLookBehindDone)) {
-        m_autoplayLookBehindDone  = true;
-        m_autoplayLookBehindTimer = Autoplay::LOOK_BEHIND_HOLD;
-        m_autoplayLookBehindYaw   = Autoplay::lookBehindYaw(m_localPlayer.yaw);
+        Autoplay::lookBehindDue(ap().noProgressTimer, ap().lookBehindDone)) {
+        ap().lookBehindDone  = true;
+        ap().lookBehindTimer = Autoplay::LOOK_BEHIND_HOLD;
+        ap().lookBehindYaw   = Autoplay::lookBehindYaw(m_localPlayer.yaw);
     }
 
     // Remedy A (priority) — WEDGED right at the exit with the boss dead: an unreachable LOS straggler keeps
@@ -653,7 +675,7 @@ void Engine::updateAutoplay(f32 dt) {
     // measurement says it cost exactly what the comment there predicts: on a stalled VHALL floor the
     // no-progress timer climbed to 45 s (the ladder's threshold is 4 s) and the ladder never fired,
     // because the commit sits above it in this chain and swallowed every tick.
-    if (m_autoplayVhCommit && vhallUpperExit &&
+    if (ap().vhCommit && vhallUpperExit &&
         (lengthSq(v.flowDir) > 1e-6f || v.distToDoor <= 1.5f)) {
         // VHALL COMMIT (armed by the floor-stall watchdog; see engine.h). The bot climbed to the balcony
         // story but kept FIGHTING the swarm in place — kite/strafe, never walking to the door — and fell
@@ -685,10 +707,10 @@ void Engine::updateAutoplay(f32 dt) {
             // mount AIRBORNE (bouncing off a riser), grounded for only a tick at a time, so a slow ~1.2 s
             // pulse almost never lands on a grounded frame. A fast pulse catches those frames — one jump
             // from the base clears the ~0.7 m riser. applyBotIntent gates it on grounded, so it can't
-            // double-jump. Gated on m_autoplayVhOnRamp so the commit WALKS the flat approach (and settles
+            // double-jump. Gated on ap().vhOnRamp so the commit WALKS the flat approach (and settles
             // onto a void pad to be launched) instead of bunny-hopping across it.
             const bool climbing = m_localPlayer.position.y < m_level.floorDoorPos.y - 0.5f;
-            if (climbing && m_autoplayVhOnRamp && (currentLocalTick() % 8u) < 4u) in.jump = true;
+            if (climbing && ap().vhOnRamp && (currentLocalTick() % 8u) < 4u) in.jump = true;
         }
     // A LATCHED COMMIT WITH NOTHING TO DO MUST NOT SHADOW THE ESCAPE LADDER. The commit sits above the
     // escape ladder in this else-if chain and is held for the rest of the floor, so once it latched it
@@ -698,7 +720,7 @@ void Engine::updateAutoplay(f32 dt) {
     // the ladder below was unreachable. So the branch is entered only when it can actually act — walk a
     // heading, or descend at the door — and otherwise the chain falls through to the ladder, which does
     // its own 8-direction search and digs the bot out.
-    } else if (m_autoplayDescentCommit && m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY &&
+    } else if (ap().descentCommit && m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY &&
                (lengthSq(v.flowDir) > 1e-6f || v.distToDoor < Autoplay::DESCEND_STOP_M)) {
         // FOUR_STORY DESCEND COMMIT (armed by the floor-stall watchdog; see engine.h). The bot was
         // standing in the swarm firing instead of descending. Same shape as the VHALL commit: KEEP the
@@ -730,7 +752,7 @@ void Engine::updateAutoplay(f32 dt) {
         in = Autoplay::BotIntent{};
         in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
         in.descend = true;
-    } else if (atDoor && v.distToDoor < 2.5f && m_autoplayNoProgressTimer < 8.0f) {
+    } else if (atDoor && v.distToDoor < 2.5f && ap().noProgressTimer < 8.0f) {
         in = Autoplay::BotIntent{};
         in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
         const Vec3 h{m_level.floorDoorPos.x - m_localPlayer.position.x, 0.0f,
@@ -740,9 +762,9 @@ void Engine::updateAutoplay(f32 dt) {
             in.aimYaw = y; in.aimPitch = 0.0f; in.moveFwd = true;   // close the last metre
         }
         in.descend = true;
-    } else if (stuck || m_autoplayNudgeTimer > 0.0f || m_autoplayEscapeTimer > 0.0f) {
+    } else if (stuck || ap().nudgeTimer > 0.0f || ap().escapeTimer > 0.0f) {
         // Remedy B — wedged on geometry: an ESCALATING escape so an AFK bot is NEVER found permanently
-        // idle. The longer the bot makes no XZ progress (m_autoplayNoProgressTimer keeps climbing while
+        // idle. The longer the bot makes no XZ progress (ap().noProgressTimer keeps climbing while
         // wedged), the more aggressive the escape:
         //   STAGE 1 (stuck, <6 s): a lateral ±90/180 nudge off the current heading (the original remedy).
         //   STAGE 2 (nudge found no safe step, or >6 s): a full 8-direction safe-step search that walks
@@ -756,15 +778,15 @@ void Engine::updateAutoplay(f32 dt) {
         // also throttles A* to once per window). While stuck the bot is NEVER left with a zero heading
         // unless the cell is fully walled — which the level geometry guarantees can't persist.
         const f32  feetY  = m_localPlayer.position.y;
-        const Vec3 anchor = m_autoplayLastPos;   // last progress point = where the bot wedged
+        const Vec3 anchor = ap().lastPos;   // last progress point = where the bot wedged
         Vec3 esc{0, 0, 0};
 
         // STAGE 1: lateral nudge. Arms at the 4 s stuck onset and only up to 6 s (past that, escalate).
-        if (stuck && m_autoplayNudgeTimer <= 0.0f && m_autoplayEscapeTimer <= 0.0f &&
-            m_autoplayNoProgressTimer < 6.0f)
-            m_autoplayNudgeTimer = 0.5f;
-        if (m_autoplayNudgeTimer > 0.0f) {
-            m_autoplayNudgeTimer -= dt;
+        if (stuck && ap().nudgeTimer <= 0.0f && ap().escapeTimer <= 0.0f &&
+            ap().noProgressTimer < 6.0f)
+            ap().nudgeTimer = 0.5f;
+        if (ap().nudgeTimer > 0.0f) {
+            ap().nudgeTimer -= dt;
             // Base heading: the travel heading if we have one, else the bot's facing. Rotate to a
             // lateral/back direction and take the first whose one-cell step is hazard-safe.
             Vec3 base = v.flowDir;
@@ -777,18 +799,18 @@ void Engine::updateAutoplay(f32 dt) {
                     esc = cand; break;
                 }
             }
-            if (lengthSq(esc) < 1e-6f) m_autoplayNudgeTimer = 0.0f;   // no lateral step: abandon, escalate now
+            if (lengthSq(esc) < 1e-6f) ap().nudgeTimer = 0.0f;   // no lateral step: abandon, escalate now
         }
 
         // STAGE 2 / 3: committed 8-dir (or A*) escape, engaged whenever the lateral nudge isn't driving.
         if (lengthSq(esc) < 1e-6f) {
-            if (m_autoplayEscapeTimer <= 0.0f) {
+            if (ap().escapeTimer <= 0.0f) {
                 Vec3 h{0, 0, 0};
                 // STAGE 3 first (deepest escalation): a short A* leg toward the exit for when the flow
                 // field itself yields no heading. bodyRadius ~ the player half-width; findPath returns
                 // world-space waypoints (outPath[0] = the first corner toward the goal), 0 if the door is
                 // unreachable within its 256-cell cap.
-                if (m_autoplayNoProgressTimer > 8.0f && m_level.floorDoorActive) {
+                if (ap().noProgressTimer > 8.0f && m_level.floorDoorActive) {
                     // On a STACKED floor the flat A* below is story-blind and routes to the door's XZ
                     // under a balcony / away from a hole — use the story-aware field heading instead.
                     const bool stackedExit = m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL ||
@@ -818,18 +840,18 @@ void Engine::updateAutoplay(f32 dt) {
                 if (lengthSq(h) < 1e-6f)
                     h = Autoplay::escapeHeading(m_level.grid, m_localPlayer.position, feetY, anchor,
                                                 m_level.lavaFloor);
-                m_autoplayEscapeDir   = h;
-                m_autoplayEscapeTimer = 0.5f;   // commit for ~0.5 s (traverse a cell; throttle the A* leg)
+                ap().escapeDir   = h;
+                ap().escapeTimer = 0.5f;   // commit for ~0.5 s (traverse a cell; throttle the A* leg)
             }
-            m_autoplayEscapeTimer -= dt;
+            ap().escapeTimer -= dt;
             // Re-validate the committed heading each tick (cheap insurance); drop the commit early if it
             // is no longer safe so the next tick recomputes rather than driving into a hazard.
-            if (lengthSq(m_autoplayEscapeDir) > 1e-6f &&
-                Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, m_autoplayEscapeDir,
+            if (lengthSq(ap().escapeDir) > 1e-6f &&
+                Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, ap().escapeDir,
                                       m_level.lavaFloor))
-                esc = m_autoplayEscapeDir;
+                esc = ap().escapeDir;
             else
-                m_autoplayEscapeTimer = 0.0f;
+                ap().escapeTimer = 0.0f;
         }
 
         // Apply the escape heading through unstickCombatMove: if a hostile is in reach it STRAFES around
@@ -849,7 +871,7 @@ void Engine::updateAutoplay(f32 dt) {
             // so the bot hops out rather than pogoing (a held JUMP re-fires every landing frame).
             in.jump = Autoplay::kitingJumpTick(v.tick);
         }
-    } else if (m_autoplayExitBull && v.doorActive && !bossGate) {
+    } else if (ap().exitBull && v.doorActive && !bossGate) {
         // Remedy B2 — EXIT BULL (the exit-progress watchdog latched): the bot is MOVING but getting
         // nowhere useful — orbiting/spiralling the floor, or kited off the exit by a swarm it refuses to
         // shoot — so stop playing and just leave. Ranked BELOW the geometry escape on purpose: when the
@@ -908,10 +930,10 @@ void Engine::updateAutoplay(f32 dt) {
             // cuts out inside 1.5 m so the punch never overshoots the descend radius.
             const bool flatFloor = m_level.layoutStyle != LevelGen::LayoutStyle::VERTICAL_HALL &&
                                    m_level.layoutStyle != LevelGen::LayoutStyle::FOUR_STORY;
-            if (flatFloor && in.moveFwd && (m_autoplayBullDodgeTick % 45u == 0u))
+            if (flatFloor && in.moveFwd && (ap().bullDodgeTick % 45u == 0u))
                 in.dodge = true;
         }
-        m_autoplayBullDodgeTick++;
+        ap().bullDodgeTick++;
         in.descend = true;   // held so it fires the moment the bot is inside the 2 m descend radius
         // FIRE through anything blocking the run to the exit. The shot travels along the door heading, so a
         // body ON the path is hit — this is what clears the swarm a squishy kiting build can't (its
@@ -923,7 +945,7 @@ void Engine::updateAutoplay(f32 dt) {
                 in.fire = true; break;
             }
         }
-    } else if (m_autoplayBreakoffTimer > 0.0f) {
+    } else if (ap().breakoffTimer > 0.0f) {
         // Remedy C — break off a stalled fight (armed in (2b)): firing at an in-band target the shots
         // can't kill (cover/angle), or an enemy body-blocking the bot. The response depends on whether an
         // exit heading exists:
@@ -942,7 +964,7 @@ void Engine::updateAutoplay(f32 dt) {
             in.aimYaw = yaw; in.aimPitch = 0.0f; in.moveFwd = true;
         } else {
             Autoplay::BotIntent u = unstickCombatMove(v, Vec3{0, 0, 0}, m_level.grid, feetY, m_level.lavaFloor,
-                                                      m_autoplayLastPos, m_localPlayer.position, m_localPlayer.yaw);
+                                                      ap().lastPos, m_localPlayer.position, m_localPlayer.yaw);
             if (intentActs(u)) in = u;
         }
     }
@@ -953,8 +975,8 @@ void Engine::updateAutoplay(f32 dt) {
     // again. Movement and fire are dropped for the turn (a deliberate look-behind, not a fighting
     // retreat); `descend` is left alone so a door hold already in progress is not thrown away. The
     // aim smoother turns at its own rate, so this reads as a look over the shoulder, never a snap.
-    if (m_autoplayLookBehindTimer > 0.0f) {
-        in.aimYaw = m_autoplayLookBehindYaw; in.aimPitch = 0.0f;
+    if (ap().lookBehindTimer > 0.0f) {
+        in.aimYaw = ap().lookBehindYaw; in.aimPitch = 0.0f;
         in.moveFwd = in.moveBack = in.moveLeft = in.moveRight = false;
         in.fire = false; in.jump = false;
     }
@@ -967,11 +989,11 @@ void Engine::updateAutoplay(f32 dt) {
     // pulse spends the shrine on the first cycle exactly as it does a shrine sharing the exit. The bot
     // approached facing the shrine (the flowDir steer aims faceAndGo at it), so the interact aim cone
     // is satisfied; within the 1.2 m grab radius facing stops mattering, so it stops there to let the
-    // hold land. Flat-floor detour only (m_autoplayShrineTarget is set only there).
-    if (m_autoplayShrineTarget && !in.fire && !in.potion && !in.descend && !stuck &&
-        !m_autoplayExitBull && !v.stunned && !v.rolling) {
-        const Vec3 to{m_autoplayShrinePos.x - m_localPlayer.position.x, 0.0f,
-                      m_autoplayShrinePos.z - m_localPlayer.position.z};
+    // hold land. Flat-floor detour only (ap().shrineTarget is set only there).
+    if (ap().shrineTarget && !in.fire && !in.potion && !in.descend && !stuck &&
+        !ap().exitBull && !v.stunned && !v.rolling) {
+        const Vec3 to{ap().shrinePos.x - m_localPlayer.position.x, 0.0f,
+                      ap().shrinePos.z - m_localPlayer.position.z};
         const f32 d = length(to);
         if (d < GameConst::INTERACT_RANGE) {
             if (lengthSq(to) > 1e-6f) { f32 y, p; Autoplay::dirToAim(to, y, p); in.aimYaw = y; in.aimPitch = 0.0f; }
@@ -988,9 +1010,9 @@ void Engine::updateAutoplay(f32 dt) {
     // its cap (16 in view, permanently) and the FIGHT branch owns the intent; that branch only emits
     // movement when it is kiting, closing or strafing, so an in-band target it is neither closing on
     // nor kiting from produces zero WASD. Both rescues are disarmed by the very same conditions: the
-    // escape ladder needs m_autoplayNoProgressTimer > 4 s but the combat-progress branch pins it at 0
+    // escape ladder needs ap().noProgressTimer > 4 s but the combat-progress branch pins it at 0
     // while the bot chips the swarm (measured max 0.5-0.6 s), and the 20 s floor-stall window that
-    // arms m_autoplayDescentCommit resets whenever the bot happens to drift 2 m doorward mid-fight.
+    // arms ap().descentCommit resets whenever the bot happens to drift 2 m doorward mid-fight.
     //
     // So make the commit's behaviour the DEFAULT rather than a watchdog-armed emergency: whenever the
     // intent carries no movement at all and a descent heading exists, walk it. Combat is untouched —
@@ -1006,9 +1028,9 @@ void Engine::updateAutoplay(f32 dt) {
     if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY &&
         !in.moveFwd && !in.moveBack && !in.moveLeft && !in.moveRight &&
         !in.descend && !v.stunned && !v.rolling &&
-        m_autoplayLookBehindTimer <= 0.0f && m_autoplayLootDwell <= 0.0f &&
+        ap().lookBehindTimer <= 0.0f && ap().lootDwell <= 0.0f &&
         lengthSq(v.flowDir) > 1e-6f &&
-        !Autoplay::atDescentGoal(m_autoplayDescent, m_level.grid, m_localPlayer.position)) {
+        !Autoplay::atDescentGoal(ap().descent, m_level.grid, m_localPlayer.position)) {
         // Decompose the heading onto the player's CURRENT yaw basis — the basis the movement code will
         // actually read this tick, since the aim is only EASED toward the intent's desired yaw.
         const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
@@ -1035,12 +1057,12 @@ void Engine::updateAutoplay(f32 dt) {
     // be set on the same tick, exactly as the gap-closer roll does. Combat (aim/fire/block/skills) is
     // left alone. Grounded only — an airborne bot is already committed and a roll would just burn the CD.
     if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY && m_localPlayer.onGround &&
-        !in.descend && !v.stunned && !v.rolling && m_autoplayLootDwell <= 0.0f &&
-        m_autoplayLookBehindTimer <= 0.0f) {
+        !in.descend && !v.stunned && !v.rolling && ap().lootDwell <= 0.0f &&
+        ap().lookBehindTimer <= 0.0f) {
         constexpr f32 kHoleSteer = 6.0f;   // m: steer the feet at the hole from here in
         constexpr f32 kHoleRoll  = 2.5f;   // m: close enough that a roll lands in it
         Vec3 hole{};
-        const f32 hd = Autoplay::nearestDropHole(m_autoplayDescent, m_level.grid,
+        const f32 hd = Autoplay::nearestDropHole(ap().descent, m_level.grid,
                                                  m_localPlayer.position, hole);
         if (hd <= kHoleSteer) {
             const Vec3 to{hole.x - m_localPlayer.position.x, 0.0f, hole.z - m_localPlayer.position.z};
@@ -1066,10 +1088,10 @@ void Engine::updateAutoplay(f32 dt) {
     // wedge. So we release + re-hold in a pulse (autoplay_nav.h descendPulseHeld): one cycle spends
     // the shrine, the next descends. Only bites the descend intent; combat/movement are untouched.
     if (in.descend) {
-        m_autoplayDescendPulse += dt;
-        if (!Autoplay::descendPulseHeld(m_autoplayDescendPulse)) in.descend = false;   // release beat
+        ap().descendPulse += dt;
+        if (!Autoplay::descendPulseHeld(ap().descendPulse)) in.descend = false;   // release beat
     } else {
-        m_autoplayDescendPulse = 0.0f;
+        ap().descendPulse = 0.0f;
     }
 
 
@@ -1119,13 +1141,15 @@ void Engine::updateAutoplay(f32 dt) {
         const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
         const Vec3 p     = m_localPlayer.position;
         const f32  feetY = p.y;
-        // Pads are vetoed unless the bot is standing on one (a 3x3 pad node would box it in), the
-        // storey's only ways down are lifts (paddedOnly), or the field's next routed step IS a pad
-        // (a pad blocking the route — cross it) — same carve-outs as the travel veto.
-        const bool avoidPads = !Autoplay::onJumpPad(m_level.grid, p) && !m_autoplayDescent.paddedOnly &&
-                               !Autoplay::descentNextIsPad(m_autoplayDescent, m_level.grid, p);
+        // PADS ARE NOT VETOED HERE. Fighting is reactive and short-range, and refusing every step
+        // whose footprint clips a pad made the bot skirt widely around them mid-combat — Aaron:
+        // "make the bot properly use jump pads instead of being afraid of them". A pad taken during a
+        // fight costs a re-route, which the descent field, padEscapeDirection and the wedge escape
+        // all now handle; being unable to step where the fight is has no such recovery. Walls,
+        // off-map and the corner-cut rule still apply.
         auto blocked = [&](Vec3 d) {
-            return !Autoplay::stepAllowed(m_level.grid, p, feetY, d, /*lavaFloor=*/false, avoidPads);
+            return !Autoplay::stepAllowed(m_level.grid, p, feetY, d, /*lavaFloor=*/false,
+                                          /*avoidPads=*/false);
         };
         if (in.moveFwd   && blocked(fwd))            in.moveFwd   = false;
         if (in.moveBack  && blocked(fwd   * -1.0f))  in.moveBack  = false;
@@ -1166,6 +1190,56 @@ void Engine::updateAutoplay(f32 dt) {
         if (in.moveBack  && Autoplay::wouldFall(m_level.grid, p, feetY, fwd   * -1.0f))  in.moveBack  = false;
         if (in.moveRight && Autoplay::wouldFall(m_level.grid, p, feetY, right))          in.moveRight = false;
         if (in.moveLeft  && Autoplay::wouldFall(m_level.grid, p, feetY, right * -1.0f))  in.moveLeft  = false;
+        // ...AND THE RESULTANT. Per-component alone is not enough: at a balcony CORNER each axis
+        // lands on the slab while the DIAGONAL between them goes over the edge, so both components
+        // pass and the bot walks off anyway. This is the same corner case stepAllowed already guards
+        // (a diagonal step needs the destination AND both orthogonals); the fall veto never did.
+        //
+        // Measured: on VHALL upper-exit floors the bot reaches the top in ~60 s then spends only
+        // 4-11% of the next ten minutes there, and attributing every drop showed ~64% were plain
+        // WALK-OFFS with no jump or roll anywhere near them (one sample: no jump for 14 s) — i.e.
+        // exactly the case a per-axis veto cannot see.
+        //
+        // The LATERAL component is dropped first: it is usually the incidental one (a strafe or a
+        // kite side-step) while the fore/aft motion is what the brain actually intended. If the
+        // resultant still falls, the fore/aft goes too and the bot holds its ground rather than
+        // stepping off.
+        for (u8 pass = 0; pass < 2; pass++) {
+            Vec3 res{0.0f, 0.0f, 0.0f};
+            if (in.moveFwd)   res = res + fwd;
+            if (in.moveBack)  res = res - fwd;
+            if (in.moveRight) res = res + right;
+            if (in.moveLeft)  res = res - right;
+            if (lengthSq(res) < 1e-6f) break;                       // nothing left to check
+            if (!Autoplay::wouldFall(m_level.grid, p, feetY, res)) break;   // the combined step is safe
+            if (pass == 0 && (in.moveRight || in.moveLeft)) { in.moveRight = in.moveLeft = false; }
+            else { in.moveFwd = in.moveBack = in.moveRight = in.moveLeft = false; break; }
+        }
+
+        // THE VETO MUST NEVER FREEZE THE BOT OUTRIGHT.
+        //
+        // Measured (couch soak, floor 36, both lanes): standing ON the exit storey (y = 3.00 =
+        // exitY), grounded, a VALID two-story heading every tick (flow = 1.00), 12 visible targets —
+        // and mv = 0 with d2d frozen at 17-18 m for the whole floor. Every direction reads as a fall
+        // from a balcony whose route to the door crosses a catwalk (one of the pair has a deliberate
+        // 2-cell jump gap), so the resultant branch above cleared all four components and the bot
+        // stood there permanently. "They don't even move."
+        //
+        // The VHallField cannot route off an edge — its adjacency only links nodes whose surfaces are
+        // within one step — so when the FIELD has a heading and this 1-cell lookahead disagrees, the
+        // lookahead is the thing that is wrong: it cannot see the catwalk the field is routing over.
+        // Trust the field and restore its step. A veto that can zero every direction is not a safety
+        // rail, it is a trap; falling costs a re-climb, standing still costs the whole run.
+        if (!in.moveFwd && !in.moveBack && !in.moveLeft && !in.moveRight &&
+            lengthSq(v.flowDir) > 1e-6f) {
+            const f32 df = v.flowDir.x * fwd.x   + v.flowDir.z * fwd.z;
+            const f32 dr = v.flowDir.x * right.x + v.flowDir.z * right.z;
+            constexpr f32 kAxis = 0.35f;
+            in.moveFwd   = df >  kAxis;
+            in.moveBack  = df < -kAxis;
+            in.moveRight = dr >  kAxis;
+            in.moveLeft  = dr < -kAxis;
+        }
     }
     // UNDER-SLAB TRAP. Two rules, and they must be in this order.
     //
@@ -1224,29 +1298,29 @@ void Engine::updateAutoplay(f32 dt) {
     // So: land a STREAK of perfect blocks, then take an "unreliable" LAPSE where most swings mistime,
     // then be sharp again. One decision PER SWING — a block want spans ~9 ticks, so we act on the
     // rising edge and latch the outcome for the swing. Deterministic (tick-hashed), replay-safe.
-    if (m_autoplayBlockUnreliableT > 0.0f) m_autoplayBlockUnreliableT -= dt;
+    if (ap().blockUnreliableT > 0.0f) ap().blockUnreliableT -= dt;
     {
         const bool wantNow = in.block;                        // what decideCombat asked for, pre-pacing
-        if (wantNow && !m_autoplayBlockWantPrev) {            // fresh swing to react to
-            if (m_autoplayBlockUnreliableT > 0.0f) {
+        if (wantNow && !ap().blockWantPrev) {            // fresh swing to react to
+            if (ap().blockUnreliableT > 0.0f) {
                 // LAPSE: the perfect tap lands only sometimes; the rest are mistimed (eaten).
                 const u32 h = currentLocalTick() * 2654435761u;
-                m_autoplayBlockSuppress = ((h >> 25) % 100u) >= Autoplay::BLOCK_UNRELIABLE_PCT;
+                ap().blockSuppress = ((h >> 25) % 100u) >= Autoplay::BLOCK_UNRELIABLE_PCT;
             } else {
                 // SHARP: land the perfect block and build the streak; at the cap, fall into a lapse.
-                m_autoplayBlockSuppress = false;
-                if (++m_autoplayBlockStreak >= m_autoplayBlockStreakCap) {
-                    m_autoplayBlockUnreliableT = Autoplay::BLOCK_UNRELIABLE_SEC;
-                    m_autoplayBlockStreak      = 0;
+                ap().blockSuppress = false;
+                if (++ap().blockStreak >= ap().blockStreakCap) {
+                    ap().blockUnreliableT = Autoplay::BLOCK_UNRELIABLE_SEC;
+                    ap().blockStreak      = 0;
                     const u32 h = currentLocalTick() * 40503u;   // next run: 2 or 3 in a row
-                    m_autoplayBlockStreakCap   = Autoplay::BLOCK_STREAK_MIN +
+                    ap().blockStreakCap   = Autoplay::BLOCK_STREAK_MIN +
                         (u8)((h >> 20) % (u32)(Autoplay::BLOCK_STREAK_MAX - Autoplay::BLOCK_STREAK_MIN + 1u));
                 }
             }
         }
-        if (!wantNow) m_autoplayBlockSuppress = false;        // swing over: clear the per-swing latch
-        if (m_autoplayBlockSuppress) in.block = false;        // a mistimed swing: no perfect block
-        m_autoplayBlockWantPrev = wantNow;
+        if (!wantNow) ap().blockSuppress = false;        // swing over: clear the per-swing latch
+        if (ap().blockSuppress) in.block = false;        // a mistimed swing: no perfect block
+        ap().blockWantPrev = wantNow;
     }
 
     // (6) WEAPON THROWS — the two "hurl the weapon" flourishes, both driven through the REAL buttons.
@@ -1265,9 +1339,9 @@ void Engine::updateAutoplay(f32 dt) {
     // Both are suppressed while a UI is open or the bot is stunned/rolling, and lane-0 only (v1).
     {
         const u8 tl = (m_localPlayerIndex < MAX_LOCAL_PLAYERS) ? m_localPlayerIndex : 0;
-        if (m_autoplayThrowLeash  > 0.0f) m_autoplayThrowLeash  -= dt;
-        if (m_autoplayReloadThrow > 0.0f) m_autoplayReloadThrow -= dt;
-        m_autoplayReloadPulse = false;
+        if (ap().throwLeash  > 0.0f) ap().throwLeash  -= dt;
+        if (ap().reloadThrow > 0.0f) ap().reloadThrow -= dt;
+        ap().reloadPulse = false;
         const bool mayThrow = !uiOpen && !v.stunned && !v.rolling;
 
         // Nearest hostile that is RANGED and actually visible — the throw wants a line, not a guess.
@@ -1276,19 +1350,19 @@ void Engine::updateAutoplay(f32 dt) {
             if (v.targets[i].isRanged && v.targets[i].hasLOS && !v.targets[i].invulnerable)
                 rangedT = &v.targets[i];
 
-        if (m_autoplayThrowSeq >= 0.0f) {                 // a tap is already in flight: run it out
-            m_autoplayThrowSeq += dt;
-            if (WeaponThrow::botTapDone(m_autoplayThrowSeq)) m_autoplayThrowSeq = -1.0f;
-        } else if (mayThrow && rangedT && m_autoplayThrowLeash <= 0.0f &&
+        if (ap().throwSeq >= 0.0f) {                 // a tap is already in flight: run it out
+            ap().throwSeq += dt;
+            if (WeaponThrow::botTapDone(ap().throwSeq)) ap().throwSeq = -1.0f;
+        } else if (mayThrow && rangedT && ap().throwLeash <= 0.0f &&
                    WeaponThrow::botShouldThrow(v.weaponIsMelee, m_weaponThrowCd[tl] <= 0.0f,
                                                rangedT->isRanged, rangedT->hasLOS,
                                                rangedT->dist, v.weaponRange)) {
-            m_autoplayThrowSeq   = 0.0f;                              // start the synthetic tap
-            m_autoplayThrowLeash = WeaponThrow::BOT_THROW_LEASH;
+            ap().throwSeq   = 0.0f;                              // start the synthetic tap
+            ap().throwLeash = WeaponThrow::BOT_THROW_LEASH;
         }
 
         // (b) the THROWAWAY gun toss. Same "occasional", same visible-target requirement.
-        if (mayThrow && m_autoplayReloadThrow <= 0.0f && rangedT) {
+        if (mayThrow && ap().reloadThrow <= 0.0f && rangedT) {
             const ItemInstance& eq =
                 m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
             if (!isItemEmpty(eq) && eq.rarity == Rarity::LEGENDARY &&
@@ -1298,8 +1372,8 @@ void Engine::updateAutoplay(f32 dt) {
                                                                   m_itemDefs, eq);
                 // clip-1 exactly: the fullest clip a manual reload is allowed to interrupt.
                 if (wd.clipSize > 0 && !ws.reloading && ws.currentClip == wd.clipSize - 1) {
-                    m_autoplayReloadPulse = true;
-                    m_autoplayReloadThrow = 8.0f;   // s between gun tosses
+                    ap().reloadPulse = true;
+                    ap().reloadThrow = 8.0f;   // s between gun tosses
                 }
             }
         }
@@ -1310,7 +1384,7 @@ void Engine::updateAutoplay(f32 dt) {
     // FIGHT branch's kite/close).
     //
     // This exists because none of the other rescues can see this failure. The escape ladder needs
-    // m_autoplayNoProgressTimer > 4 s, and the `combatProgress` branch pins that timer at 0 on any
+    // ap().noProgressTimer > 4 s, and the `combatProgress` branch pins that timer at 0 on any
     // chip damage; the floor-stall watchdog resets on any doorward drift and only arms the descent
     // commit — which is already latched here and is itself the thing being ignored. Measured on the
     // residual FOUR_STORY park: valid heading on 100% of ticks, veto never fired, not on a pad, Y
@@ -1335,32 +1409,32 @@ void Engine::updateAutoplay(f32 dt) {
     // ramp-aware remedy (back off DOWN the strip and re-approach centred, or a centreline hop), not
     // this one. Do not re-extend without measuring that separately.
     if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY && !in.descend &&
-        !v.stunned && !v.rolling && m_autoplayLootDwell <= 0.0f) {
+        !v.stunned && !v.rolling && ap().lootDwell <= 0.0f) {
         const bool cmdMove = in.moveFwd || in.moveBack || in.moveLeft || in.moveRight;
 
         // Close the observation window. TWO ways in, because the failure has two symptoms: the bot is
         // commanding movement and not moving (a lip/corner wedge), or the veto refused every direction
         // so it has no heading to command at all (boxed in). Both mean "wants to travel, cannot".
-        m_autoplayWedgeWinT += dt;
-        if (cmdMove) m_autoplayWedgeCmdT += dt;
-        if (m_autoplayFlowVetoed) m_autoplayWedgeVetoT += dt;
-        if (m_autoplayWedgeWinT >= Autoplay::WEDGE_WIN_SEC) {
-            const Vec3 d = m_localPlayer.position - m_autoplayWedgeAnchor;
+        ap().wedgeWinT += dt;
+        if (cmdMove) ap().wedgeCmdT += dt;
+        if (ap().flowVetoed) ap().wedgeVetoT += dt;
+        if (ap().wedgeWinT >= Autoplay::WEDGE_WIN_SEC) {
+            const Vec3 d = m_localPlayer.position - ap().wedgeAnchor;
             const f32  net = sqrtf(d.x * d.x + d.y * d.y + d.z * d.z);   // 3D: a fall/pad ride is progress
-            if (Autoplay::wedgeDetected(m_autoplayWedgeWinT, m_autoplayWedgeCmdT, net) ||
-                Autoplay::boxedDetected(m_autoplayWedgeWinT, m_autoplayWedgeVetoT)) {
-                m_autoplayWedgeEscT = Autoplay::WEDGE_BURST_SEC;
-                if (m_autoplayWedgeTry < 255u) m_autoplayWedgeTry++;   // next one tries a wider angle
-                m_autoplayWedgeCount++;
+            if (Autoplay::wedgeDetected(ap().wedgeWinT, ap().wedgeCmdT, net) ||
+                Autoplay::boxedDetected(ap().wedgeWinT, ap().wedgeVetoT)) {
+                ap().wedgeEscT = Autoplay::WEDGE_BURST_SEC;
+                if (ap().wedgeTry < 255u) ap().wedgeTry++;   // next one tries a wider angle
+                ap().wedgeCount++;
             } else {
-                m_autoplayWedgeTry = 0;                                // freed: back to the first angle
+                ap().wedgeTry = 0;                                // freed: back to the first angle
             }
-            m_autoplayWedgeWinT = 0.0f; m_autoplayWedgeCmdT = 0.0f; m_autoplayWedgeVetoT = 0.0f;
-            m_autoplayWedgeAnchor = m_localPlayer.position;
+            ap().wedgeWinT = 0.0f; ap().wedgeCmdT = 0.0f; ap().wedgeVetoT = 0.0f;
+            ap().wedgeAnchor = m_localPlayer.position;
         }
 
-        if (m_autoplayWedgeEscT > 0.0f) {
-            m_autoplayWedgeEscT -= dt;
+        if (ap().wedgeEscT > 0.0f) {
+            ap().wedgeEscT -= dt;
             // Rotate whatever heading we HAVE. flowDir is the routed one; with none (boxed in) fall
             // back to the facing, so the burst still produces a real direction to shove at.
             Vec3 base = v.flowDir;
@@ -1368,7 +1442,7 @@ void Engine::updateAutoplay(f32 dt) {
                 const f32 cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
                 base = Vec3{-sy, 0.0f, -cy};
             }
-            const Vec3 esc = rotateY_XZ(base, Autoplay::wedgeEscapeAngle(m_autoplayWedgeTry));
+            const Vec3 esc = rotateY_XZ(base, Autoplay::wedgeEscapeAngle(ap().wedgeTry));
             const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
             const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
             const f32  df = esc.x * fwd.x + esc.z * fwd.z, dr = esc.x * right.x + esc.z * right.z;
@@ -1379,6 +1453,27 @@ void Engine::updateAutoplay(f32 dt) {
             // further up (grounded, not mid-roll) — that gate has already run by the time we get here.
             if (m_localPlayer.onGround && !m_localPlayer.dodgeState.rolling) in.jump = true;
 
+        }
+    }
+
+    // STALL AUTOPSY. Fires only once a single floor has run over 5 minutes — rare enough to cost
+    // nothing, and by then the run is in trouble and the next question is always the same: does the
+    // bot have a route, is it commanding movement, and is it moving? Shipped ON (no env gate)
+    // because the last several stalls were diagnosed by rebuilding with a temporary tracer and
+    // re-running for half an hour; a stuck floor should explain itself the first time.
+    if (m_autoplayFloorTime > 300.0f) {
+        static f32 dumpT = 0.0f;
+        dumpT += dt;
+        if (dumpT >= 15.0f) {
+            dumpT = 0.0f;
+            const bool mv = in.moveFwd || in.moveBack || in.moveLeft || in.moveRight;
+            LOG_WARN("[STALL] %s fl=%u t=%.0f | flow=%.2f mv=%d grnd=%d y=%.2f exitY=%.1f d2d=%.1f "
+                     "| tgts=%u fire=%d npt=%.1f | style=%s",
+                     kClassDefs[static_cast<u32>(m_playerClass)].name, m_level.currentFloor,
+                     m_autoplayFloorTime, sqrtf(lengthSq(v.flowDir)), (int)mv,
+                     (int)m_localPlayer.onGround, m_localPlayer.position.y, m_level.floorDoorPos.y,
+                     v.distToDoor, v.targetCount, (int)in.fire, ap().noProgressTimer,
+                     LevelGen::styleName(m_level.layoutStyle));
         }
     }
 
@@ -1402,12 +1497,12 @@ void Engine::autoplayTownStep(f32 dt, bool uiOpen) {
     // The stuck/escape ladder never runs in town, so hold its state at "just made progress" instead
     // of leaving it frozen: a no-progress timer parked at 3.9 s from the last dungeon floor would
     // otherwise fire a spurious escape nudge on the first frame after the portal drops us back in.
-    m_autoplayLastPos         = m_localPlayer.position;
-    m_autoplayNoProgressTimer = 0.0f;
-    m_autoplayNudgeTimer      = 0.0f;
-    m_autoplayEscapeTimer     = 0.0f;
-    m_autoplayLookBehindTimer = 0.0f;
-    m_autoplayLookBehindDone  = false;
+    ap().lastPos         = m_localPlayer.position;
+    ap().noProgressTimer = 0.0f;
+    ap().nudgeTimer      = 0.0f;
+    ap().escapeTimer     = 0.0f;
+    ap().lookBehindTimer = 0.0f;
+    ap().lookBehindDone  = false;
 
     const Autoplay::TownPortalPlan plan =
         Autoplay::planTownPortal(m_localPlayer.position, m_level.townPortalPos);
@@ -1447,10 +1542,10 @@ void Engine::autoplayTownStep(f32 dt, bool uiOpen) {
     // m_townPortalRequested is set by that very same updatePlayerPickup arbitration, so the BUTTON is
     // the correct driver here — a direct flag write would be reset before updateTownPortal reads it.
     if (plan.take) {
-        m_autoplayDescendPulse += dt;
-        in.descend = Autoplay::descendPulseHeld(m_autoplayDescendPulse);
+        ap().descendPulse += dt;
+        in.descend = Autoplay::descendPulseHeld(ap().descendPulse);
     } else {
-        m_autoplayDescendPulse = 0.0f;
+        ap().descendPulse = 0.0f;
     }
 
     applyBotIntent(in, uiOpen, dt, /*melee=*/false);
@@ -1467,8 +1562,8 @@ void Engine::autoplayTownStep(f32 dt, bool uiOpen) {
 void Engine::updateSidearm(const Autoplay::BotView& v, f32 dt) {
     constexpr f32 kMinDwell = 3.0f;   // once switched, hold the sidearm at least this long
     constexpr f32 kCooldown = 5.0f;   // and wait this long between switches
-    if (m_autoplaySidearmCooldown > 0.0f) m_autoplaySidearmCooldown -= dt;
-    if (m_autoplaySidearmActive)          m_autoplaySidearmDwell    += dt;
+    if (ap().sidearmCooldown > 0.0f) ap().sidearmCooldown -= dt;
+    if (ap().sidearmActive)          ap().sidearmDwell    += dt;
 
     PlayerInventory& inv = m_inventories[0];
 
@@ -1484,8 +1579,8 @@ void Engine::updateSidearm(const Autoplay::BotView& v, f32 dt) {
         // enemy on the floor — the trigger cleared the instant the sidearm was drawn, the "keep it
         // while the trigger holds" rule never held, and the state machine collapsed to a 3 s dwell
         // on / 5 s cooldown off duty cycle while the cross-gap enemy stood there the whole time.
-        const f32 meleeReach = m_autoplaySidearmActive ? m_autoplaySidearmMeleeRange : v.weaponRange;
-        const u8  meleeCell  = m_autoplaySidearmActive ? inv.buildCell : v.buildCell;
+        const f32 meleeReach = ap().sidearmActive ? ap().sidearmMeleeRange : v.weaponRange;
+        const u8  meleeCell  = ap().sidearmActive ? inv.buildCell : v.buildCell;
         const Autoplay::Doctrine doc = Autoplay::doctrineFor(meleeCell);
         // engageCeiling's own formula, on the melee numbers (v.weaponRange is the sidearm's).
         const f32 ceil = fmaxf(doc.engageMax * meleeReach, Autoplay::THREAT_RADIUS);
@@ -1499,9 +1594,9 @@ void Engine::updateSidearm(const Autoplay::BotView& v, f32 dt) {
         }
     }
 
-    if (!m_autoplaySidearmActive) {
+    if (!ap().sidearmActive) {
         // --- Consider switching TO the sidearm. ---
-        if (trigger && m_autoplaySidearmCooldown <= 0.0f && v.weaponIsMelee) {
+        if (trigger && ap().sidearmCooldown <= 0.0f && v.weaponIsMelee) {
             const s32 idx = BuildScore::bestRangedBackpackIdx(inv, m_itemDefs, m_itemDefCount);
             // The draw/stow is logged (not just chatted) because "the sidearm stopped working" is
             // otherwise invisible in a soak: addChatMessage only reaches the on-screen chat, so a
@@ -1515,14 +1610,14 @@ void Engine::updateSidearm(const Autoplay::BotView& v, f32 dt) {
                              m_level.currentFloor);
                 }
             } else {
-                m_autoplaySidearmMeleeUid   = inv.equipped[(u32)ItemSlot::WEAPON].uid;  // stash BEFORE equip
-                m_autoplaySidearmMeleeRange = v.weaponRange;   // the melee reach the trigger keeps judging by
+                ap().sidearmMeleeUid   = inv.equipped[(u32)ItemSlot::WEAPON].uid;  // stash BEFORE equip
+                ap().sidearmMeleeRange = v.weaponRange;   // the melee reach the trigger keeps judging by
                 Inventory::equip(inv, (u8)idx, m_itemDefs);   // ranged weapon -> WEAPON slot; melee -> bag
-                m_autoplaySidearmActive = true;
-                m_autoplaySidearmDwell  = 0.0f;
+                ap().sidearmActive = true;
+                ap().sidearmDwell  = 0.0f;
                 addChatMessage("", "Autoplay: drew a ranged sidearm", Vec3{0.6f, 0.85f, 1.0f});
                 LOG_INFO("Autoplay: SIDEARM drawn on floor %u (melee reach %.1f m)",
-                         m_level.currentFloor, m_autoplaySidearmMeleeRange);
+                         m_level.currentFloor, ap().sidearmMeleeRange);
             }
         }
         return;
@@ -1531,17 +1626,17 @@ void Engine::updateSidearm(const Autoplay::BotView& v, f32 dt) {
     // --- Active: consider switching BACK to melee. ---
     // Keep it while the trigger holds OR the min dwell has not elapsed. Otherwise put the melee
     // weapon back by finding the stashed uid in the bag (its slot can move as loot comes and goes).
-    if (trigger || m_autoplaySidearmDwell < kMinDwell) return;
+    if (trigger || ap().sidearmDwell < kMinDwell) return;
 
     s32 meleeIdx = -1;
     for (u8 i = 0; i < MAX_INVENTORY_ITEMS; i++)
-        if (inv.backpack[i].defId != 0xFFFF && inv.backpack[i].uid == m_autoplaySidearmMeleeUid) { meleeIdx = i; break; }
+        if (inv.backpack[i].defId != 0xFFFF && inv.backpack[i].uid == ap().sidearmMeleeUid) { meleeIdx = i; break; }
     if (meleeIdx >= 0) Inventory::equip(inv, (u8)meleeIdx, m_itemDefs);   // melee -> WEAPON slot
     // If the stashed weapon vanished (should not happen — nothing discards the equipped-then-bagged
     // melee weapon while the sidearm guard blocks auto-equip), fall through: clearing the flag lets
     // the next autoEquipBackpack re-gear the melee build normally.
-    m_autoplaySidearmActive   = false;
-    m_autoplaySidearmCooldown = kCooldown;
+    ap().sidearmActive   = false;
+    ap().sidearmCooldown = kCooldown;
     addChatMessage("", "Autoplay: back to melee", Vec3{0.6f, 0.85f, 1.0f});
 }
 
@@ -1561,10 +1656,10 @@ Autoplay::BotView Engine::buildBotView() {
     v.rolling   = m_localPlayer.dodgeState.rolling;
     v.onGround  = m_localPlayer.onGround;
     v.dodgeCooldown = m_localPlayer.dodgeState.cooldownTimer;
-    // The bot's OWN leashes on top of the engine cooldown (see m_autoplayDodgeCd) — the policy asks
+    // The bot's OWN leashes on top of the engine cooldown (see ap().dodgeCd) — the policy asks
     // for a roll only when the matching one has expired.
-    v.dodgeAllowed    = m_autoplayDodgeCd    <= 0.0f;
-    v.gapCloseAllowed = m_autoplayGapCloseCd <= 0.0f;
+    v.dodgeAllowed    = ap().dodgeCd    <= 0.0f;
+    v.gapCloseAllowed = ap().gapCloseCd <= 0.0f;
     // blockTimer is only meaningful WHILE blocking — it is zeroed on the raise edge and simply left
     // stale on release (engine_update.cpp), so report 0 when the shield is down or the policy would
     // read a months-old hold and refuse to ever raise again.
@@ -1704,7 +1799,7 @@ Autoplay::BotView Engine::buildBotView() {
     // The equipped weapon is already ranged (getEffectiveWeapon above set weaponRange/isMelee), so
     // only the doctrine column needs the swap. The PERSISTED buildCell (m_inventories[0].buildCell)
     // is untouched — this is a per-tick view override.
-    if (m_autoplaySidearmActive) v.buildCell = Autoplay::rangedCellFor(v.buildCell);
+    if (ap().sidearmActive) v.buildCell = Autoplay::rangedCellFor(v.buildCell);
 
     // --- world gate: idle in town / arena / the Source, and only travel while an ordinary exit exists ---
     v.onNormalFloor = !(m_level.inTown || m_level.inArena || m_level.inSourceChamber) && m_level.floorDoorActive;
@@ -1792,8 +1887,8 @@ Autoplay::BotView Engine::buildBotView() {
             return !hit.hit || hit.distance >= len - 0.5f;
         };
 
-        m_autoplayVhClimbing = false;
-        m_autoplayVhOnRamp   = false;   // set true below only when within hop range of the exit ramp
+        ap().vhClimbing = false;
+        ap().vhOnRamp   = false;   // set true below only when within hop range of the exit ramp
         if (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL) {
             // Cache the floor's JUMP-PAD cells once (VHALL doesn't record them in jumpPads[], so a
             // grid scan is the only way to see them). Cluster-deduped so a 3x3 pad node is ONE goal.
@@ -1824,6 +1919,9 @@ Autoplay::BotView Engine::buildBotView() {
             // RAMP CLIMB — an anti-drift assist on top of the VHallField (the user's call: "pathfind to
             // the ramp, approach it the right way"). See the block below for why it is scoped to "already
             // on a slab" rather than used to route TO the ramp.
+            // How near a ramp the bot must be before it starts squaring up to mount it. Beyond this
+            // the two-story field owns the approach; inside it, the staging rule below does.
+            constexpr f32 kRampStageDist = 12.0f;
             bool climbingViaRamp = false;
             if (belowExit && dg.portalCount > 0) {
                 // Let the story-aware VHallField route EVERYTHING — the ground approach, which ramp to
@@ -1839,34 +1937,110 @@ Autoplay::BotView Engine::buildBotView() {
                 // already on a slab" and centring on the NEAREST ramp is the only version that mounts on
                 // EVERY run. (The residual — it can climb a non-exit ramp and then must cross a catwalk it
                 // falls off — is the open upper-story-crossing problem, tracked in the concept doc.)
+                // Nearest ramp by segment distance — the one we are dealing with either way.
+                s32 nr = -1; f32 brs = 1e18f;
+                for (u8 k = 0; k < dg.portalCount; k++) {
+                    const f32 rs = Autoplay::rampSegDistXZ(dg.portals[k].lowPos, dg.portals[k].highPos, pos);
+                    if (rs < brs) { brs = rs; nr = k; }
+                }
                 if (pos.y > 0.5f) {
-                    s32 nr = -1; f32 brs = 1e18f;
-                    for (u8 k = 0; k < dg.portalCount; k++) {
-                        const f32 rs = Autoplay::rampSegDistXZ(dg.portals[k].lowPos, dg.portals[k].highPos, pos);
-                        if (rs < brs) { brs = rs; nr = k; }
-                    }
+                    // ON THE SLAB — centreline anti-drift, as before. The field mounts it; this keeps
+                    // the eased-aim walk from sliding off the 2-wide strip on the way up.
                     if (nr >= 0 && brs < 5.0f) {
                         const Vec3 rd = Autoplay::rampApproachDir(dg.portals[nr].lowPos, dg.portals[nr].highPos, pos);
-                        if (lengthSq(rd) > 1e-6f) { v.flowDir = rd; climbingViaRamp = true; m_autoplayVhOnRamp = true; }
+                        if (lengthSq(rd) > 1e-6f) { v.flowDir = rd; climbingViaRamp = true; ap().vhOnRamp = true; }
+                    }
+                } else if (nr >= 0 && brs < kRampStageDist) {
+                    // ON THE GROUND, NEAR A RAMP — SQUARE UP, but do NOT take over the routing.
+                    //
+                    // The mount fails when the bot meets the 2-wide graduated slab side-on: it is
+                    // pressed against a riser it cannot step over and scrapes along the edge instead
+                    // of climbing ("vhall loves to hug the stairs"). The cure is to arrive in LINE
+                    // with the ramp — but the first version of this drove a STRAIGHT LINE at a
+                    // staging point behind the foot, and that was worse: a straight line knows
+                    // nothing about walls, and near a ramp it often passes UNDERNEATH the slab, which
+                    // the under-slab pinch veto then refuses outright, leaving the bot pinned against
+                    // the very edge it was supposed to stop hugging.
+                    //
+                    // The two-story field already routes ground -> foot -> up correctly and IS
+                    // wall-aware and under-slab-aware. So it keeps the route, and alignment is added
+                    // as a LATERAL CORRECTION on top: blend the field heading with a pull toward the
+                    // ramp's centreline, strongest when far off it. The bot converges onto the axis
+                    // as it approaches and arrives square, without ever leaving a routed path.
+                    const Vec3 low  = dg.portals[nr].lowPos, high = dg.portals[nr].highPos;
+                    const f32  off  = Autoplay::rampLateralOffset(low, high, pos);
+                    if (off > 0.75f && lengthSq(v.flowDir) > 1e-6f) {
+                        const Vec3 axis = Autoplay::rampUpAxis(low, high);
+                        if (lengthSq(axis) > 1e-6f) {
+                            // Perpendicular from the body toward the centreline (XZ).
+                            const f32 rx = pos.x - low.x, rz = pos.z - low.z;
+                            const f32 along = rx * axis.x + rz * axis.z;
+                            Vec3 toLine{-(rx - axis.x * along), 0.0f, -(rz - axis.z * along)};
+                            if (lengthSq(toLine) > 1e-6f) {
+                                toLine = normalize(toLine);
+                                const f32 w = off > 3.0f ? 0.6f : 0.35f;   // harder pull when far off
+                                Vec3 blended{v.flowDir.x * (1.0f - w) + toLine.x * w, 0.0f,
+                                             v.flowDir.z * (1.0f - w) + toLine.z * w};
+                                if (lengthSq(blended) > 1e-6f) v.flowDir = normalize(blended);
+                            }
+                        }
                     }
                 }
             }
 
-            // JUMP PAD fallback (only when NOT already on the ramp approach). The void pad flings the bot
-            // up a story in one launch — used when it is reachable and the ramp is not close.
+            // USE THE JUMP PADS. On an upper-exit VHALL floor a pad is the RELIABLE way up — one
+            // launch clears the whole storey — while the ramp is a narrow 2-wide graduated slab that
+            // the eased-aim walk drifts off, and it is the flaky half of every VHALL climb (measured:
+            // bots spending 99% of a 590 s floor on the ground never mounting, or 38% of a 405 s floor
+            // on the ramp never cresting). So the pad is now the PREFERRED route, not a fallback used
+            // only when the ramp is far: it is picked BEFORE the ramp assist and, once chosen, it is
+            // COMMITTED — a goal re-picked every tick walks the bot back and forth between two pads,
+            // the same failure the ramp crossing already had to fix.
+            //
+            // Reach is generous (a pad across the hall is still worth walking to, since taking it
+            // replaces the entire climb) and the commit survives losing line of sight, because the
+            // detour fan rounds corners on the way and a momentary occlusion is not a reason to
+            // abandon the route. It is released when the bot is up, when the pad stops being
+            // reachable at all, or on a timeout so a pad it can never actually get to cannot pin it.
             bool climbingViaPad = false;
-            if (!climbingViaRamp && m_level.floorDoorPos.y > 1.5f && pos.y < m_level.floorDoorPos.y - 1.5f) {
-                constexpr f32 kPadReach = 18.0f;
-                f32 bestD2 = kPadReach * kPadReach; s32 best = -1;
-                for (u8 k = 0; k < m_autoplayPadCount; k++) {
-                    const f32 dx = m_autoplayPadCells[k].x - pos.x, dz = m_autoplayPadCells[k].z - pos.z;
-                    const f32 d2 = dx * dx + dz * dz;
-                    if (d2 < bestD2 && clearLineTo(m_autoplayPadCells[k])) { bestD2 = d2; best = k; }
+            // ...but NOT once the climb is already under way. `belowExit` is still true halfway up a
+            // ramp, so without this an in-progress climb gets abandoned for a pad across the hall and
+            // the bot walks back off the slab it had mounted — which reads as scraping along the
+            // stairs. On the ground the pad is the better route; on the slab, finish the climb.
+            const bool onSlabAlready = pos.y > 0.5f;
+            if (belowExit && !onSlabAlready) {
+                constexpr f32 kPadReach     = 34.0f;   // worth crossing the hall for
+                constexpr u32 kPadGoalMaxTick = 25u * 60u;   // ~25 s: drop a pad we cannot reach
+                const u32 nowTick = currentLocalTick();
+                if (ap().padGoal >= 0) {
+                    if (ap().padGoal >= (s8)m_autoplayPadCount ||
+                        nowTick - ap().padGoalTick > kPadGoalMaxTick)
+                        ap().padGoal = -1;      // stale or hopeless: re-pick (or fall back to the ramp)
                 }
-                if (best >= 0) {
-                    const Vec3 to{m_autoplayPadCells[best].x - pos.x, 0.0f, m_autoplayPadCells[best].z - pos.z};
-                    if (lengthSq(to) > 1e-6f) { v.flowDir = normalize(to); climbingViaPad = true; }
+                if (ap().padGoal < 0) {
+                    // Pick the nearest pad we can actually see. The clear-line test is only applied at
+                    // PICK time — see above for why it is not re-tested while committed.
+                    f32 bestD2 = kPadReach * kPadReach; s32 best = -1;
+                    for (u8 k = 0; k < m_autoplayPadCount; k++) {
+                        const f32 dx = m_autoplayPadCells[k].x - pos.x, dz = m_autoplayPadCells[k].z - pos.z;
+                        const f32 d2 = dx * dx + dz * dz;
+                        if (d2 < bestD2 && clearLineTo(m_autoplayPadCells[k])) { bestD2 = d2; best = k; }
+                    }
+                    if (best >= 0) { ap().padGoal = (s8)best; ap().padGoalTick = nowTick; }
                 }
+                if (ap().padGoal >= 0 && ap().padGoal < (s8)m_autoplayPadCount) {
+                    const Vec3 g = m_autoplayPadCells[ap().padGoal];
+                    const Vec3 to{g.x - pos.x, 0.0f, g.z - pos.z};
+                    if (lengthSq(to) > 1e-6f) {
+                        v.flowDir = normalize(to);
+                        climbingViaPad = true;
+                        // Do NOT let the ramp centreline assist fight the pad approach for the feet.
+                        climbingViaRamp = false;
+                        ap().vhOnRamp = false;
+                    }
+                }
+            } else {
+                ap().padGoal = -1;   // up already: the pad has done its job
             }
 
             // The exit is a balcony door on the OPPOSITE story. Routing is a BFS FLOW FIELD over
@@ -1875,16 +2049,24 @@ Autoplay::BotView Engine::buildBotView() {
             // bot off a balcony edge. It does the COARSE approach to the ramp foot (before the centreline
             // steer takes over) and the cross to the door up top — used whenever not on the ramp/pad.
             if (!climbingViaPad && !climbingViaRamp &&
-                Autoplay::ensureVHallField(m_autoplayVHall, m_level.grid, m_level.floorDoorPos, floorStamp)) {
-                const Vec3 vd = Autoplay::vhallDirection(m_autoplayVHall, m_level.grid, pos);
+                Autoplay::ensureVHallField(ap().vHall, m_level.grid, m_level.floorDoorPos, floorStamp)) {
+                const Vec3 vd = Autoplay::vhallDirection(ap().vHall, m_level.grid, pos);
                 if (lengthSq(vd) > 1e-6f) v.flowDir = vd;
             }
             // Climb-assist jump: the ramp is a narrow 2-wide graduated slab, and even with correct
             // steering the eased-aim walk can stall against the risers. Pulse a hop while the bot is
             // BELOW the exit height and the exit is UP — i.e. still climbing the RAMP (not while riding a
-            // pad, which does its own launch). (m_autoplayVhClimbing was defaulted false above.)
-            if (!climbingViaPad && m_level.floorDoorPos.y > 1.5f && pos.y < m_level.floorDoorPos.y - 0.5f)
-                m_autoplayVhClimbing = true;
+            // pad, which does its own launch). (ap().vhClimbing was defaulted false above.)
+            // The margin here must be SMALLER than a ramp riser, or the flag switches off exactly
+            // where the climb still needs it. At 0.5 m it did: a ramp's last step onto the balcony is
+            // ~0.5 m, so a bot at the top of the ramp sits at exactly exitY - 0.5 and the test
+            // `pos.y < exitY - 0.5` reads FALSE — vhClimbing drops, the climb hop it gates dies, and
+            // the bot walks into a 0.5 m riser it cannot step over (STEP_UP_HEIGHT is 0.4) forever.
+            // Measured three separate times as "stuck on the stairs": y pinned at 2.49-2.50 against a
+            // 3.0 m balcony, moving, valid route, distance-to-door frozen, npt climbing past 80 s.
+            // 0.1 m keeps the flag true until the bot is genuinely up on the exit storey.
+            if (!climbingViaPad && m_level.floorDoorPos.y > 1.5f && pos.y < m_level.floorDoorPos.y - 0.1f)
+                ap().vhClimbing = true;
         } else if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) {
             // The Descent: the exit is always DOWN, so the travel goal is a hole in THIS story's
             // slab — and getting to one is a MAZE routing problem, not a bearing.
@@ -1903,10 +2085,10 @@ Autoplay::BotView Engine::buildBotView() {
             // the two seedings pointing opposite ways — which froze the bot oscillating at the very
             // hole it should drop into. commitBotStory only moves the storey once the bot is solidly
             // standing on a new one, so a lip flicker is ignored and a real fall commits on landing.
-            m_autoplayDescentStory = Autoplay::commitBotStory(m_level.grid, pos, m_autoplayDescentStory);
-            if (Autoplay::ensureDescentField(m_autoplayDescent, m_level.grid, dg,
-                                             m_autoplayDescentStory, floorStamp, m_level.floorDoorPos)) {
-                const Vec3 dd = Autoplay::descentDirection(m_autoplayDescent, m_level.grid, pos);
+            ap().descentStory = Autoplay::commitBotStory(m_level.grid, pos, ap().descentStory);
+            if (Autoplay::ensureDescentField(ap().descent, m_level.grid, dg,
+                                             ap().descentStory, floorStamp, m_level.floorDoorPos)) {
+                const Vec3 dd = Autoplay::descentDirection(ap().descent, m_level.grid, pos);
                 if (lengthSq(dd) > 1e-6f) {
                     v.flowDir = dd;
                 } else if (Autoplay::onJumpPad(m_level.grid, pos)) {
@@ -1916,7 +2098,7 @@ Autoplay::BotView Engine::buildBotView() {
                     // the Descent floor PARK (traced: 12 minutes with distance-to-exit oscillating
                     // between two fixed values, 47% of ticks airborne, 32% with no heading). Steer it
                     // off the pad to the nearest routable non-pad cell and the descent resumes.
-                    const Vec3 esc = Autoplay::padEscapeDirection(m_autoplayDescent, m_level.grid, pos);
+                    const Vec3 esc = Autoplay::padEscapeDirection(ap().descent, m_level.grid, pos);
                     if (lengthSq(esc) > 1e-6f) v.flowDir = esc;
                 }
             }
@@ -1931,7 +2113,7 @@ Autoplay::BotView Engine::buildBotView() {
         // takes priority (FIGHT ignores flowDir). FLAT non-lava floors only: on stacked/lava floors the
         // story/causeway routing above owns the heading, and the boss-seek below still overrides this
         // (kill the boss first), the globe steady after it (survival first).
-        m_autoplayShrineTarget = false;
+        ap().shrineTarget = false;
         if (!v.stackedFloor && !m_level.lavaFloor) {
             constexpr f32 kShrineDetour = 8.0f;   // metres: a minor detour, not a cross-floor trek
             f32 bestD2 = kShrineDetour * kShrineDetour;
@@ -1940,14 +2122,14 @@ Autoplay::BotView Engine::buildBotView() {
                 if (!w.active || !isShrine(w.item)) continue;
                 const f32 dx = w.position.x - pos.x, dz = w.position.z - pos.z;
                 const f32 d2 = dx * dx + dz * dz;
-                if (d2 < bestD2) { bestD2 = d2; m_autoplayShrinePos = w.position; m_autoplayShrineTarget = true; }
+                if (d2 < bestD2) { bestD2 = d2; ap().shrinePos = w.position; ap().shrineTarget = true; }
             }
-            if (m_autoplayShrineTarget) {
-                const Vec3 to{m_autoplayShrinePos.x - pos.x, 0.0f, m_autoplayShrinePos.z - pos.z};
+            if (ap().shrineTarget) {
+                const Vec3 to{ap().shrinePos.x - pos.x, 0.0f, ap().shrinePos.z - pos.z};
                 // Steer to the shrine ONLY with a clear line; a shrine is optional, never worth
                 // wall-hugging toward one behind a wall. The flag stays set so the activation still
                 // fires if the ordinary exit route happens to bring the bot into range.
-                if (lengthSq(to) > 1e-6f && clearLineTo(m_autoplayShrinePos)) v.flowDir = normalize(to);
+                if (lengthSq(to) > 1e-6f && clearLineTo(ap().shrinePos)) v.flowDir = normalize(to);
             }
         }
 
@@ -1987,8 +2169,8 @@ Autoplay::BotView Engine::buildBotView() {
                         // at cell centres (no wall-hug), has no A* cell cap (a boss across the floor still
                         // routes), and rebuilds only when the boss changes cell (a moving target). Falls
                         // back to the exit field only if the boss is genuinely unreachable.
-                        if (Autoplay::ensureRouteField(m_autoplayBossRoute, m_level.grid, bossPos, floorStamp)) {
-                            const Vec3 rd = Autoplay::routeDirection(m_autoplayBossRoute, m_level.grid, pos);
+                        if (Autoplay::ensureRouteField(ap().bossRoute, m_level.grid, bossPos, floorStamp)) {
+                            const Vec3 rd = Autoplay::routeDirection(ap().bossRoute, m_level.grid, pos);
                             if (lengthSq(rd) > 1e-6f) v.flowDir = rd;
                         }
                     }
@@ -2019,7 +2201,7 @@ Autoplay::BotView Engine::buildBotView() {
     // Cleared every tick and raised only in the all-detours-refused branch below, so it means exactly
     // "the router wanted to go somewhere and the veto left it with nowhere" — the boxed-in signal the
     // wedge escape watches (a bot merely standing still has no heading here to veto).
-    m_autoplayFlowVetoed = false;
+    ap().flowVetoed = false;
     if (lengthSq(v.flowDir) > 1e-6f) {
         const f32 feetY = m_localPlayer.position.y;
         // JUMP PADS ARE A HAZARD ON A DESCENT FLOOR, and only there. The objective is to get DOWN;
@@ -2039,10 +2221,16 @@ Autoplay::BotView Engine::buildBotView() {
         // routes THROUGH a pad only when a pad severs the pocket / blocks the exit corridor, and there
         // the veto would freeze the bot at the pad it must cross. Standing down lets it take the bounce
         // and re-route, instead of standing still (the "can't find the exit when a pad is in the way").
-        const bool avoidPads = (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) &&
-                               !Autoplay::onJumpPad(m_level.grid, v.pos) &&
-                               !m_autoplayDescent.paddedOnly &&
-                               !Autoplay::descentNextIsPad(m_autoplayDescent, m_level.grid, v.pos);
+        // PAD PREFERENCE, NOT PAD FEAR. The descent FIELD already prefers a pad-free descent (its
+        // tier-1 flood excludes pads and only tier-2 routes through them), which is the right place
+        // to express "a return lift undoes the descent" — it costs the bot nothing when a clean route
+        // exists. The hard VETO on top of that was the part that read as fear: it refused any step
+        // whose footprint so much as clipped a pad, so the bot skirted them, boxed itself in corners
+        // beside them, and stalled next to lifts it could simply have crossed. Removed on Aaron's
+        // call. The consequence — an occasional unplanned launch — is now recoverable in a way it was
+        // not when the veto was written: padEscapeDirection gets the bot off a lift, the wedge escape
+        // digs it out of a corner, and the field re-routes from wherever it lands.
+        const bool avoidPads = false;
         if (!Autoplay::stepAllowed(m_level.grid, v.pos, feetY, v.flowDir, m_level.lavaFloor, avoidPads)) {
             constexpr f32 kFan[4] = { 0.7853981634f, -0.7853981634f,     // ±45°: the gentle detour
                                       1.5707963268f, -1.5707963268f };   // ±90°: the square sidestep
@@ -2052,7 +2240,7 @@ Autoplay::BotView Engine::buildBotView() {
                 if (Autoplay::stepAllowed(m_level.grid, v.pos, feetY, cand, m_level.lavaFloor, avoidPads)) { pick = cand; break; }
             }
             if (lengthSq(pick) > 1e-6f) v.flowDir = pick;
-            else { v.flowDir = Vec3{0, 0, 0}; m_autoplayFlowVetoed = true; }   // boxed: nowhere left to step
+            else { v.flowDir = Vec3{0, 0, 0}; ap().flowVetoed = true; }   // boxed: nowhere left to step
         }
     }
 
@@ -2162,8 +2350,8 @@ Autoplay::BotView Engine::buildBotView() {
             const Vec3 raw = s_targets[i].vel;
             Vec3 sm = raw;                                   // unseen target: seed with its raw value
             for (u32 j = 0; j < AIM_VEL_SLOTS; j++) {
-                if (m_autoplayVelId[j] != s_targets[i].id || m_autoplayVelId[j] == 0) continue;
-                sm = m_autoplayVelEma[j] + (raw - m_autoplayVelEma[j]) * alpha;
+                if (ap().velId[j] != s_targets[i].id || ap().velId[j] == 0) continue;
+                sm = ap().velEma[j] + (raw - ap().velEma[j]) * alpha;
                 break;
             }
             freshId[i] = s_targets[i].id; freshVel[i] = sm;
@@ -2171,7 +2359,7 @@ Autoplay::BotView Engine::buildBotView() {
         }
         // Rebuilt wholesale each tick, so a target that left the list simply drops its history —
         // which is what we want: re-acquiring it later should not lead on a stale velocity.
-        for (u32 j = 0; j < AIM_VEL_SLOTS; j++) { m_autoplayVelId[j] = freshId[j]; m_autoplayVelEma[j] = freshVel[j]; }
+        for (u32 j = 0; j < AIM_VEL_SLOTS; j++) { ap().velId[j] = freshId[j]; ap().velEma[j] = freshVel[j]; }
     }
 
     v.targets     = s_targets;
@@ -2182,11 +2370,11 @@ Autoplay::BotView Engine::buildBotView() {
     // = the enemy died, despawned, or fell out of the nearest-kMaxTargets cap — either way the memory
     // is stale and pickTarget falls back to plain nearest-LOS.
     v.currentTargetIdx = -1;
-    if (m_autoplayTargetId != 0) {
+    if (ap().targetId != 0) {
         for (u32 i = 0; i < n; i++)
-            if (s_targets[i].id == m_autoplayTargetId) { v.currentTargetIdx = (s32)i; break; }
+            if (s_targets[i].id == ap().targetId) { v.currentTargetIdx = (s32)i; break; }
     }
-    v.targetSwitchAllowed = m_autoplayTargetDwell >= Autoplay::TARGET_MIN_DWELL;
+    v.targetSwitchAllowed = ap().targetDwell >= Autoplay::TARGET_MIN_DWELL;
 
     // (globes were collected above, before the nav steer that consumes them.)
     return v;
@@ -2273,15 +2461,15 @@ void Engine::applyBotIntent(const Autoplay::BotIntent& in, bool uiOpen, f32 dt, 
     // WEAPON-THROW TAP OVERRIDE. While the synthetic tap is in flight it OWNS the Fire button — the
     // sequence is release -> brief press -> release, and letting the ordinary auto-fire hold leak
     // through would keep `held` above TAP_SEC and turn the intended throw back into a plain swing.
-    const bool throwTap    = (m_autoplayThrowSeq >= 0.0f);
-    const bool throwTapDown = throwTap && WeaponThrow::botTapFireHeld(m_autoplayThrowSeq);
+    const bool throwTap    = (ap().throwSeq >= 0.0f);
+    const bool throwTapDown = throwTap && WeaponThrow::botTapFireHeld(ap().throwSeq);
     Input::setBotHeld(GameAction::FIRE,   throwTap ? (throwTapDown && !uiOpen)
                                                    : (in.fire && onTarget));
     Input::setBotHeld(GameAction::BLOCK,  in.block);
     Input::setBotHeld(GameAction::DODGE,  in.dodge);
     Input::setBotHeld(GameAction::POTION, in.potion);
     // RELOAD also carries the THROWAWAY gun toss (a one-tick press edge set by updateAutoplay).
-    Input::setBotHeld(GameAction::RELOAD, in.reload || m_autoplayReloadPulse);
+    Input::setBotHeld(GameAction::RELOAD, in.reload || ap().reloadPulse);
     // Class skill: select the slot (SKILL_n) AND press CLASS_SKILL — the selection loop runs before
     // the activation in handleClassSkillActivation, so both land in one frame.
     //
@@ -2323,14 +2511,14 @@ void Engine::exitAutoplayRun() {
     // later NORMAL Auto-Loot game in the same process had lane-0 re-gearing silently dead. Put the
     // melee weapon back (same uid search as the stow path; slots move as loot comes and goes) and
     // clear the state with the rest of the disarm.
-    if (m_autoplaySidearmActive) {
+    if (ap().sidearmActive) {
         PlayerInventory& inv = m_inventories[0];
         for (u8 i = 0; i < MAX_INVENTORY_ITEMS; i++)
-            if (inv.backpack[i].defId != 0xFFFF && inv.backpack[i].uid == m_autoplaySidearmMeleeUid) {
+            if (inv.backpack[i].defId != 0xFFFF && inv.backpack[i].uid == ap().sidearmMeleeUid) {
                 Inventory::equip(inv, i, m_itemDefs);
                 break;
             }
-        m_autoplaySidearmActive = false;
+        ap().sidearmActive = false;
     }
     m_autoplayActive = false;
     Input::setBotOverlayActive(false);   // also clears any held synthetic actions (input.cpp)

@@ -614,3 +614,47 @@ TEST_CASE("BuildScore: a melee class still keeps RANGED weapons for the sidearm"
     // ...and does NOT leak into the Ranged column, where the family gate rules.
     CHECK(score(sword, defs[1], MOD_RANGED, WeaponType::MELEE) == doctest::Approx(0.0f));
 }
+
+// The bag must HOLD the best gear for EVERY build configuration, not just the active one — switching
+// builds should find gear waiting. The pickup filter already reasons over all nine cells, but under
+// bag pressure eviction ranked purely by maxCellScore, the item's score in ISOLATION, and so
+// discarded the unique best-in-slot for defensive/caster cells (those pieces score lower in absolute
+// terms than a big weapon). isBestInSlotForAnyCell is what protects them.
+TEST_CASE("BuildScore: best-in-slot for ANY cell is recognised and protected") {
+    using namespace BuildScore;
+    ItemDef defs[4]{};
+    // A heavy-damage weapon: huge for Glass Cannon, gated out of Magic (family), fine for Melee.
+    defs[1] = weaponDef(WeaponSubtype::CLAYMORE, 40.0f);
+    // A defensive chest: modest absolute score, but the best ARMOR we own for a Tanky cell.
+    defs[2] = armorDef(60.0f);
+    // A strictly weaker chest — same slot, dominated everywhere.
+    defs[3] = armorDef(10.0f);
+
+    PlayerInventory inv{};
+    for (auto& e : inv.equipped) e.defId = 0xFFFF;
+    for (auto& b : inv.backpack) b.defId = 0xFFFF;
+
+    ItemInstance sword{}; sword.defId = 1;
+    ItemInstance goodArmor{}; goodArmor.defId = 2;
+    ItemInstance weakArmor{}; weakArmor.defId = 3;
+    inv.backpack[0] = sword;
+    inv.backpack[1] = goodArmor;
+    inv.backpack[2] = weakArmor;
+
+    // The good armor is best-in-slot for at least one cell even though its ABSOLUTE score is far
+    // below the weapon's — which is exactly the case naive eviction got wrong.
+    CHECK(isBestInSlotForAnyCell(inv, defs, 4, 1));
+    CHECK(maxCellScore(goodArmor, defs[2]) < maxCellScore(sword, defs[1]));
+
+    // The weaker chest is dominated by the good one in every cell — not protected, and the right
+    // thing to throw away when the bag is full.
+    CHECK_FALSE(isBestInSlotForAnyCell(inv, defs, 4, 2));
+
+    // The weapon is protected too (best weapon we own for the cells that can field it).
+    CHECK(isBestInSlotForAnyCell(inv, defs, 4, 0));
+
+    // A DUPLICATE of the good armor ties rather than beats it, so it is not protected — otherwise
+    // two identical pieces would both be un-evictable and the bag could never make room.
+    inv.backpack[3] = goodArmor;
+    CHECK_FALSE(isBestInSlotForAnyCell(inv, defs, 4, 3));
+}

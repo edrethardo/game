@@ -1245,8 +1245,8 @@ void Engine::clientNetPre(f32 dt) {
     // wire movement too or the server walks the player from held keys (rubber-band on close).
     // Melee throw edge: handleWeaponFire (run earlier this tick in gameUpdate) latched a throw for
     // this local lane; stamp INPUT_EX_THROW onto the outgoing input, then consume the latch.
-    const u8 throwSetMask = m_pendingThrowEdge ? INPUT_EX_THROW : 0;
-    m_pendingThrowEdge = false;
+    const u8 throwSetMask = m_pendingThrowEdge[sp] ? INPUT_EX_THROW : 0;
+    m_pendingThrowEdge[sp] = false;
     Client::captureAndSendInput(m_localPlayer, m_clientTick, ws.currentWeapon,
                                 m_activeClassSkill, skillClearMask, /*freezeMovement=*/frozen,
                                 /*laneId=*/sp, /*targetSlot=*/activeNetSlot(),

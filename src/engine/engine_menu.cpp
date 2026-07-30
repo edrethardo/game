@@ -350,7 +350,13 @@ bool Engine::updateMenuMouseActive() {
 // post-load force turns the gear brain back on. Running after startGame(CONTINUE) (which preserves the
 // loaded inventory) is what makes the write stick to the next descent autosave.
 void Engine::enterAutoplayRun(bool freshCharacter) {
-    m_inventories[0].autoMode = 1;                                    // Auto Loot is the bot's gear brain
+    // EVERY local lane, not just lane 0: couch co-op gives each local player its own bot, and each
+    // needs its own gear brain and its own build cell seeded from ITS OWN class (seeding lane 1 from
+    // lane 0's class is how a Sorcerer ends up swinging a sword — the exact bug the per-class seed
+    // below exists to prevent, just one lane over).
+    const u8 apLanes = (m_splitPlayerCount > 0) ? m_splitPlayerCount : 1;
+    for (u8 L = 0; L < apLanes && L < MAX_LOCAL_PLAYERS; L++)
+        m_inventories[L].autoMode = 1;                                // Auto Loot is the bot's gear brain
 
     // Build cell. A FRESH hero has no persisted choice at all — and PlayerInventory's untouched
     // default is Moderate/MELEE for every class, so Auto-Equip used to hand a Sorcerer a sword and
@@ -360,39 +366,44 @@ void Engine::enterAutoplayRun(bool freshCharacter) {
     // inventory grid on a previous session, and silently rewriting it would re-gear their hero.
     // Out of range is still repaired in both cases (a corrupt/blank byte would index the doctrine
     // and score tables out of bounds).
-    if (freshCharacter)
-        m_inventories[0].buildCell = Autoplay::defaultCellForClass(m_playerClass);
-    else if (m_inventories[0].buildCell >= BuildScore::BUILD_ROWS * BuildScore::BUILD_COLS)
-        m_inventories[0].buildCell = BuildScore::DEFAULT_BUILD_CELL;
+    for (u8 L = 0; L < apLanes && L < MAX_LOCAL_PLAYERS; L++) {
+        const PlayerClass cls = (L == 0) ? m_playerClass : m_playerClasses[L];
+        if (freshCharacter)
+            m_inventories[L].buildCell = Autoplay::defaultCellForClass(cls);
+        else if (m_inventories[L].buildCell >= BuildScore::BUILD_ROWS * BuildScore::BUILD_COLS)
+            m_inventories[L].buildCell = BuildScore::DEFAULT_BUILD_CELL;
+    }
     m_autoplayActive = true;
     m_autoplayControl.forceBot();          // start in bot control from frame one
     Input::setBotOverlayActive(true);
 
     // Reset the 8b nav/backstop timers so a SECOND in-process Autoplay run (menu -> run -> quit ->
-    // Autoplay again) never inherits stale state: a leftover m_autoplayNoProgressTimer > 4 s would
-    // fire a spurious stuck/nudge on frame one, and a leftover m_autoplayLastTargetCount > 0 would
-    // false-arm the loot dwell. The zero m_autoplayLastPos is a sentinel — the world may not be
+    for (u8 L = 0; L < MAX_LOCAL_PLAYERS; L++) {
+        AutoplayLane& AP = m_apLanes[L];
+    // Autoplay again) never inherits stale state: a leftover AP.noProgressTimer > 4 s would
+    // fire a spurious stuck/nudge on frame one, and a leftover AP.lastTargetCount > 0 would
+    // false-arm the loot dwell. The zero AP.lastPos is a sentinel — the world may not be
     // positioned yet here, so the first updateAutoplay tick re-anchors it (a large delta reads as
     // "progressed", not a stuck accrual, and the zeroed no-progress timer needs a full 4 s to arm
     // regardless), keeping frame one clean.
-    m_autoplayLastPos         = Vec3{0, 0, 0};
-    m_autoplayNoProgressTimer = 0.0f;
-    m_autoplayNudgeTimer      = 0.0f;
-    m_autoplayEscapeTimer     = 0.0f;
-    m_autoplayEscapeDir       = Vec3{0, 0, 0};   // pairs with the timer: a stale committed heading
+    AP.lastPos         = Vec3{0, 0, 0};
+    AP.noProgressTimer = 0.0f;
+    AP.nudgeTimer      = 0.0f;
+    AP.escapeTimer     = 0.0f;
+    AP.escapeDir       = Vec3{0, 0, 0};   // pairs with the timer: a stale committed heading
                                                  // would otherwise steer the first frames of run #2
-    m_autoplayLootDwell       = 0.0f;
-    m_autoplayLastTargetCount = 0;
-    m_autoplayDescendPulse    = 0.0f;
-    m_autoplayLastEnemyHp     = 0.0f;   // combat-progress signal (a leftover value could false-arm break-off)
-    m_autoplayLastEnemyCount  = 0;
-    m_autoplayBreakoffTimer   = 0.0f;
+    AP.lootDwell       = 0.0f;
+    AP.lastTargetCount = 0;
+    AP.descendPulse    = 0.0f;
+    AP.lastEnemyHp     = 0.0f;   // combat-progress signal (a leftover value could false-arm break-off)
+    AP.lastEnemyCount  = 0;
+    AP.breakoffTimer   = 0.0f;
     m_autoplayFreePlayTimer   = -1.0f;  // Free-Play auto-confirm: armed only by updateTownPortal
-    m_autoplaySidearmActive   = false;  // a fresh run never inherits a mid-fight sidearm swap
-    m_autoplaySidearmDwell    = 0.0f;
-    m_autoplaySidearmCooldown = 0.0f;
-    m_autoplaySidearmMeleeUid   = 0;
-    m_autoplaySidearmMeleeRange = 0.0f;
+    AP.sidearmActive   = false;  // a fresh run never inherits a mid-fight sidearm swap
+    AP.sidearmDwell    = 0.0f;
+    AP.sidearmCooldown = 0.0f;
+    AP.sidearmMeleeUid   = 0;
+    AP.sidearmMeleeRange = 0.0f;
     m_autoplayDeaths          = 0;      // soak death tally starts fresh each run
     m_autoplayRunTime         = 0.0f;   // balance telemetry accumulators
     m_autoplayFloorTime       = 0.0f;
@@ -401,31 +412,32 @@ void Engine::enterAutoplayRun(bool freshCharacter) {
     m_autoplayFloorStartKills  = 0;
     m_autoplayHbTimer         = 0.0f;
     m_autoplayPadFloor        = 0xFFFFFFFFu;   // rescan jump pads on the first floor of the run
-    m_autoplayDescentStory    = 1e9f;          // re-adopt the spawn storey on the first Descent floor
-    // (m_autoplayBossRoute needs no reset — its staleness stamp is the floor's seed identity, which a
+    AP.descentStory    = 1e9f;          // re-adopt the spawn storey on the first Descent floor
+    // (AP.bossRoute needs no reset — its staleness stamp is the floor's seed identity, which a
     // new run/floor can never match, exactly like the Descent/VHall fields.)
-    m_autoplayExitBull        = false;  // exit-progress watchdog: re-anchored on the first floor's first tick
-    m_autoplayDoorCheckDist   = 0.0f;
-    m_autoplayExitStallTimer  = 0.0f;
+    AP.exitBull        = false;  // exit-progress watchdog: re-anchored on the first floor's first tick
+    AP.doorCheckDist   = 0.0f;
+    AP.exitStallTimer  = 0.0f;
     m_autoplayLastFloor       = 0;
-    m_autoplayFloorCheckDist  = 1e9f;   // long (kill-agnostic) floor-stall window, same re-anchor
-    m_autoplayFloorStallTimer = 0.0f;
+    AP.floorCheckDist  = 1e9f;   // long (kill-agnostic) floor-stall window, same re-anchor
+    AP.floorStallTimer = 0.0f;
     // Combat memory. The sticky-target identity is the sharp one: entity pool generations RESET on
     // a run start and slots allocate in the same order, so a stale id from run 1 can COLLIDE with an
     // unrelated hostile in run 2 and start the new run locked onto it with a full switch dwell.
-    m_autoplayTargetId    = 0;
-    m_autoplayTargetDwell = 0.0f;
-    m_autoplayTargetBlind = 0.0f;
-    for (u32 i = 0; i < AIM_VEL_SLOTS; i++) { m_autoplayVelId[i] = 0; m_autoplayVelEma[i] = Vec3{0, 0, 0}; }
+    AP.targetId    = 0;
+    AP.targetDwell = 0.0f;
+    AP.targetBlind = 0.0f;
+    for (u32 i = 0; i < AIM_VEL_SLOTS; i++) { AP.velId[i] = 0; AP.velEma[i] = Vec3{0, 0, 0}; }
     // Travel/aim steadiness + the behaviour leashes: a committed heading from run 1 would steer run
     // 2's first ticks, and half-charged dodge leashes would refuse its first rolls for no reason.
-    m_autoplayTravelDir   = Vec3{0, 0, 0};
-    m_autoplayTravelHold  = 0.0f;
-    m_autoplayDodgeCd     = 0.0f;
-    m_autoplayGapCloseCd  = 0.0f;
-    m_autoplayLookBehindTimer = 0.0f;
-    m_autoplayLookBehindDone  = false;
-    m_autoplayVhClimbing  = false;
+    AP.travelDir   = Vec3{0, 0, 0};
+    AP.travelHold  = 0.0f;
+    AP.dodgeCd     = 0.0f;
+    AP.gapCloseCd  = 0.0f;
+    AP.lookBehindTimer = 0.0f;
+    AP.lookBehindDone  = false;
+    AP.vhClimbing  = false;
+    }
     // The two story flow fields need no reset here: their staleness stamp is the floor's seed
     // identity (levelSeed + floor + difficulty, see buildBotView), which a new run can never match.
 
@@ -580,6 +592,9 @@ void Engine::updateMenu(f32 dt) {
                 if (netHostGame(2)) {
                     m_menu.couchHost = false;
                     startCouchGame();        // m_netRole==SERVER → seats slot 1 + sets m_netCouch
+                    // Same as the offline couch branch: the Autoplay row can reach here too, and
+                    // arming is per-lane, so a host-couch session gets a bot in both local lanes.
+                    if (m_menu.autoplay) enterAutoplayRun(!m_menu.p1Continue);
                 } else {
                     m_netRole = NetRole::NONE;
                     m_menu.couchHost = false;
@@ -1415,6 +1430,13 @@ void Engine::updateMenu(f32 dt) {
             if (m_menu.subSelection == 0 || GameConst::kDemoBuild) {
                 startCouchGame();              // offline split-screen (m_netRole stays NONE);
                                                // demo always lands here (online options hidden)
+                // ARM THE BOT FOR COUCH TOO. The Autoplay row leads here just as readily as it leads
+                // to the solo start, and this branch used to arm nothing at all — so picking
+                // Autoplay and then "Start Local Co-op" gave a fully manual split-screen game with
+                // no bot in either lane. enterAutoplayRun arms EVERY local lane (it seeds each
+                // lane's gear brain and build cell from that lane's own class), and startCouchGame
+                // has already set m_splitPlayerCount = 2, so both lanes are covered here.
+                if (m_menu.autoplay) enterAutoplayRun(!m_menu.p1Continue);
             } else if (m_menu.subSelection == 1) {
                 // Host online together — pick LAN/Online (subState 10), then host with 2 local slots.
                 m_netRole = NetRole::SERVER;

@@ -145,15 +145,15 @@ TEST_CASE("The damage slope is a NORMAL dial, not a Hell one") {
     CHECK(norm50_B > norm50_A * 1.05f);
 }
 
-TEST_CASE("difficultyDamageBump: Normal x1.55, Nightmare x4.70, Hell x8.03") {
+TEST_CASE("difficultyDamageBump: Normal x1.55, Nightmare x7.05, Hell x12.045") {
     // 2026-07-23 balance-lab session, pass 2: Normal 1.25 -> 1.40 -> 1.55 are deliberate raises;
     // NM 2.80 -> 2.35 and Hell 9.58 -> 8.03 were RE-SOLVES against the steeper 0.24 slope.
     // 2026-07-24: Nightmare DOUBLED outright (2.35 -> 4.70) on Aaron's call, paired with an equal
     // doubling of its HP via difficultyHealthBump — see the ratio test below for why they move
     // together rather than damage alone.
     CHECK(difficultyDamageBump(0) == doctest::Approx(1.55f));
-    CHECK(difficultyDamageBump(1) == doctest::Approx(4.70f));
-    CHECK(difficultyDamageBump(2) == doctest::Approx(8.03f));
+    CHECK(difficultyDamageBump(1) == doctest::Approx(7.05f));    // 4.70 x 1.5 (2026-07-29)
+    CHECK(difficultyDamageBump(2) == doctest::Approx(12.045f));  // 8.03 x 1.5 (2026-07-29)
     // Unexpected values fall back to Normal rather than misbehaving.
     CHECK(difficultyDamageBump(99) == doctest::Approx(1.55f));
     // Ordering is the invariant that actually matters: deeper tier => strictly more damage.
@@ -172,7 +172,7 @@ TEST_CASE("Hell floor 50 damage is AT LEAST double what it was — the stated ha
     const f32 prevHell50 = (1.0f + 149.0f * 0.16f) * 5.90f;    // the pre-rework curve: 146.6x
     const f32 newHell50  = floorDamageMult(150) * difficultyDamageBump(2);
     CHECK(newHell50 >= 2.0f * prevHell50);
-    CHECK(newHell50 == doctest::Approx(295.2f).epsilon(0.01));
+    CHECK(newHell50 == doctest::Approx(295.2f * 1.5f).epsilon(0.01));   // 442.8 after the +50% pass
 }
 
 TEST_CASE("Hell floor 50 HP = the compounding curve x the floor-10 boost") {
@@ -196,13 +196,19 @@ TEST_CASE("Hell: the glass-cannon guard holds, with headroom opened by the floor
     // headroom, so a future damage-bump raise no longer instantly inverts the guard the way it did at
     // the old knife-edge — but the guard below is still the thing that catches an over-raise.
     const f32 hellDmg  = floorDamageMult(150) * difficultyDamageBump(2);   // ~295.2x
-    const f32 hellHp   = floorHealthMult(150);                             // ~448.5x (299 x 1.5)
+    // MUST include difficultyHealthBump — this line read floorHealthMult alone, which was silently
+    // correct only while Hell's health bump happened to be 1.0. When Hell's bump moved to 1.5
+    // (2026-07-29) the omission made this compare a bumped damage against an UNbumped HP and the
+    // ratio collapsed to ~1.01, i.e. the guard would have reported a knife-edge that does not exist.
+    const f32 hellHp   = floorHealthMult(150) * difficultyHealthBump(2);   // ~672.8x
     const f32 prevDmg  = (1.0f + 149.0f * 0.16f) * 5.90f;
 
     CHECK(hellDmg >= 2.0f * prevDmg);   // the stated damage floor (unchanged)
     CHECK(hellHp  >  hellDmg);          // glass-cannon guard: HP must outscale damage — STILL HOLDS
 
     // The headroom the floor-10 boost opened (was < 1.05; now ~1.52).
+    // BOTH axes moved +50% on 2026-07-29, so this ratio is unchanged — that is the point of
+    // moving them together rather than one at a time.
     CHECK(hellHp / hellDmg == doctest::Approx(1.52f).epsilon(0.03));
 }
 
@@ -220,8 +226,10 @@ TEST_CASE("Nightmare: hot damage, plus the floor-10 HP tilt, still absolutely HP
     const f32 prevDmg = (1.0f + 99.0f * 0.16f) * 1.90f;
     const f32 hpX     = (floorHealthMult(100) * difficultyHealthBump(1)) / prevHp;   // 2.56 x 1.5
     const f32 dmgX    = (floorDamageMult(100) * difficultyDamageBump(1)) / prevDmg;
-    CHECK(hpX  == doctest::Approx(2.56f * TIER10_HP_BOOST).epsilon(0.03));  // 3.84 — the +50% floor-10 tilt
-    CHECK(dmgX == doctest::Approx(3.64f).epsilon(0.03));                    // damage growth unchanged
+    // 2026-07-29: NM's HP bump went 2.0 -> 3.0 (Aaron: "triple the hp in nightmare"), so the growth
+    // multiple rises by the same 1.5x: 3.84 -> 5.76. Damage was deliberately NOT moved with it.
+    CHECK(hpX  == doctest::Approx(2.56f * TIER10_HP_BOOST * 1.5f).epsilon(0.03));  // 5.76
+    CHECK(dmgX == doctest::Approx(3.64f * 1.5f).epsilon(0.03));             // 5.46 after the +50% pass
     CHECK(hpX  >  dmgX);                                                    // HP now edges past damage growth
 
     // The invariant with teeth: absolute NM-50 HP outscales absolute NM-50 damage (glass-cannon guard).
@@ -230,24 +238,43 @@ TEST_CASE("Nightmare: hot damage, plus the floor-10 HP tilt, still absolutely HP
     CHECK(nm50Hp > nm50Dmg);
 }
 
-TEST_CASE("difficultyHealthBump doubles Nightmare and leaves the other tiers alone") {
-    // The per-tier HP lever exists only because compounding cannot be aimed at one difficulty, so
-    // "double Nightmare's HP" had no other expression. Normal and Hell must read exactly 1.0 — a
-    // stray multiplier here would silently re-solve Hell's curve, which is boxed in by two hard
-    // requirements (see difficultyDamageBump's comment).
-    CHECK(difficultyHealthBump(0) == doctest::Approx(1.0f));
-    CHECK(difficultyHealthBump(1) == doctest::Approx(2.0f));
-    CHECK(difficultyHealthBump(2) == doctest::Approx(1.0f));
+TEST_CASE("difficultyHealthBump triples Nightmare and scales Hell by the same factor") {
+    // The per-tier HP lever exists only because compounding cannot be aimed at one difficulty.
+    // 2026-07-29: Nightmare tripled (2.0 -> 3.0) and Hell scaled by the SAME 1.5x (1.0 -> 1.5).
+    // Hell moving in lockstep is the load-bearing part — see the tier-step test below.
+    CHECK(difficultyHealthBump(0) == doctest::Approx(1.0f));    // Normal untouched
+    CHECK(difficultyHealthBump(1) == doctest::Approx(3.0f));
+    CHECK(difficultyHealthBump(2) == doctest::Approx(1.5f));
     CHECK(difficultyHealthBump(99) == doctest::Approx(1.0f));   // unknown tier: no scaling
 }
 
-TEST_CASE("Nightmare's doubling keeps HP and damage in step") {
-    // The invariant that matters across the whole curve is that enemy HP outscales enemy damage —
-    // it is what stops deep enemies becoming glass cannons that delete the player before they can
-    // be hit back. Doubling BOTH preserves the ratio exactly; doubling damage alone would have
-    // moved Nightmare toward that failure. This pins the pairing, not the individual numbers.
-    CHECK(difficultyHealthBump(1) == doctest::Approx(2.0f));
-    CHECK(difficultyDamageBump(1) / 2.35f == doctest::Approx(difficultyHealthBump(1)).epsilon(0.01));
+TEST_CASE("The Nightmare->Hell HP step survives the triple") {
+    // THE reason Hell had to move with Nightmare. Hell floor 1 is deliberately EASIER than Nightmare
+    // floor 50 (the player has just re-geared), a ~0.52x dip. Raising Nightmare alone would have
+    // deepened that to ~0.35x — Hell's opening floors a third as tough as the tier you just left,
+    // which reads as the game getting easier exactly when it should bite. Scaling both by 1.5x holds
+    // the ratio exactly where it was.
+    const f32 nm50  = floorHealthMult(100) * difficultyHealthBump(1);
+    const f32 hell1 = floorHealthMult(101) * difficultyHealthBump(2);
+    CHECK(hell1 / nm50 == doctest::Approx(0.52f).epsilon(0.05));
+    // ...and Hell still ends far above where Nightmare ended.
+    CHECK(floorHealthMult(150) * difficultyHealthBump(2) > nm50 * 3.0f);
+}
+
+TEST_CASE("Nightmare HP and damage moved together again (+50% each, 2026-07-29)") {
+    // Until 2026-07-29 HP and damage were PAIRED at 2.0 so the ratio was preserved exactly. The
+    // triple deliberately breaks the pairing: HP went to 3.0 and damage stayed at 4.70 (= 2 x 2.35).
+    //
+    // That is safe BECAUSE of which way it moves. The invariant with teeth is "enemy HP outscales
+    // enemy damage" — the guard against deep enemies becoming glass cannons that delete the player
+    // before they can be hit back. Raising HP alone strengthens it (enemies get spongier, never more
+    // lethal); it is raising DAMAGE alone that would have inverted it. Pinned so a future "let's put
+    // them back in step" re-pairing has to argue with the direction, not just the numbers.
+    CHECK(difficultyHealthBump(1) == doctest::Approx(3.0f));
+    CHECK(difficultyDamageBump(1) == doctest::Approx(7.05f));   // also +50% (2026-07-29)
+    const f32 nm50Hp  = floorHealthMult(100) * difficultyHealthBump(1);
+    const f32 nm50Dmg = floorDamageMult(100) * difficultyDamageBump(1);
+    CHECK(nm50Hp > nm50Dmg);          // HP still outscales damage — back at the paired ~1.14x
 }
 
 TEST_CASE("Normal's damage raise is deliberate, depth-weighted, and pinned") {
@@ -274,7 +301,7 @@ TEST_CASE("Normal's damage raise is deliberate, depth-weighted, and pinned") {
 TEST_CASE("Combined enemy damage = linear floor curve x per-tier bump") {
     // What the spawn sites actually compute. A Hell floor-50 enemy: (1 + 149*0.24) * 8.03 = 295.2x.
     const f32 hellF50Dmg = floorDamageMult(150) * difficultyDamageBump(2);
-    CHECK(hellF50Dmg == doctest::Approx((1.0f + 149.0f * 0.24f) * 8.03f).epsilon(0.001));
+    CHECK(hellF50Dmg == doctest::Approx((1.0f + 149.0f * 0.24f) * 12.045f).epsilon(0.001));
 
     // HP must still outscale damage. Damage is linear while HP compounds, and this ordering is what
     // keeps deep enemies from becoming glass cannons that delete the player before they can be hit

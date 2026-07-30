@@ -411,7 +411,7 @@ void Engine::handleWeaponFire(f32 dt) {
                 if (m_netRole == NetRole::CLIENT) {
                     spawnWeaponThrow(activeNetSlot(), eyePos, fwd, wpn, eqWpn.defId,
                                      /*predictedGhost=*/true, m_clientTick);
-                    m_pendingThrowEdge = true;          // clientNetPre stamps INPUT_EX_THROW this tick
+                    m_pendingThrowEdge[throwLane] = true;   // clientNetPre stamps INPUT_EX_THROW for THIS lane
                 } else {
                     spawnWeaponThrow(activeNetSlot(), eyePos, fwd, wpn, eqWpn.defId,
                                      /*predictedGhost=*/false, 0);

@@ -142,6 +142,18 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
         } else if (ieq(a, "--arena")) {
             opt.arena  = true;
             opt.active = true;
+        } else if (ieq(a, "--autoplay-couch")) {
+            // Couch co-op AUTOPLAY: split-screen with BOTH local players driven by their own bot.
+            // Implies --autoplay. Lane 0 takes --new's class; lane 1 takes an OPTIONAL class argument
+            // here, defaulting to Marksman so the pair is melee + ranged. The argument is only
+            // consumed when it is a real class name — otherwise `--autoplay-couch --fourstory` would
+            // eat the next flag.
+            opt.autoplayCouch = true; opt.autoplay = true; opt.active = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                PlayerClass c2;
+                if (parseClass(argv[i + 1], c2)) { opt.cls2 = c2; i++; }
+                else { LOG_WARN("--autoplay-couch: unknown class '%s'", argv[i + 1]); opt.valid = false; }
+            }
         } else if (ieq(a, "--arena-couch")) {
             opt.arenaCouch = true;
             opt.active     = true;

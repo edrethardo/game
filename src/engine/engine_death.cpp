@@ -267,11 +267,30 @@ void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
         }
     }
 
-    // Bomber death explosion — AoE damage + burn in radius on death
+    // Bomber death explosion — AoE damage + burn in radius on death.
+    //
+    // KNOWN AND ACCEPTED (Aaron, 2026-07-29): the radius test below is XZ-ONLY — vertical separation
+    // is ignored entirely. That is deliberate for FLYING bombers (a Plague Bat hovers 1.5-2.5 m above
+    // its target by design, and a 3D test would make it whiff the thing it just dived at), but it has
+    // a consequence on the stacked layouts: a suicider detonating on the storey BELOW can still catch
+    // a player through the floor, and widening the radius to 3.5 m reaches slightly further into that
+    // case than 3.0 m did. Left as-is on purpose — do not "fix" it by switching to a 3D distance
+    // without handling the flyer case, or flying bombers stop dealing damage at all.
     if ((pool.entities[idx].enemyRole & EnemyRole::BOMBER) &&
         !(pool.entities[idx].flags & ENT_FRIENDLY)) {
-        f32 explosionRadius = 3.0f;
-        f32 explosionDmg = pool.entities[idx].damage * 2.5f; // suicide hits hard (was 0.8 — and under the old detonation range it whiffed entirely)
+        // 3.5 m (Aaron; was 3.0). The detonation trigger is 0.85 * attackRange — 2.1 m for a Plague
+        // Bat, 2.55 m for a Hellhound — so the blast already covered the trigger distance; the extra
+        // half-metre is what stops a player who is BACKING AWAY as it closes from stepping out of the
+        // edge of the explosion in the tick it goes off.
+        f32 explosionRadius = 3.5f;
+        // 3.25x = the old 2.5x plus 30% (Aaron). A suicider's whole existence is the one detonation:
+        // it closes to 0.85 * attackRange and dies to deliver it, so the blast has to read as a real
+        // punishment for letting one reach you, not a chip. Applied to the MULTIPLIER rather than to
+        // each enemy's `damage` in enemies.json, because that stat also drives their ordinary melee —
+        // this buffs the suicide and nothing else. Per-enemy result at base (before the difficulty and
+        // floor multipliers): Plague Bat 52 -> 68, Flame Imp 55 -> 72, Hellhound 75 -> 98,
+        // Nullifier 90 -> 117.
+        f32 explosionDmg = pool.entities[idx].damage * 3.25f; // suicide hits hard (was 0.8 — and under the old detonation range it whiffed entirely)
         f32 burnDur = pool.entities[idx].onHitDuration;
         f32 burnDps = pool.entities[idx].onHitDps;
 
@@ -286,9 +305,29 @@ void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
                 if (m_playerDead[p]) continue;
                 Player& lp = m_localPlayers[p];
                 Vec3 d = lp.position - pos;
-                if (sqrtf(d.x * d.x + d.z * d.z) < explosionRadius) {
+                const f32 dist = sqrtf(d.x * d.x + d.z * d.z);
+                if (dist < explosionRadius) {
                     Combat::applyDamageToPlayer(lp, explosionDmg, &pos);
                     if (burnDur > 0.0f) { lp.burnTimer = fmaxf(lp.burnTimer, burnDur); lp.burnDps = burnDps; }
+                }
+                // EARTHQUAKE. A suicider detonating next to you should feel like the ground itself
+                // moves, so the shake is deliberately not the usual hit-flinch: it runs at ~7 Hz
+                // instead of 25 (a slow heavy roll, not a buzz — at 25 Hz more intensity only reads
+                // as a louder rattle) and rides a LONG 0.9 s tail so the floor keeps rolling after
+                // the flash. Felt well beyond the damage radius (3x) with a smooth falloff, which is
+                // what sells it as the room shaking rather than as a hit landing on you — a blast you
+                // survived at the edge still shakes the world. Per LANE, and scaled by that lane's
+                // own distance, so in split-screen the player who was next to it feels it hardest.
+                {
+                    constexpr f32 kQuakeReach = 3.0f;    // x radius — the shake is heard wider than it hurts
+                    constexpr f32 kQuakeAmp   = 0.55f;   // metres of camera throw, point-blank
+                    constexpr f32 kQuakeHz    = 7.0f;    // slow, heavy roll
+                    constexpr f32 kQuakeSec   = 0.9f;    // long tail: the ground keeps moving
+                    const f32 reach = explosionRadius * kQuakeReach;
+                    if (dist < reach && p < MAX_LOCAL_PLAYERS) {
+                        const f32 falloff = 1.0f - (dist / reach);          // 1 at the centre, 0 at the edge
+                        m_cameras[p].shake.trigger(kQuakeAmp * falloff * falloff, kQuakeSec, kQuakeHz);
+                    }
                 }
             }
             // Networked co-op: damage remote NetPlayers through a throwaway view so it rides the

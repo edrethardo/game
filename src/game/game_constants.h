@@ -222,8 +222,18 @@ namespace GameConst {
             // outright. Paired with difficultyHealthBump's matching 2.0 so HP and damage move
             // TOGETHER; doubling damage alone would have inverted the "HP must outscale damage"
             // invariant that keeps deep enemies from becoming glass cannons.
-            case 1:  return 4.70f;  // Nightmare — 2 x the solved 2.35 (see difficultyHealthBump)
-            case 2:  return 8.03f;  // Hell      — re-solved vs the 0.24 slope: ~295x stands still
+            // 2026-07-29 (Aaron): +50% damage on both deep tiers, alongside the same +50% HP. Because
+            // BOTH axes moved by the same factor, the HP-over-damage ratio lands exactly back where it
+            // was before that session (NM-50 1.14x, Hell-50 1.52x) — the invariant is preserved, the
+            // tiers are simply 50% hotter on both axes.
+            //
+            // KNOWN CONSEQUENCE, accepted deliberately: the Hell-50 solve above is written against a
+            // 3,722 HP geared paladin taking ~2,187 per hit = 1.70 hits to kill. At 12.045 that
+            // becomes ~3,280 = 1.13 hits. Hell-50 trash is now very close to a ONE-SHOT on a geared
+            // character; the "lethal, but not a one-shot" promise in the note above no longer holds at
+            // the very end of Hell. Anyone re-solving this should start from that sentence.
+            case 1:  return 7.05f;  // Nightmare — 4.70 x 1.5 (2026-07-29)
+            case 2:  return 12.045f;// Hell      — 8.03 x 1.5 (2026-07-29); see the one-shot note above
             default: return 1.55f;  // Normal    (was 1.25 -> 1.40) — flat raise on top of the steeper slope
         }
     }
@@ -244,9 +254,26 @@ namespace GameConst {
     // same factor preserves that ratio exactly, which is why Nightmare doubling both is safe where
     // doubling damage alone would not have been.
     inline f32 difficultyHealthBump(u8 difficulty) {
+        // 2026-07-29 (Aaron): "triple the hp in nightmare and adjust hell accordingly."
+        //
+        // Nightmare 2.0 -> 3.0. Hell 1.0 -> 1.5 — the SAME 1.5x factor, which is what "accordingly"
+        // has to mean here: the tier-boundary step (Hell floor 1 vs Nightmare floor 50) is a
+        // deliberate 0.52x dip, and scaling both tiers by the same factor holds it at exactly 0.52.
+        // Raising Nightmare alone would have deepened that dip to 0.35 — Hell's opening floors
+        // suddenly a third as tough as the tier you just left, which reads as the game getting
+        // EASIER when you finally break into Hell.
+        //
+        // Resulting HP multipliers (incl. the floor-10 boost): Nightmare 1 -> 31.5x, Nightmare 50 ->
+        // 198.7x, Hell 1 -> 103.2x, Hell 50 -> 672.8x.
+        //
+        // DAMAGE is deliberately NOT moved. difficultyDamageBump's note pairs Nightmare's 2.0 HP with
+        // its 4.70 damage so the two move together, but that pairing exists to protect the
+        // "HP outscales damage" invariant, and raising HP alone pushes it the SAFE way: Nightmare-50
+        // goes 1.14x -> 1.71x HP-over-damage and Hell-50 1.52x -> 2.28x. Enemies get spongier, never
+        // more lethal. If damage is ever raised to match, re-check those ratios first.
         switch (difficulty) {
-            case 1:  return 2.0f;   // Nightmare — doubled with its damage (2026-07-24)
-            case 2:  return 1.0f;   // Hell      — unchanged; its curve is solved via the damage bump
+            case 1:  return 3.0f;   // Nightmare — tripled (2026-07-29); was 2.0
+            case 2:  return 1.5f;   // Hell      — same 1.5x factor, so the tier step is unchanged
             default: return 1.0f;   // Normal    — unchanged
         }
     }

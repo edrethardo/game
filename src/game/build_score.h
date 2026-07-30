@@ -415,6 +415,34 @@ inline bool worthPickingUp(const ItemInstance& cand, const ItemDef& def,
     return false;
 }
 
+// BEST-IN-SLOT PROTECTION. True when this bag item is the best we OWN for its slot under at least
+// one build cell — i.e. dropping it would strictly weaken some build.
+//
+// This is what makes "hold the best equipment for every build configuration" actually hold under bag
+// pressure. The eviction rule ranks candidates by maxCellScore, which is the item's score in
+// ISOLATION — so it cheerfully discards the unique best-in-slot for a defensive or caster cell,
+// because those pieces score lower in absolute terms than a big weapon does. The bag then silently
+// stops being able to field the build the player is about to switch to.
+//
+// It stays cheap because, as Aaron put it, most best-in-slot OVERLAPS: the protected set is the
+// UNION of best-in-slot over cells, not 9 cells x every slot, and one item usually wins the same
+// slot for several cells at once. Compared with excludeBackpackIdx = this item, so "best" means
+// "strictly better than anything else we own", and a duplicate that ties is not protected.
+inline bool isBestInSlotForAnyCell(const PlayerInventory& inv, const ItemDef* defs, u32 defCount,
+                                   u8 backpackIdx, WeaponType classPreferred = WeaponType::COUNT) {
+    const ItemInstance& it = inv.backpack[backpackIdx];
+    if (it.defId == 0xFFFF || it.defId >= defCount) return false;
+    const ItemDef& def = defs[it.defId];
+    for (u8 cell = 0; cell < BUILD_ROWS * BUILD_COLS; cell++) {
+        const f32 s = score(it, def, cell, classPreferred);
+        if (s <= 0.0f) continue;                       // not fieldable in this cell at all
+        if (s > bestSlotScore(inv, defs, defCount, def.slot, cell,
+                              /*excludeBackpackIdx=*/backpackIdx, classPreferred))
+            return true;                               // nothing else we own matches it here
+    }
+    return false;
+}
+
 // PRUNE test: a bag item is a KEEPER if, for at least one build cell, nothing else we own beats it
 // (>= against the best-without-me — deliberately weaker than the pickup filter, so an item we
 // decided to keep is not dropped by the very next pass: asymmetry is what prevents churn).

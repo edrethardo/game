@@ -333,3 +333,49 @@ TEST_CASE("FOUR_STORY: return pads sit under holes, and always have a surface to
         LevelGridSystem::shutdown(g);
     }
 }
+
+// A JUMP PAD MUST NEVER SIT ON THE EXIT PORTAL (or the spawn). A pad fires the instant you are
+// grounded on it, so one overlapping the portal flings you off at the exact moment you try to
+// descend — the floor becomes unusable for a human player as much as for the bot, and no amount of
+// navigation fixes it. Both Descent pad sites are placed before the endpoints are chosen (dead-end
+// node pads follow maze topology, return lifts follow a hole roll), so neither can avoid the exit on
+// its own; a post-pass reconciles them. Reported live by Aaron: "the jump pad should NEVER be on the
+// exit portal."
+TEST_CASE("FOUR_STORY: no jump pad on or beside the exit portal or the spawn") {
+    constexpr s32 kR = 2;   // must match the generator's keep-out radius
+    // 60 seeds, not a handful: measured against the UNFIXED generator the violation rate is ~12% of
+    // floors, so a short seed list passes by luck (the first draft used 8 and caught nothing). This
+    // many makes the test fail with near-certainty if the post-pass is ever removed.
+    for (u32 seed = 1; seed <= 60; seed++) {
+        LevelGrid g;
+        LevelGridSystem::init(g, 44, 44, 1.0f);
+        DungeonResult r = LevelGen::generate(g, seed, 44, 44, LevelGen::LayoutStyle::FOUR_STORY);
+        CAPTURE(seed);
+
+        auto noPadsAround = [&](Vec3 p, const char* what) {
+            u32 gx, gz;
+            REQUIRE(LevelGridSystem::worldToGrid(g, p, gx, gz));
+            for (s32 dz = -kR; dz <= kR; dz++)
+                for (s32 dx = -kR; dx <= kR; dx++) {
+                    const s32 x = (s32)gx + dx, z = (s32)gz + dz;
+                    if (x < 0 || z < 0 || !LevelGridSystem::isInBounds(g, (u32)x, (u32)z)) continue;
+                    CAPTURE(what); CAPTURE(x); CAPTURE(z);
+                    const bool isPad =
+                        (LevelGridSystem::getCell(g, (u32)x, (u32)z).flags & CELL_JUMPPAD) != 0;
+                    CHECK_FALSE(isPad);
+                }
+        };
+        noPadsAround(r.exitBalconyPos,  "exit");
+        noPadsAround(r.spawnBalconyPos, "spawn");
+
+        // The RECORDED pad list must agree with the grid — StoryNav steers by jumpPads[], so a pad
+        // stripped from the cells but left in the list would send the bot to a lift that is not there.
+        for (u8 i = 0; i < r.jumpPadCount; i++) {
+            const Vec3 jp = r.jumpPads[i];
+            const f32 ex = jp.x - r.exitBalconyPos.x, ez = jp.z - r.exitBalconyPos.z;
+            CAPTURE(i);
+            CHECK(std::sqrt(ex * ex + ez * ez) > (f32)kR);
+        }
+        LevelGridSystem::shutdown(g);
+    }
+}

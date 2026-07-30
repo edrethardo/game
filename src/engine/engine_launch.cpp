@@ -167,6 +167,26 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         return;
     }
 
+    // --- Dev door (--autoplay-couch): split-screen co-op with BOTH lanes bot-driven. ---
+    // Autoplay was lane-0-only until the per-lane state split; this is the door that exercises the
+    // other lane. Two fresh lanes of opt.cls, split-screen on, then the shared enterAutoplayRun
+    // below arms EVERY lane (it seeds each lane's gear brain and build cell from that lane's class).
+    if (opt.autoplayCouch) {
+        m_playerClasses[1] = opt.cls2;        // lane 1 is a DIFFERENT build by default (melee + ranged)
+        equipFreshLane(0);
+        equipFreshLane(1);
+        m_splitPlayerCount = 2;
+        Input::setSplitScreen(true);
+        Input::assignCouchPads();
+        startGame(GameStart::NEW_GAME, /*lanesPrepared=*/true);
+        positionLocalPlayersAtSpawn();
+        enterAutoplayRun(/*freshCharacter=*/true);
+        LOG_INFO("Launch: COUCH AUTOPLAY — P1 %s + P2 %s, both bot-driven (--autoplay-couch)",
+                 kClassDefs[static_cast<u32>(opt.cls)].name,
+                 kClassDefs[static_cast<u32>(opt.cls2)].name);
+        return;
+    }
+
     m_splitPlayerCount = 1;  // CLI launch is always single local player
 
     // --- JOIN: connect as a client and enter CONNECTING; the server drives us into the game ---

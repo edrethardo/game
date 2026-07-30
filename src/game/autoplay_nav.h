@@ -187,6 +187,19 @@ inline bool wouldFall(const LevelGrid& g, Vec3 from, f32 feetY, Vec3 dir) {
     const Vec3 to = from + normalize(flat) * g.cellSize;      // one cell ahead
     u32 gx, gz;
     if (!LevelGridSystem::worldToGrid(g, to, gx, gz)) return false;   // off-map: stepAllowed's job
+    // A SLAB ABOVE YOU IS A CLIMB, NOT A FALL. effectiveFloorHeight only returns a slab top the body
+    // could STEP onto (within PLATFORM_STEP_TOLERANCE, 0.4 m); a slab any higher is refused and the
+    // function reports the ground story underneath instead. On a VHALL ramp the final riser onto the
+    // balcony is ~0.5 m — just over that window — so the destination read as a 2.5 m DROP and the
+    // veto refused the last step of every climb. Measured: bots bouncing at y = 2.4-2.9 against a
+    // 3.0 m balcony, airborne, distance-to-door frozen, for the whole floor ("still gets stuck at
+    // the stairs"). Anything overhead is something to climb onto — it can never be a fall — so check
+    // for a higher slab before judging the drop.
+    const u8 n = LevelGridSystem::platformCount(g, gx, gz);
+    for (u8 i = 0; i < n; i++) {
+        const f32 top = LevelGridSystem::getPlatformTop(g, gx, gz, i);
+        if (top > feetY - PLATFORM_STEP_TOLERANCE) return false;   // at/above us: a step or a hop up
+    }
     const f32 dest = LevelGridSystem::effectiveFloorHeight(g, gx, gz, feetY);
     return dest < feetY - PLATFORM_STEP_TOLERANCE;
 }
@@ -502,6 +515,55 @@ inline f32 rampSegDistXZ(Vec3 low, Vec3 high, Vec3 p) {
     const f32 dx = p.x - cx, dz = p.z - cz;
     return std::sqrt(dx * dx + dz * dz);
 }
+// MOUNT A RAMP HEAD-ON, NOT SIDEWAYS.
+//
+// A VHALL ramp is a 2-wide graduated slab. Meeting it from the SIDE means the body is pressed
+// against a riser edge it cannot step over, so it scrapes along the slab and never mounts — "vhall
+// loves to hug the stairs". The climb only works if the bot first walks to a point in LINE with the
+// ramp, a short way back from its foot, and then goes straight up the axis.
+//
+// This is the routing that earlier attempts could not make work, and the reason it is viable now is
+// that the thing that used to break it has been fixed: routing toward a ramp used to trap the bot on
+// the ground UNDERNEATH the slab, which LevelGridSystem::bodyPinnedUnderSlab now refuses outright.
+
+// The staging point: on the ground, on the ramp's axis, `backoff` metres BEHIND its foot. Walking
+// here first is what converts a sideways scrape into a straight-on climb.
+inline Vec3 rampFootApproach(Vec3 low, Vec3 high, f32 backoff = 2.5f) {
+    Vec3 axis{high.x - low.x, 0.0f, high.z - low.z};
+    const f32 L = std::sqrt(axis.x * axis.x + axis.z * axis.z);
+    if (L < 0.1f) return low;
+    axis.x /= L; axis.z /= L;
+    return Vec3{low.x - axis.x * backoff, low.y, low.z - axis.z * backoff};
+}
+
+// How far the body sits OFF the ramp's centreline (metres, XZ), measured against the infinite axis
+// rather than the segment — behind the foot is still "on the line", which is the whole point of the
+// staging position above.
+inline f32 rampLateralOffset(Vec3 low, Vec3 high, Vec3 p) {
+    Vec3 axis{high.x - low.x, 0.0f, high.z - low.z};
+    const f32 L = std::sqrt(axis.x * axis.x + axis.z * axis.z);
+    if (L < 0.1f) { const f32 dx = p.x - low.x, dz = p.z - low.z; return std::sqrt(dx*dx + dz*dz); }
+    axis.x /= L; axis.z /= L;
+    const f32 rx = p.x - low.x, rz = p.z - low.z;
+    const f32 along = rx * axis.x + rz * axis.z;
+    const f32 ox = rx - axis.x * along, oz = rz - axis.z * along;
+    return std::sqrt(ox * ox + oz * oz);
+}
+
+// Lined up well enough to mount head-on: within `tol` of the centreline. One cell is the useful
+// value — the slab is 2 wide, so half a cell of drift still puts the body on it.
+inline bool rampAligned(Vec3 low, Vec3 high, Vec3 p, f32 tol = 1.0f) {
+    return rampLateralOffset(low, high, p) <= tol;
+}
+
+// Unit XZ heading straight UP the ramp axis (foot -> top).
+inline Vec3 rampUpAxis(Vec3 low, Vec3 high) {
+    Vec3 axis{high.x - low.x, 0.0f, high.z - low.z};
+    const f32 L = std::sqrt(axis.x * axis.x + axis.z * axis.z);
+    if (L < 0.1f) return {0.0f, 0.0f, 0.0f};
+    return Vec3{axis.x / L, 0.0f, axis.z / L};
+}
+
 inline Vec3 rampApproachDir(Vec3 low, Vec3 high, Vec3 p) {
     const f32 ax = high.x - low.x, az = high.z - low.z;
     const f32 L  = std::sqrt(ax * ax + az * az);

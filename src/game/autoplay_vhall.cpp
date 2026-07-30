@@ -126,6 +126,7 @@ static inline u8 botStory(const LevelGrid& g, u32 x, u32 z, f32 feetY) {
     return feetY >= LevelGridSystem::getPlatformTop(g, x, z) - PLATFORM_STEP_TOLERANCE ? 1 : 0;
 }
 
+
 Vec3 vhallDirection(const VHallField& f, const LevelGrid& g, Vec3 pos) {
     if (!f.valid || !f.dir) return {0, 0, 0};
     u32 gx, gz;

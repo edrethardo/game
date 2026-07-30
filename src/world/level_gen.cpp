@@ -1395,6 +1395,47 @@ static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
     result.exitBalconyPos  = { (exitCX  + 0.5f) * cs, 0.0f,            (exitCZ  + 0.5f) * cs };
     result.spawnOnUpper    = true;
 
+    // NO JUMP PAD ON THE EXIT (or the spawn). A pad fires the instant you are grounded on it, so one
+    // overlapping the exit portal flings you off the portal at the exact moment you try to descend —
+    // the floor becomes unusable for a human as much as for the bot, and no amount of routing fixes
+    // it. Both pad sites above are placed BEFORE the endpoints are known (dead-end node pads by
+    // maze topology, return lifts by hole roll), so neither can avoid the exit on its own; this is
+    // the post-pass that reconciles them. VERTICAL_HALL has always done the same thing via clearPad.
+    //
+    // Only the PAD FLAGS are cleared — unlike VHALL's clearPad this must not rewrite the cell, since
+    // on a stacked floor that would destroy the slabs the storeys are made of. Radius 2 (a 5x5) so a
+    // 3x3 pad node cannot overlap the portal's own trigger.
+    {
+        constexpr s32 kNoPadR = 2;
+        auto stripPads = [&](Vec3 p) {
+            u32 gx, gz;
+            if (!LevelGridSystem::worldToGrid(grid, p, gx, gz)) return;
+            for (s32 dz = -kNoPadR; dz <= kNoPadR; dz++)
+                for (s32 dx = -kNoPadR; dx <= kNoPadR; dx++) {
+                    const s32 x = (s32)gx + dx, z = (s32)gz + dz;
+                    if (x < 0 || z < 0 || !LevelGridSystem::isInBounds(grid, (u32)x, (u32)z)) continue;
+                    GridCell& c = LevelGridSystem::getCell(grid, (u32)x, (u32)z);
+                    c.flags     = static_cast<u8>(c.flags & ~CELL_JUMPPAD);
+                    c.jumpPadQ  = 0;
+                }
+        };
+        stripPads(result.exitBalconyPos);
+        stripPads(result.spawnBalconyPos);
+        // Drop the same pads from the recorded list, or StoryNav would route the bot to a lift that
+        // no longer exists (jumpPads[] is what nearestPadGoal steers by).
+        const f32 keepOut = (kNoPadR + 0.5f) * cs;
+        u8 kept = 0;
+        for (u8 i = 0; i < result.jumpPadCount; i++) {
+            const Vec3 jp = result.jumpPads[i];
+            const f32 ex = jp.x - result.exitBalconyPos.x,  ez = jp.z - result.exitBalconyPos.z;
+            const f32 sx = jp.x - result.spawnBalconyPos.x, sz2 = jp.z - result.spawnBalconyPos.z;
+            const bool nearExit  = (ex * ex + ez * ez)   < keepOut * keepOut;
+            const bool nearSpawn = (sx * sx + sz2 * sz2) < keepOut * keepOut;
+            if (!nearExit && !nearSpawn) result.jumpPads[kept++] = jp;
+        }
+        result.jumpPadCount = kept;
+    }
+
     auto roomAt = [&](u32 base, u32 gx, u32 gz) -> s32 {
         for (u32 i = base; i < base + 4 && i < result.roomCount; i++) {
             const DungeonRoom& r = result.rooms[i];

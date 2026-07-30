@@ -705,8 +705,40 @@ void Engine::update(f32 dt) {
                 // Dead player: check for respawn input, skip gameplay. Gamepad JUMP is routed
                 // to this player's controller (setActivePlayer above); keyboard Space counts
                 // only for P0 (L4 — Space is P0's key and must not respawn the controller P2).
+                // AUTOPLAY: press it ourselves. A dead lane never reaches gameUpdate, so the bot
+                // driver is not running for it and cannot hold JUMP through the normal input path
+                // the way it does for everything else. Count the lane's own dead clock here and
+                // synthesise the respawn — matching the SP auto-revive's 1.5 s — so a couch bot
+                // does not lie there forever. Keyed off the same latch the SP revive uses: while a
+                // human holds control the lane waits for a real key.
+                bool botRespawn = false;
+                if (m_autoplayActive) {
+                    // Same rule as the singleplayer death screen: a BOT death revives fast (1.5 s),
+                    // and a death while control reads as human still hands the run back — after 5 s
+                    // — rather than waiting on a keypress forever. A dead lane cannot act, so leaving
+                    // it to a human who may not be there is how half a couch session goes missing.
+                    ap().deadRespawnT += dt;
+                    const f32 wait = m_autoplayControl.botInControl() ? 1.5f : 5.0f;
+                    botRespawn = ap().deadRespawnT >= wait;
+                    // Reviving under a "human" latch means taking control back too, or the lane
+                    // stands at the spawn doing nothing until the latch idles out.
+                    if (botRespawn && !m_autoplayControl.botInControl()) m_autoplayControl.forceBot();
+                } else {
+                    ap().deadRespawnT = 0.0f;
+                }
                 if (Input::isActionPressed(GameAction::JUMP) ||
-                    (sp == 0 && Input::isKeyPressed(SDL_SCANCODE_SPACE)) || deadClickRespawn) {
+                    (sp == 0 && Input::isKeyPressed(SDL_SCANCODE_SPACE)) || deadClickRespawn ||
+                    botRespawn) {
+                    ap().deadRespawnT = 0.0f;
+                    if (botRespawn) {
+                        // Count it. m_autoplayDeaths is the run-wide tally the [TELEM] lines report,
+                        // and this path never touched it — so a couch run that had died 18 times
+                        // still printed deaths=0, which reads as "nothing is happening to them" in
+                        // exactly the logs you go to when a run is stuck.
+                        m_autoplayDeaths++;
+                        LOG_INFO("Autoplay: lane %u REVIVED (couch bot respawn, run deaths=%u)",
+                                 (u32)sp, m_autoplayDeaths);
+                    }
                     // (M4) Enemies are already sent home when the last player dies (the co-op
                     // death path calls resetEnemiesToRooms), so nothing to reset on respawn —
                     // the old allDead computation here was dead code.
@@ -1747,7 +1779,13 @@ void Engine::gameUpdate(f32 dt) {
         // happened while control read as human waits HUMAN_REVIVE_SEC, which is far longer than it
         // takes a real player to click an option but still bounded, so an AFK run can never strand.
         if (m_autoplayActive) {
-            constexpr f32 HUMAN_REVIVE_SEC = 15.0f;
+            // 5 s (Aaron, 2026-07-29; was 15). In AUTOPLAY MODE the bot should take the run back
+            // shortly after any death, including one that happened while control read as human —
+            // being dead is not a state a human is doing anything useful in, and the death screen
+            // frees the cursor, so "control reads as human" is often just a stray pointer event
+            // rather than a player at the keyboard. 5 s is still long enough to click an option
+            // deliberately, and short enough that watching a run never means watching a corpse.
+            constexpr f32 HUMAN_REVIVE_SEC = 5.0f;
             const bool botDeath = m_autoplayControl.botInControl();
             m_autoplayBotDeath     = true;   // latched: the countdown must not re-read botInControl()
             m_autoplayRespawnTimer = botDeath ? 1.5f : HUMAN_REVIVE_SEC;

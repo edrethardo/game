@@ -220,9 +220,14 @@ void Engine::shutdown() {
 
     saveStash();   // no-op unless dirty — last-chance flush for the shared account stash
 
-    Autoplay::freeDescentField(m_autoplayDescent);   // Descent drop-hole flow field (heap scratch)
-    Autoplay::freeRouteField(m_autoplayBossRoute);   // boss goal flow field (heap scratch)
-    Autoplay::freeVHallField(m_autoplayVHall);       // VERTICAL_HALL two-story flow field (heap scratch)
+    // EVERY lane, not just the active one: the nav flow fields are per-lane now (couch co-op gives
+    // each local player its own bot), and each holds a heap allocation. Freeing only ap() would leak
+    // lane 1's three fields on every couch run.
+    for (u8 lane = 0; lane < MAX_LOCAL_PLAYERS; lane++) {
+        Autoplay::freeDescentField(m_apLanes[lane].descent);   // Descent drop-hole flow field
+        Autoplay::freeRouteField  (m_apLanes[lane].bossRoute); // boss goal flow field
+        Autoplay::freeVHallField  (m_apLanes[lane].vHall);     // VERTICAL_HALL two-story flow field
+    }
 
     AudioSystem::shutdown();
     Net::shutdown();

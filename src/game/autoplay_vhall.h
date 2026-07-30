@@ -60,6 +60,7 @@ bool ensureVHallField(VHallField& f, const LevelGrid& g, Vec3 doorPos, u32 stamp
 // (the same rule collision uses), so a bot mid-ramp is treated as upper and routed along the ramp.
 Vec3 vhallDirection(const VHallField& f, const LevelGrid& g, Vec3 pos);
 
+
 // True when the bot's (cell, story) node is the door itself (field code 0xFE) — it has arrived.
 bool atVHallGoal(const VHallField& f, const LevelGrid& g, Vec3 pos);
 

@@ -13,10 +13,15 @@ struct ScreenShake {
     f32 frequency = 25.0f;
     f32 timer     = 0.0f;
 
-    void trigger(f32 newIntensity, f32 duration) {
+    // A shake carries its OWN frequency. The default 25 Hz is a snappy hit-flinch buzz; an
+    // EARTHQUAKE is the opposite — a slow, heavy roll (~7 Hz) with a long tail, and driving one at
+    // 25 Hz just reads as a louder buzz no matter how much intensity you throw at it. Frequency
+    // rides with the winning shake so a quake can't be left buzzing by whatever ran before it.
+    void trigger(f32 newIntensity, f32 duration, f32 newFrequency = 25.0f) {
         if (newIntensity > intensity) {
             intensity = newIntensity;
             decay = newIntensity / duration;
+            frequency = newFrequency;
         }
     }
 

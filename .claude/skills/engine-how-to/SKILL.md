@@ -179,6 +179,13 @@ python3 tools/balance_chart.py out.csv -o out.html   # CSV → one-page HTML cur
 
 ## Pitfalls / Gotchas
 
+- **The BOMBER death blast is XZ-only, on purpose.** `engine_death.cpp`'s suicide explosion (3.5 m,
+  `damage * 3.25`) ignores vertical separation. That is required for FLYING bombers — a Plague Bat
+  hovers 1.5-2.5 m above its target by design, so a 3D distance test would make it whiff the player it
+  just dived at. The accepted cost is that on VERTICAL_HALL / FOUR_STORY a suicider can catch a player
+  through a floor from the storey below. Known and deliberately unfixed (Aaron, 2026-07-29); switching
+  to a 3D test without special-casing flyers would silently disable flying bombers entirely.
+
 - **A multi-story cell has N slabs — a scalar read of it is a phantom.** Anything that inspects
   `CELL_PLATFORM` must loop `platformCount()` and use the INDEXED getters. The single-slab reads
   (highest top, lowest underside) describe a *phantom full-height band* that walls off the legal

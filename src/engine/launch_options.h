@@ -40,6 +40,10 @@ struct LaunchOptions {
 
     u8  slot = 0;                              // 1-20, for Save::LOAD
     PlayerClass cls = PlayerClass::WARRIOR;    // for Save::NEW
+    // Lane 1's class for --autoplay-couch. Defaults to MARKSMAN so the pair is melee + ranged out of
+    // the box: two lanes of the same class exercise one doctrine twice, and the whole point of couch
+    // autoplay is watching two DIFFERENT builds run their own targeting and navigation side by side.
+    PlayerClass cls2 = PlayerClass::MARKSMAN;
     u32 floor = 1;                             // for Save::NEW
     u8  difficulty = 0;                        // for Save::NEW (CONTINUE takes it from the save)
 
@@ -50,6 +54,7 @@ struct LaunchOptions {
     bool town = false;                         // --town: after --load/--new, enter the TOWN hub
     bool arena = false;                        // --arena: after --load/--new, enter the PvP ARENA
     bool arenaCouch = false;                   // --arena-couch: local-versus arena, two fresh lanes
+    bool autoplayCouch = false;                // --autoplay-couch: split-screen, BOTH lanes bot-driven
     bool verticalHall = false;                 // --vhall: force the two-story VERTICAL_HALL layout on non-boss floors (dev)
     bool fourStory   = false;                  // --fourstory: force the four-story FOUR_STORY "Descent" layout on non-boss floors (dev)
     bool lava        = false;                  // --lava: force the molten Hellforge theme on any floor 31-40 (dev)

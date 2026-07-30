@@ -281,36 +281,112 @@ private:
     // 8b navigation backstops (engine_autoplay.cpp). The flow field expresses travel on FLAT floors;
     // the anti-livelock state below catches the two cases it can't: a wedged bot that stops making
     // XZ progress, and the tail of a fight where loot is still being vacuumed.
-    Vec3             m_autoplayLastPos = {0, 0, 0};      // XZ progress anchor for the stuck detector (also the escalating escape's "wedge anchor")
-    f32              m_autoplayNoProgressTimer = 0.0f;   // seconds the bot has sat within 0.5 m of the anchor while travelling; also keys the escape ESCALATION (nudge <6 s, 8-dir >6 s, A* leg >8 s)
-    f32              m_autoplayNudgeTimer = 0.0f;        // >0 = Stage 1 of the escape: steering a lateral ±90/180 unstick nudge
+    static constexpr u32 AIM_VEL_SLOTS = 16;   // == the bot's target-list cap   (declared before AutoplayLane, which sizes arrays with it)
+    // ---- PER-LANE Autoplay state (couch co-op: each local player gets its OWN bot) ----
+    //
+    // updateAutoplay already runs INSIDE the per-lane swap loop (gameUpdate is called once per
+    // local player, with swapInPlayer(sp) having aliased m_localPlayer/m_localPlayerIndex to that
+    // lane). The only thing that made Autoplay lane-0-only was that every one of these members
+    // was shared, so two lanes stomped each other's target, timers, commits and flow fields.
+    //
+    // Split per lane, reached through ap() — which keys off m_localPlayerIndex, the same alias
+    // mechanism the player state itself uses, so no call site needs a lane argument.
+    //
+    // What deliberately stays GLOBAL (outside this struct): m_autoplayActive, the human-takeover
+    // latch + handoff grace (there is one human), the run/floor telemetry timers and death
+    // counters, and the pad-cell cache (floor geometry, identical for both lanes).
+    struct AutoplayLane {
+        // Seconds this lane has been dead while the bot holds control. Split-screen has no GAME_OVER
+        // screen — a dead lane sits in its own branch waiting for a JUMP press, and gameUpdate (which
+        // runs updateAutoplay) is SKIPPED for it, so the bot can never press anything. Without this a
+        // couch bot simply stays dead. Per-lane because each local player dies on its own clock.
+        f32              deadRespawnT = 0.0f;
+        Vec3             lastPos = {0, 0, 0};      // XZ progress anchor for the stuck detector (also the escalating escape's "wedge anchor")
+        f32              noProgressTimer = 0.0f;   // seconds the bot has sat within 0.5 m of the anchor while travelling; also keys the escape ESCALATION (nudge <6 s, 8-dir >6 s, A* leg >8 s)
+        f32              nudgeTimer = 0.0f;        // >0 = Stage 1 of the escape: steering a lateral ±90/180 unstick nudge
+        f32              escapeTimer = 0.0f;       // >0 = driving the committed escape heading below
+        Vec3             escapeDir   = {0, 0, 0};  // committed unit XZ escape heading (Stage 2/3)
+        f32              lootDwell = 0.0f;         // >0 = holding position so the loot vacuum can settle
+        u32              lastTargetCount = 0;      // last tick's hostile count (a >0->0 edge arms the loot dwell)
+        f32              descendPulse = 0.0f;      // seconds continuously wanting to descend; drives the PICKUP release/re-hold pulse (autoplay_nav.h descendPulseHeld)
+        f32              lastEnemyHp    = 0.0f;     // last tick's summed nearby-hostile HP
+        u32              lastEnemyCount = 0;        // last tick's nearby-hostile count (a drop = a kill)
+        f32              breakoffTimer  = 0.0f;     // >0 = forcing a TRAVEL leg to break a stalled (no-damage) in-band fight, so the bot relocates and changes its firing angle
+        bool             exitBull       = false;    // latched: bull to the exit (livelocked on this floor)
+        f32              doorCheckDist  = 0.0f;     // distToDoor at the window's start (rolling checkpoint)
+        f32              exitStallTimer = 0.0f;     // seconds elapsed in the current no-kill window
+        Vec3             slowAnchor{};              // position at the window start
+        f32              slowAnchorT    = 0.0f;     // seconds into the current net-progress window
+        bool             slowNetStuck   = false;    // last window showed < ~2.5 m of NET travel
+        Vec3             wedgeAnchor{};             // position at the observation window start
+        f32              wedgeWinT      = 0.0f;     // seconds into the current window
+        f32              wedgeCmdT      = 0.0f;     // ...of which, seconds with movement commanded
+        f32              wedgeEscT      = 0.0f;     // > 0 while an escape burst overrides the intent
+        u8               wedgeTry       = 0;        // consecutive wedges — escalates the escape angle
+        u32              wedgeCount     = 0;        // escapes fired this floor (telemetry only)
+        bool             flowVetoed     = false;    // this tick: a real heading was vetoed to zero
+        f32              wedgeVetoT     = 0.0f;     // seconds of that within the current window
+        u32              bullDodgeTick  = 0;        // pulses the punch-through dodge past the CD
+        f32              floorCheckDist = 1e9f;     // distToDoor at the long window's start
+        f32              floorStallTimer = 0.0f;    // seconds elapsed in the current long window
+        f32              dodgeCd     = 0.0f;    // s until the next DEFENSIVE roll (doctrine dodgeCooldownSec)
+        f32              gapCloseCd  = 0.0f;    // s until the next gap-closer charge (Autoplay::GAP_CLOSE_COOLDOWN)
+        u32              targetId    = 0;       // BotTarget::id of the hostile being fought (0 = none)
+        f32              targetDwell = 0.0f;    // s on that target; a switch needs Autoplay::TARGET_MIN_DWELL
+        f32              targetBlind = 0.0f;    // s the engaged target has had NO line of sight; under Autoplay::TARGET_LOS_GRACE it is still held (LOS flicker, not a lost target)
+        Vec3             travelDir  = {0, 0, 0}; // committed unit XZ travel heading ({0,0,0} = none)
+        f32              travelHold = 0.0f;      // s left on the commit
+        u32              velId[AIM_VEL_SLOTS]  = {};   // 0 = free slot
+        Vec3             velEma[AIM_VEL_SLOTS] = {};
+        bool             vhClimbing = false;
+        bool             vhOnRamp = false;
+        bool             vhCommit = false;
+        bool             descentCommit = false;
+        u8               blockStreak      = 0;      // perfect blocks landed this streak
+        u8               blockStreakCap   = 3;      // this streak's cap (2 or 3), re-rolled per lapse
+        f32              blockUnreliableT = 0.0f;   // remaining lapse time (>0 = unreliable now)
+        bool             blockSuppress    = false;  // this swing's block is being dropped (a mistime)
+        bool             blockWantPrev    = false;  // decideCombat wanted a block last tick (edge detect)
+        Vec3             shrinePos{};
+        bool             shrineTarget = false;   // a shrine is the current travel detour
+        Autoplay::RouteField bossRoute;
+        bool             sidearmActive   = false;  // a ranged weapon is worn IN PLACE of the melee one
+        u32              sidearmMeleeUid  = 0;      // uid of the stashed melee weapon, to find it for the switch-back
+        f32              sidearmMeleeRange = 0.0f;
+        f32              sidearmDwell     = 0.0f;   // seconds the sidearm has been worn (min-hold, anti-chatter)
+        f32              sidearmCooldown  = 0.0f;   // seconds until another switch is allowed (anti-chatter)
+        Autoplay::DescentField descent;
+        f32 descentStory = 1e9f;
+        Autoplay::VHallField vHall;
+        s8               padGoal  = -1;
+        u32              padGoalTick = 0;   // tick it was picked, so a hopeless goal is released
+        f32              lookBehindTimer = 0.0f; // >0 = mid look-behind, holding the reversed aim
+        f32              lookBehindYaw   = 0.0f; // the reversed yaw captured when the turn armed
+        bool             lookBehindDone  = false;// this stuck episode has already spent its turn
+        f32            throwSeq      = -1.0f;  // >=0: running the synthetic Fire tap
+        f32            throwLeash    = 0.0f;   // s until the bot may throw again
+        f32            reloadThrow   = 0.0f;   // s until the next THROWAWAY reload throw
+        bool           reloadPulse   = false;  // one-tick RELOAD press for the reload throw
+    };
+    AutoplayLane m_apLanes[MAX_LOCAL_PLAYERS];
+    AutoplayLane&       ap()       { return m_apLanes[m_localPlayerIndex < MAX_LOCAL_PLAYERS ? m_localPlayerIndex : 0]; }
+    const AutoplayLane& ap() const { return m_apLanes[m_localPlayerIndex < MAX_LOCAL_PLAYERS ? m_localPlayerIndex : 0]; }
     // Escape Stages 2/3 (engine_autoplay.cpp): when the lateral nudge finds nothing / the bot stays
     // wedged, a committed 8-direction (or short A*) escape heading drives it AWAY from the wedge so an
     // AFK bot can never be found permanently idle. The heading is held for a ~0.5 s window (traverse a
     // cell before re-deciding; also throttles the A* leg to once per window).
-    f32              m_autoplayEscapeTimer = 0.0f;       // >0 = driving the committed escape heading below
-    Vec3             m_autoplayEscapeDir   = {0, 0, 0};  // committed unit XZ escape heading (Stage 2/3)
-    f32              m_autoplayLootDwell = 0.0f;         // >0 = holding position so the loot vacuum can settle
-    u32              m_autoplayLastTargetCount = 0;      // last tick's hostile count (a >0->0 edge arms the loot dwell)
-    f32              m_autoplayDescendPulse = 0.0f;      // seconds continuously wanting to descend; drives the PICKUP release/re-hold pulse (autoplay_nav.h descendPulseHeld)
     // Combat-progress signal for the UNIFIED stuck detector: a fight only counts as progress if the bot
     // is actually dealing damage, so a standoff (firing at an unhittable cover/angle/elevation target,
     // which LOS-to-centre reads as a valid fight) lets the no-progress timer climb instead of suppressing
     // it. Each tick the driver sums the nearby-hostile HP the view already gathered and counts them; a
     // DROP in either (damage dealt / a kill) is combat progress and re-zeros the timer.
-    f32              m_autoplayLastEnemyHp    = 0.0f;     // last tick's summed nearby-hostile HP
-    u32              m_autoplayLastEnemyCount = 0;        // last tick's nearby-hostile count (a drop = a kill)
-    f32              m_autoplayBreakoffTimer  = 0.0f;     // >0 = forcing a TRAVEL leg to break a stalled (no-damage) in-band fight, so the bot relocates and changes its firing angle
     // Exit-progress watchdog — the definitive "always complete the floor" backstop. Independent of the
     // XZ stuck detector (a bot ORBITING the floor moves > 0.5 m/tick, so it never trips "stuck", yet it
     // never approaches the exit either — e.g. a kiting sorcerer swarmed inside its own engage floor that
     // NEVER fires, circling/spiralling at a crawl near the door forever). Evaluated on a rolling ~4 s
     // window: if the bot neither closed > 1 m toward the exit NOR dealt combat damage in the window it is
-    // livelocked — the m_autoplayExitBull latch turns on and Remedy A bulls it to the door (A*-routed,
+    // livelocked — the ap().exitBull latch turns on and Remedy A bulls it to the door (A*-routed,
     // firing through the swarm) and descends. The latch clears the moment it makes progress / descends.
-    bool             m_autoplayExitBull       = false;    // latched: bull to the exit (livelocked on this floor)
-    f32              m_autoplayDoorCheckDist  = 0.0f;     // distToDoor at the window's start (rolling checkpoint)
-    f32              m_autoplayExitStallTimer = 0.0f;     // seconds elapsed in the current no-kill window
     u32              m_autoplayLastFloor      = 0;        // detects a floor change to re-anchor the window
     // SLOW anchor — an oscillation-proof net-progress check for the stuck detector. The per-tick
     // `progressed` test re-anchors on any 0.5 m move, so a bot SLIDING along a wall or ORBITING a spot
@@ -318,9 +394,6 @@ private:
     // engages (measured: a swarmed sorcerer pinned at a wall, z sliding 41<->46 m, 39 m from the door,
     // for minutes). Every ~2.5 s we ask whether the bot actually got anywhere; if not — and it is not
     // dealing damage, so a stationary real fight is exempt — the no-progress timer is allowed to climb.
-    Vec3             m_autoplaySlowAnchor{};              // position at the window start
-    f32              m_autoplaySlowAnchorT    = 0.0f;     // seconds into the current net-progress window
-    bool             m_autoplaySlowNetStuck   = false;    // last window showed < ~2.5 m of NET travel
     // WEDGE ESCAPE (Autoplay::wedge* in autoplay_nav.h). Deliberately independent of BOTH signals
     // above: `progressed` re-anchors on movement the bot never made, and the whole no-progress ladder
     // is zeroed by combat progress — which on a Descent floor (four stories of enemies, target list
@@ -328,54 +401,36 @@ private:
     // ever arms. This asks the one question none of the others do: is the bot COMMANDING movement and
     // failing to move? Measured parks had a valid heading, no veto, no pad, Y pinned to the centimetre
     // and 0.0-0.1 m of travel per 5 s. A wedge is positional, so it is detected positionally.
-    Vec3             m_autoplayWedgeAnchor{};             // position at the observation window start
-    f32              m_autoplayWedgeWinT      = 0.0f;     // seconds into the current window
-    f32              m_autoplayWedgeCmdT      = 0.0f;     // ...of which, seconds with movement commanded
-    f32              m_autoplayWedgeEscT      = 0.0f;     // > 0 while an escape burst overrides the intent
-    u8               m_autoplayWedgeTry       = 0;        // consecutive wedges — escalates the escape angle
-    u32              m_autoplayWedgeCount     = 0;        // escapes fired this floor (telemetry only)
     // BOXED-IN, the same failure with the symptom inverted: the router hands back a real heading and
     // the hazard veto refuses it AND every fan detour, so flowDir is zeroed and the brain commands no
     // movement — which the wedge window above, asking for commanded movement, can never see.
-    bool             m_autoplayFlowVetoed     = false;    // this tick: a real heading was vetoed to zero
-    f32              m_autoplayWedgeVetoT     = 0.0f;     // seconds of that within the current window
     // BULL punch-through. When the committed exit bull is walking a FLAT floor, a swarm can body-block a
     // fragile build and shove it in circles — moving 15 m of churn but never arriving (measured Marksman,
     // distToDoor pinned at 15-27 m). While it walks, the remedy DODGES toward the exit on this pulse
     // counter: i-frames + a ~4 m lunge slide past the bodies. Dying mid-punch is fine (routing OUT is the
     // goal); the engine's own ~1 s dodge cooldown paces the real rolls.
-    u32              m_autoplayBullDodgeTick  = 0;        // pulses the punch-through dodge past the CD
     // FLOOR-STALL watchdog — the long, KILL-AGNOSTIC twin of the window above. That one restarts
     // whenever the bot deals damage, on the reasonable theory that a live fight is worth finishing;
     // on a four-story Descent (~190 entities across four stacked stories) the bot deals damage almost
     // continuously and so it never fired at all. Measured: 50% of ticks firing, 22% walking, the exit
     // watchdog latched 0% of the time, and the bot never left floor 1. This one asks only "have you
     // got closer to the way out lately", and arms a disengage leg when the answer is no.
-    f32              m_autoplayFloorCheckDist = 1e9f;     // distToDoor at the long window's start
-    f32              m_autoplayFloorStallTimer = 0.0f;    // seconds elapsed in the current long window
     // BOT-SIDE DODGE LEASHES. The engine's own dodge cooldown is 1 s — a balance number, not a
     // behaviour one: a bot that rolls every time it is legal reads as constant panicked twitching.
     // The driver holds a multi-second timer per roll KIND (defensive proactive vs offensive
     // gap-closer charge) and reports "may I even ask?" to the pure policy through BotView, so the
     // two are rate-limited independently and neither can chain.
-    f32              m_autoplayDodgeCd     = 0.0f;    // s until the next DEFENSIVE roll (doctrine dodgeCooldownSec)
-    f32              m_autoplayGapCloseCd  = 0.0f;    // s until the next gap-closer charge (Autoplay::GAP_CLOSE_COOLDOWN)
     // TARGET STICKINESS (Autoplay::pickTarget). The bot used to re-pick the nearest LOS hostile every
     // tick, so similar-range enemies made it flip focus constantly and — with the eased aim — never
     // settle its crosshair. The driver owns the MEMORY: the entity identity currently engaged, and
     // how long it has been engaged (the switch dwell). The pure policy only sees a slot index + a
     // boolean, so it stays engine-free and testable.
-    u32              m_autoplayTargetId    = 0;       // BotTarget::id of the hostile being fought (0 = none)
-    f32              m_autoplayTargetDwell = 0.0f;    // s on that target; a switch needs Autoplay::TARGET_MIN_DWELL
-    f32              m_autoplayTargetBlind = 0.0f;    // s the engaged target has had NO line of sight; under Autoplay::TARGET_LOS_GRACE it is still held (LOS flicker, not a lost target)
     // TRAVEL-HEADING COMMIT (aim steadiness). buildBotView re-derives the walk heading from scratch
     // every tick — the flow-field byte plus the ±45/±90 hazard-detour fan — and BOTH halves toggle as
     // the bot drifts across a cell boundary, so merely WALKING swung the desired aim 45-90° several
     // times a second (measured: 8-16 such flips/s). The chosen heading is therefore COMMITTED for a
     // short window and only re-decided when it stops being safe, the route genuinely reverses, or the
     // window expires.
-    Vec3             m_autoplayTravelDir  = {0, 0, 0}; // committed unit XZ travel heading ({0,0,0} = none)
-    f32              m_autoplayTravelHold = 0.0f;      // s left on the commit
     // FOUR_STORY "Descent" DROP-HOLE ROUTE. The way down is a specific hole in this story's slab,
     // usually several maze corridors away — a straight-line heading at it just scrapes walls (see
     // autoplay_nav.h dropHoleCandidates), so the route is A*-planned and then followed waypoint by
@@ -389,23 +444,18 @@ private:
     // against 2.4 deg without, a 10x amplification, at ~11-22 direction reversals per second. That
     // is the "ultra high frequency low amplitude" shake, and it is ranged-only because melee and
     // hitscan aim straight at t.pos. One EMA per tracked target, matched by entity id.
-    static constexpr u32 AIM_VEL_SLOTS = 16;   // == the bot's target-list cap
-    u32              m_autoplayVelId[AIM_VEL_SLOTS]  = {};   // 0 = free slot
-    Vec3             m_autoplayVelEma[AIM_VEL_SLOTS] = {};
     // Set each tick buildBotView routes an UNFINISHED climb (the exit is up and the bot is below it).
     // updateAutoplay reads it to pulse a climb-assist JUMP: the VERTICAL_HALL ramps are narrow 2-wide
     // graduated slabs, and the eased-aim + WASD walk drifts the bot off the strip and slides it back
     // down before it can crest — measured, on some seeds it never got past ~1 m of a 3 m climb. A
     // periodic hop while climbing carries it up over the risers and back onto the slab. Reset false
     // whenever not actively climbing (crossed, descending, or off VERTICAL_HALL).
-    bool             m_autoplayVhClimbing = false;
     // The bot is close enough to the EXIT RAMP segment that the climb-assist hop should fire (set in
     // buildBotView from rampSegDistXZ). The hop must NOT fire during the flat approach: pulsing a jump
     // while walking the void ground bunny-hops the bot across it (airborne half the time), which under
     // the airborne fall-veto carve-out means it never settles onto a void pad to be launched and crawls
     // to the ramp foot ("bunnyhopping while approaching the pad doesn't work"). Gated to ~3.5 m of the
     // ramp, the bot WALKS grounded to the foot / onto the pad and only pogos up the narrow riser slab.
-    bool             m_autoplayVhOnRamp = false;
     // VHALL COMMIT latch. On a VERTICAL_HALL upper-exit floor the bot climbs to the balcony story but
     // then FIGHTS the balcony swarm in place (kite/strafe, never walking to the door) and falls back off
     // the rim — the "climb-roam" that dominated the deep-floor stalls (measured: 5 of 6 genuine stalls in
@@ -414,7 +464,6 @@ private:
     // floor-stall watchdog (20 s of no exit approach) and, once set, commits the bot to the VHallField
     // route to the door — aim + walk it, fire on the way, force the climb-assist jump, fall-vetoed —
     // until it descends (the floor-change reset clears it).
-    bool             m_autoplayVhCommit = false;
     // FOUR_STORY DESCENT COMMIT latch — the Descent twin of the VHALL commit. On a dense Descent floor
     // the bot stands in the swarm and FIGHTS instead of walking to a drop hole (measured: geared paladin
     // with 16 targets in range, all four WASD zero, never descending — "too dumb to drop again" after a
@@ -422,58 +471,41 @@ private:
     // the floor-stall watchdog latches this instead. Once set it commits the bot to the descent field
     // heading — KEEP the brain's combat (aim/fire/dodge/block/skill), only override the WASD feet toward
     // the next hole (the door on L0), so it FIGHTS ITS WAY DOWN — until it leaves the floor (the
-    // floor-change reset clears it). Layout-exclusive with m_autoplayVhCommit.
-    bool             m_autoplayDescentCommit = false;
+    // floor-change reset clears it). Layout-exclusive with ap().vhCommit.
     // PERFECT-BLOCK PACING (constants in autoplay_combat.h). The bot perfect-blocked EVERY swing, which
     // reads as a machine ("too good at perfect blocking"). It now lands a STREAK of perfect blocks (up
-    // to m_autoplayBlockStreakCap, rolled 2-3), then falls into an "unreliable" LAPSE for
+    // to ap().blockStreakCap, rolled 2-3), then falls into an "unreliable" LAPSE for
     // BLOCK_UNRELIABLE_SEC where only BLOCK_UNRELIABLE_PCT of swings land (the rest mistimed/eaten),
     // then is sharp again — so it plays WELL without being superhuman. The suppress latch holds one
     // decision per swing (a raise want spans ~9 ticks); wantPrev detects the fresh-swing edge.
-    u8               m_autoplayBlockStreak      = 0;      // perfect blocks landed this streak
-    u8               m_autoplayBlockStreakCap   = 3;      // this streak's cap (2 or 3), re-rolled per lapse
-    f32              m_autoplayBlockUnreliableT = 0.0f;   // remaining lapse time (>0 = unreliable now)
-    bool             m_autoplayBlockSuppress    = false;  // this swing's block is being dropped (a mistime)
-    bool             m_autoplayBlockWantPrev    = false;  // decideCombat wanted a block last tick (edge detect)
     // SHRINE detour (Autoplay). A shrine is a free buff sitting in the level; the bot grabs it on the
     // way. buildBotView finds the nearest active shrine within a small detour radius and steers travel
     // onto it; updateAutoplay stops and holds interact to activate it. Recomputed every tick, so no
     // stale state. Flat non-boss floors only (stacked/lava/boss routing is special).
-    Vec3             m_autoplayShrinePos{};
-    bool             m_autoplayShrineTarget = false;   // a shrine is the current travel detour
     // BOSS ROUTE (Autoplay). A general wall-aware BFS flow field seeded from the boss (autoplay_route.h)
     // — the conceptual fix for "the bot walks into a wall trying to reach the boss": a straight bearing
     // can't route around a wall, this field routes the whole way, unbounded and cell-centre-steered. It
     // rebuilds when the boss changes cell (a moving target), like the exit/descent/vhall fields. Freed
     // in Engine::shutdown.
-    Autoplay::RouteField m_autoplayBossRoute;
     // MELEE RANGED SIDEARM (Autoplay, VERTICAL_HALL upper-exit only). A melee build cannot hit an
     // enemy that is only reachable by falling off its balcony, so it temporarily equips the best
     // ranged weapon from its backpack (BuildScore::bestRangedBackpackIdx) and fires from where it
     // stands, switching back to melee when the situation clears. All transient — no save/PROTOCOL
     // change. See Engine::updateSidearm.
-    bool             m_autoplaySidearmActive   = false;  // a ranged weapon is worn IN PLACE of the melee one
-    u32              m_autoplaySidearmMeleeUid  = 0;      // uid of the stashed melee weapon, to find it for the switch-back
     // The stashed melee weapon's engagement reach, captured at draw time. While the sidearm is worn
     // the view reports the RANGED weapon's numbers (that is the point of the override), so the
     // trigger has to keep judging "could melee reach this?" with THESE numbers or it clears itself
     // the instant the sidearm is drawn (see updateSidearm).
-    f32              m_autoplaySidearmMeleeRange = 0.0f;
-    f32              m_autoplaySidearmDwell     = 0.0f;   // seconds the sidearm has been worn (min-hold, anti-chatter)
-    f32              m_autoplaySidearmCooldown  = 0.0f;   // seconds until another switch is allowed (anti-chatter)
     u8               m_autoplaySidearmNoWeaponLog = 0;    // rate-limits the "wanted a sidearm, bag had none" line
     // FOUR_STORY "Descent" travel field: a BFS toward this story's ways down (autoplay_descent.h).
     // Rebuilt only when the bot changes story or floor, so it costs one ~2k-cell BFS three times a
     // floor. Freed in Engine::shutdown.
-    Autoplay::DescentField m_autoplayDescent;
     // The COMMITTED storey the descent field is built for, held with hysteresis (Autoplay::commitBotStory)
     // so a knife-edge storey flicker at a drop-hole lip can't thrash the field and freeze the bot. 1e9f
     // = "no storey yet", reset per floor in enterAutoplayRun so a new floor re-adopts its spawn storey.
-    f32 m_autoplayDescentStory = 1e9f;
     // VERTICAL_HALL two-story travel field: a BFS over (cell, story) nodes from the exit door
     // (autoplay_vhall.h). Replaces the old flat-field-plus-ramp-heuristics — the bot follows this
     // field ground->ramp->balcony->door and can never be routed off an edge. Rebuilt per floor.
-    Autoplay::VHallField m_autoplayVHall;
     // JUMP-PAD cells cached per floor. VHALL's void pads are CELL_JUMPPAD geometry but are deliberately
     // NOT recorded in DungeonResult::jumpPads[] (so enemies use ramps), which left them invisible to the
     // bot — it only ever climbed the ramp and never used the pad. Cached (cluster centres, deduped) so
@@ -482,13 +514,16 @@ private:
     Vec3             m_autoplayPadCells[8];
     u8               m_autoplayPadCount = 0;
     u32              m_autoplayPadFloor = 0xFFFFFFFFu;
+    // COMMITTED pad goal for a VHALL climb (-1 = none). The pad is the RELIABLE way up a two-story
+    // floor — one launch clears the storey — while the 2-wide graduated ramp is the flaky part of the
+    // climb, so on an upper-exit floor the bot goes for a pad FIRST and only falls back to the ramp
+    // when none is reachable. Committed rather than re-picked per tick for the same reason the ramp
+    // crossing is: a goal that flips between two pads walks the bot back and forth between them.
+                                                  // (buildBotView has no dt — ticks, not seconds)
     // LOOK BEHIND (autoplay_nav.h LOOK_BEHIND_*). A wedged bot turns around once per stuck episode to
     // un-watch whatever it is facing, which is the only thing that can spring a dormant gargoyle
     // (weeping-angel wake rule) — and a dormant gargoyle is an unkillable solid body, so staring at
     // one is a permanent wedge. One-shot: the latch re-arms only after real progress.
-    f32              m_autoplayLookBehindTimer = 0.0f; // >0 = mid look-behind, holding the reversed aim
-    f32              m_autoplayLookBehindYaw   = 0.0f; // the reversed yaw captured when the turn armed
-    bool             m_autoplayLookBehindDone  = false;// this stuck episode has already spent its turn
     // Free-Play auto-confirm. Taking the town portal as a CLEARED hero opens the level select and
     // moves the game to GameState::MENU — where the Autoplay driver does not tick at all — so an
     // unattended run would end its life on that screen. This counts DOWN while the select is up and
@@ -526,16 +561,18 @@ private:
     f32            m_weaponThrowCd[MAX_LOCAL_PLAYERS]   = {};  // seconds until the throw is ready again
     // Autoplay: the bot throws its melee weapon at RANGED enemies now and then, and (with a THROWAWAY
     // legendary) hurls the gun on a reload at clip-1 for the near-max-damage version. Both are driven
-    // through the REAL buttons — the throw needs a synthetic short TAP of Fire (m_autoplayThrowSeq is
+    // through the REAL buttons — the throw needs a synthetic short TAP of Fire (ap().throwSeq is
     // that tap's phase timer, <0 = idle), the reload throw a one-tick RELOAD pulse. The two leashes
     // keep both "occasional" so they read as flourishes, not spam.
-    f32            m_autoplayThrowSeq      = -1.0f;  // >=0: running the synthetic Fire tap
-    f32            m_autoplayThrowLeash    = 0.0f;   // s until the bot may throw again
-    f32            m_autoplayReloadThrow   = 0.0f;   // s until the next THROWAWAY reload throw
-    bool           m_autoplayReloadPulse   = false;  // one-tick RELOAD press for the reload throw
     f32            m_fireHeldTime[MAX_LOCAL_PLAYERS]    = {};  // seconds Fire held this press (tap vs hold)
     bool           m_fireWasDown[MAX_LOCAL_PLAYERS]     = {};  // Fire held last tick, per lane
-    bool           m_pendingThrowEdge                   = false; // CLIENT: throw committed this tick
+    // PER LANE, not a single flag. clientNetPre consumes this INSIDE its per-lane loop, while
+    // handleWeaponFire sets it later in the same frame (net-pre -> gameplay -> net-post) — so with a
+    // single bool the FIRST lane sent next frame swallowed whichever lane had latched. In online
+    // couch co-op that credited P2's throw to P1 (the same shape as the v17 pickup bug), and two
+    // throws in one frame lost one of them. Single-player clients were unaffected, which is why it
+    // did not show in testing.
+    bool           m_pendingThrowEdge[MAX_LOCAL_PLAYERS] = {}; // CLIENT: throw committed this tick, per lane
 
     // Active-player aliases (gameUpdate reads/writes these, swapped per player)
     PlayerClass m_playerClass = PlayerClass::WARRIOR;

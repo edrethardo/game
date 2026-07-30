@@ -952,6 +952,57 @@ the same 0.4 m as a knife or molotov (a hurled claymore rendered dart-sized); de
 already-replicated `meshId` via a mask built once at asset-resolve time, so it is client-side with **no
 wire change**.
 
+**COUCH CO-OP AUTOPLAY — every local lane gets its OWN bot (2026-07-29).** Autoplay was
+singleplayer/lane-0-only because ALL of its ~84 state members were single-instance, even though
+`updateAutoplay` already ran inside the per-lane swap loop — two lanes simply stomped each other's
+target, timers, commits and flow fields. 66 of them now live in an `Engine::AutoplayLane` struct
+reached through `ap()`, which keys off `m_localPlayerIndex` (the same alias mechanism the player
+state uses), so no call site needed a lane argument. What deliberately stays GLOBAL: `m_autoplayActive`,
+the human-takeover latch + handoff grace (there is one human), the run/floor telemetry, and the
+pad-cell cache (floor geometry, identical for both lanes). Three couch-specific traps came with it,
+each a real bug: the three heap nav fields are per-lane so **shutdown must free EVERY lane** (freeing
+only `ap()` leaks lane 1's on every couch run); `enterAutoplayRun` seeds each lane's gear brain and
+build cell from **that lane's own class** (seeding lane 1 from lane 0 is the Sorcerer-with-a-sword bug
+one lane over); and the melee-throw wire latch `m_pendingThrowEdge` had to become **per-lane** —
+`clientNetPre` consumes it inside its per-lane loop while `handleWeaponFire` sets it later in the same
+frame, so a single bool meant the first lane sent next frame swallowed whichever lane latched, i.e.
+**online couch P2's throw was credited to P1** (the v17 pickup bug's exact shape) and two throws in one
+frame lost one. Split-screen also has **no GAME_OVER screen** — a dead lane sits in its own branch
+waiting for a JUMP press with `gameUpdate` SKIPPED, so the bot is not running for it and can never
+press anything; the per-lane dead clock synthesises the respawn (1.5 s bot / 5 s if control reads as
+human, then `forceBot`). Dev door `--autoplay-couch [class]` (lane 1 defaults to Marksman so the pair
+is melee + ranged); the menu's Autoplay row now also arms on the "Start Local Co-op" and
+"Host online together" branches, which previously armed nothing at all.
+
+**The VHALL "stuck on the stairs" stall was a KNIFE-EDGE, and it cost four wrong fixes to find
+(2026-07-29).** Bots pinned at `y = 2.49-2.50` against a 3.0 m balcony — moving, valid route,
+distance-to-door frozen, for entire floors. The chain: a ramp's final step onto the balcony is ~0.5 m
+and `STEP_UP_HEIGHT` is 0.4 m, so that step is **unwalkable by construction** and a hop is the only way
+up; the hop is gated on `vhClimbing`, which was set by `pos.y < floorDoorPos.y - 0.5f` — a margin
+exactly equal to the riser, so the flag switched off at precisely the height the bot got stuck at.
+Fixed by shrinking the margin to 0.1 m. Two stale gates on the same hop had to go with it: an absolute
+`pos.y < 1.5f` (obsoleted by `vhOnRamp`, which is what actually stops bunny-hopping the flat approach)
+and a duty cycle of 4-in-72 ticks, far too thin on the final riser where the bot is grounded ~half the
+time and combat owns most ticks — it now pulses 4-in-8 within one riser of the exit storey and stays
+slow everywhere else. Measured: runs with ZERO VHALL stalls 1/8 -> **7/8**, max floor 7 -> 14.
+**Two earlier fixes in the same area were mine and were wrong-but-instructive:** a "stage at the ramp
+foot" pass drove a STRAIGHT LINE at the staging point, which is not wall-aware and near a ramp passes
+UNDER the slab (refused by the under-slab pinch veto) — alignment is now a lateral correction blended
+onto the field's route instead; and the fall veto's resultant check cleared ALL FOUR components on
+failure, which froze bots solid on a balcony whose route crosses a catwalk (72% of stall samples had
+`mv=0`). The veto now restores the field's step when it would otherwise zero every direction — the
+two-story field cannot route off an edge, so when it and the 1-cell lookahead disagree, the lookahead
+is wrong. And `wouldFall` treats **a slab ABOVE the feet as a climb, never a drop** (`effectiveFloorHeight`
+returns the ground for anything past the 0.4 m step window, which made a 0.5 m riser read as a 2.5 m fall).
+
+**A stalled floor now explains itself.** `[STALL]` (`engine_autoplay.cpp`, shipped ON, no env gate)
+fires every 15 s once a single floor has run over 5 minutes, reporting route / commanded movement /
+grounded / height vs exit height / distance-to-door / target count / fire / no-progress timer / layout
+style. It is cheap because it is rare, and it exists because the last several stalls each cost a
+rebuild-with-a-tracer and a half-hour re-run to diagnose — the knife-edge above had been sitting in the
+logs as `y=2.50 exitY=3.0` since the first trace of the day and only became chaseable once every stuck
+floor printed it automatically.
+
 **The AFK revive could STRAND a run on the death screen — the real "autoplay gets stuck" (measured
 2026-07-28).** An 8-run back-to-back Descent stress test had **6 of 8 runs go completely silent for
 128-271 s** — no FPS line, no bot telemetry — which reads exactly like a frozen bot. It was not a

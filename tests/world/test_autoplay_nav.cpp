@@ -616,3 +616,73 @@ TEST_CASE("Autoplay: unpinDirection walks a trapped body out from under a low sl
 
     LevelGridSystem::shutdown(g);
 }
+
+// --- RAMP STAGING ------------------------------------------------------------------------------
+// A VHALL ramp is a 2-wide graduated slab. Meeting it side-on presses the body against a riser it
+// cannot step over, so it scrapes along the edge and never mounts — Aaron: "vhall loves to hug the
+// stairs". The climb has to be two phases: walk to a point IN LINE with the ramp behind its foot,
+// then go straight up the axis.
+TEST_CASE("Autoplay: ramp staging squares the bot up before it mounts") {
+    // A ramp running along +X, foot at x=10, top at x=20 (3 m up).
+    const Vec3 low {10.0f, 0.0f, 5.0f};
+    const Vec3 high{20.0f, 3.0f, 5.0f};
+
+    // The staging point is BEHIND the foot, on the axis — never off to one side.
+    const Vec3 stage = Autoplay::rampFootApproach(low, high, 2.5f);
+    CHECK(stage.x == doctest::Approx(7.5f));      // 2.5 m back down the axis
+    CHECK(stage.z == doctest::Approx(5.0f));      // dead on the centreline
+    CHECK(Autoplay::rampLateralOffset(low, high, stage) == doctest::Approx(0.0f));
+
+    // A bot approaching from the SIDE is not aligned — it must stage first, or it hugs the slab.
+    const Vec3 fromSide{12.0f, 0.0f, 11.0f};      // 6 m off the centreline, beside the ramp
+    CHECK(Autoplay::rampLateralOffset(low, high, fromSide) == doctest::Approx(6.0f));
+    CHECK_FALSE(Autoplay::rampAligned(low, high, fromSide));
+
+    // A bot on the line (even well behind the foot) IS aligned and may drive up.
+    CHECK(Autoplay::rampAligned(low, high, Vec3{4.0f, 0.0f, 5.0f}));
+    // ...and half a cell of drift is still fine: the slab is 2 wide.
+    CHECK(Autoplay::rampAligned(low, high, Vec3{9.0f, 0.0f, 5.5f}));
+
+    // The climb heading points foot -> top, so phase 2 is a straight walk up.
+    const Vec3 up = Autoplay::rampUpAxis(low, high);
+    CHECK(up.x == doctest::Approx(1.0f));
+    CHECK(up.z == doctest::Approx(0.0f));
+
+    // Degenerate ramp (no run) must not produce a NaN heading.
+    CHECK(lengthSq(Autoplay::rampUpAxis(low, low)) == doctest::Approx(0.0f));
+}
+
+// A slab ABOVE the body is something to climb onto — never a fall. effectiveFloorHeight only returns
+// a slab top within PLATFORM_STEP_TOLERANCE (0.4 m) and reports the ground beneath for anything
+// higher, so a VHALL ramp's final ~0.5 m riser onto the balcony read as a full-height DROP and the
+// fall veto refused the last step of every climb (measured: bots bouncing at y 2.4-2.9 against a
+// 3.0 m balcony with distance-to-door frozen for the whole floor).
+TEST_CASE("Autoplay fall veto: a higher slab is a climb, not a drop") {
+    LevelGrid g{};
+    LevelGridSystem::init(g, 8, 8, 1.0f);
+    for (u32 z = 0; z < 8; z++)
+        for (u32 x = 0; x < 8; x++) {
+            GridCell& c = g.cells[z * 8 + x];
+            c.flags = (x == 0 || z == 0 || x == 7 || z == 7) ? CELL_SOLID : (CELL_FLOOR | CELL_CEILING);
+            c.floorHeight = 0; c.ceilingHeight = 20;
+        }
+    // The balcony at (4,3): slab top 3.0 m — the destination of the last ramp step.
+    GridCell& balcony = g.cells[3 * 8 + 4];
+    balcony.flags |= CELL_PLATFORM; balcony.platCount = 1; balcony.platHeight[0] = 12;
+
+    const Vec3 onRamp{4.5f, 0.0f, 4.5f};          // one cell south of the balcony
+    const Vec3 toBalcony{0.0f, 0.0f, -1.0f};      // step toward it (-Z)
+
+    // Feet at 2.49 m: the 3.0 m slab is 0.51 m up — OUTSIDE the 0.4 m step window, which is exactly
+    // the case that used to report a drop to the ground story.
+    CHECK_FALSE(Autoplay::wouldFall(g, onRamp, 2.49f, toBalcony));
+    // Well below it is still a climb, not a fall.
+    CHECK_FALSE(Autoplay::wouldFall(g, onRamp, 0.0f, toBalcony));
+    // Standing ON the balcony, stepping OFF it onto open ground IS a real fall — still vetoed.
+    const Vec3 onBalcony{4.5f, 3.0f, 3.5f};
+    CHECK(Autoplay::wouldFall(g, onBalcony, 3.0f, Vec3{0.0f, 0.0f, 1.0f}));
+    // Flat ground to flat ground is never a fall.
+    CHECK_FALSE(Autoplay::wouldFall(g, Vec3{2.5f, 0.0f, 4.5f}, 0.0f, Vec3{1.0f, 0.0f, 0.0f}));
+
+    LevelGridSystem::shutdown(g);
+}
