@@ -73,6 +73,8 @@
 #include "world/pathfinder.h"     // Pathfinder::findPath — Stage-3 escape's short A* leg toward the exit
 #include "game/autoplay_nav.h"    // Autoplay::stepAllowed / escapeHeading — the travel hazard veto + 8-dir escape
 #include "game/autoplay_combat.h" // Autoplay::dirToAim / doctrineFor — nudge heading + in-band fight test
+#include <cstdlib>              // getenv/atof — AUTOPLAY_STALL_SEC, the stall-autopsy threshold override
+
 #include "game/weapon_throw.h"    // WeaponThrow::botShouldThrow / botTap* — the bot's weapon-throw tap
 #include "game/combat.h"          // Combat::engineShieldActive — mirror the damage-immune (invulnerable) checks
 #include "game/item.h"            // GLOBE_HEALTH_ID / m_worldItems — low-hp globe detours
@@ -238,7 +240,14 @@ void Engine::updateAutoplay(f32 dt) {
     // so a soak is a balance dataset: how long each floor took, deaths/kills on it, and the player's
     // power (HP / sustained weapon DPS / gear score) against the effective floor (raw + difficulty*50).
     {
-        m_autoplayRunTime += dt; m_autoplayFloorTime += dt; m_autoplayHbTimer += dt;
+        // WALL-CLOCK ACCUMULATORS ARE GLOBAL, BUT updateAutoplay RUNS ONCE PER LOCAL LANE.
+        // In couch co-op that made every duration in the telemetry advance at 2x real time: a 3 h
+        // soak reported elapsed=21525 s, the "30 s" heartbeat fired every 15 s, per-floor dwell read
+        // double, and the STALL autopsy's 5-minute gate tripped after 2.5 real minutes. The counters
+        // are deliberately shared (one run, one floor, one clock — see the couch state split in
+        // engine.h), so the fix is to advance them exactly once per FRAME rather than per lane.
+        // Everything downstream (the [TELEM]/[TELEM-HB] lines, the stall gate) is then in real seconds.
+        if (m_localPlayerIndex == 0) { m_autoplayRunTime += dt; m_autoplayFloorTime += dt; m_autoplayHbTimer += dt; }
         const char* cls = kClassDefs[static_cast<u32>(m_playerClass)].name;
         auto weaponDps = [&]() -> f32 {
             const WeaponDef w = Inventory::getEffectiveWeapon(m_inventories[0], m_itemDefs, m_weaponDefs[0]);
@@ -311,6 +320,11 @@ void Engine::updateAutoplay(f32 dt) {
     //     behind us) — a 45/90° disagreement is exactly the boundary toggle we are damping, so that
     //     one deliberately does NOT release,
     //   * the window expired, or there is no heading at all (at the exit / off-field).
+    // Bypassed wholesale while the VHALL follower owns travel: the NODE latch is the anti-toggle
+    // (a stable point target, not a held direction), and a 0.4 s stale-heading replay across a rim
+    // is this commit's own documented residual failure ("climbs then drops"). Everything else keeps
+    // the commit unchanged.
+    if (m_level.layoutStyle != LevelGen::LayoutStyle::VERTICAL_HALL)
     {
         constexpr f32 kTravelCommitSec = 0.40f;   // ~2.4 m at walking speed: a cell or two
         constexpr f32 kRouteReversed   = -0.5f;   // dot < this = more than 120° apart
@@ -339,53 +353,6 @@ void Engine::updateAutoplay(f32 dt) {
     // here and re-assert it after the remedies so a COMMITTED shove to the door (which now persists
     // through a swarm) can never march the bot to its death holding a potion it never drank.
     const bool decidedPotion = in.potion;
-
-    // CLIMB-ASSIST JUMP (VERTICAL_HALL up-ramps). buildBotView flags an unfinished climb; the ramps
-    // are narrow 2-wide graduated slabs and the eased-aim walk drifts the bot off the strip and
-    // slides it back before it crests (measured: on some seeds it never passed ~1 m of a 3 m climb).
-    // A steady hop carries it up over the risers. Only pulse while the brain is actually TRAVELLING
-    // (a fight or a potion this tick owns the body — never fight the player's own re-gear), and let
-    // applyBotIntent gate the jump on being grounded. The cadence is a deterministic tick window
-    // (~1.2 s period, a 4-tick pulse) — no rand, so it stays replay-safe like the rest of the bot.
-    // Only pulse in the LOWER part of the climb — the mount is where the risers defeat a plain walk;
-    // higher up the bot has the slab under it and a jump there is as likely to bounce it off the
-    // narrow strip as help. `m_localPlayer.position.y < 1.5` is roughly the lower half of a 3 m ramp.
-    // The !in.fire gate was WRONG for the swarm case it most needs to handle: on a VHALL upper-exit
-    // floor a balcony/ramp-foot swarm makes the bot FIRE every tick, which suppressed the climb hop
-    // entirely — so a fighting bot could never crest the ramp and roamed the floor forever (measured: 5
-    // of 6 deep-floor stalls in a 9-seed benchmark). Allow the hop while firing on VHALL upper-exit; the
-    // ~1.2 s cadence keeps it from being a constant bounce, and applyBotIntent still gates it on grounded.
-    // AND require the bot to be at the ramp (ap().vhOnRamp): the pos.y gate alone is true across the
-    // whole flat void (ground pos.y≈0 < 1.5), so without this the bot bunny-hops the entire approach.
-    // Gate on "still below the exit storey", NOT on an absolute 1.5 m.
-    //
-    // The old `position.y < 1.5f` dated from when this hop had no other gate and fired across the
-    // whole flat void (the bunny-hop-the-approach bug). `vhOnRamp` — added later — is what actually
-    // stops that, and it does it properly: the hop only fires on a ramp slab. The height clause was
-    // left in place and became actively harmful, because it switches the hop OFF over the upper half
-    // of every ramp.
-    //
-    // That is fatal on the last riser. A ramp's final step onto the balcony is ~0.5 m and
-    // STEP_UP_HEIGHT is 0.4 m, so walking CANNOT make it — a hop is the only way up. Measured, twice:
-    // bots pinned at y = 2.49-2.50 against a 3.0 m balcony, moving, with a valid heading and
-    // distance-to-door frozen for the whole floor. Both times it looked like a routing failure and
-    // both times the route was fine; the bot simply could not perform the last step.
-    const bool vhClimbHop = ap().vhClimbing && ap().vhOnRamp &&
-                            m_localPlayer.position.y < m_level.floorDoorPos.y - 0.2f &&
-                            !in.potion && !in.descend &&
-                            (vhallUpperExit || !in.fire);
-    if (vhClimbHop) {
-        // The pulse is deliberately slow (4 ticks in 72, ~5%) so a climb reads as walking up a ramp
-        // rather than bunny-hopping it. But on the FINAL riser that duty cycle is far too thin: the
-        // step is unwalkable (0.5 m vs STEP_UP_HEIGHT 0.4) so a hop is the ONLY way up, the bot is
-        // grounded only about half the time on a slab, and on a dense floor combat owns most ticks —
-        // so the few pulses that land on a grounded frame can be minutes apart. Within one riser of
-        // the exit storey, pulse hard: there is nothing left to climb after this step, so a rapid hop
-        // there costs no readability and is the difference between cresting and standing at 2.50 m.
-        const bool lastRiser = m_localPlayer.position.y > m_level.floorDoorPos.y - 0.75f;
-        const u32 phase = currentLocalTick() % (lastRiser ? 8u : 72u);
-        if (phase < 4) in.jump = true;
-    }
 
     // TARGET STICKINESS bookkeeping. Re-run the (pure, cheap — a scan of <= 16 slots) pick with the
     // same view the brain just used, so the driver learns WHICH hostile was engaged and can carry
@@ -538,6 +505,7 @@ void Engine::updateAutoplay(f32 dt) {
         ap().slowNetStuck    = false;
         ap().vhCommit        = false;                    // the climb is done once we've descended
         ap().descentCommit   = false;                    // ...and so is the Descent push
+        ap().vhFollow        = Autoplay::VHallFollow{};  // node commitments don't survive the teleport
         ap().wedgeAnchor     = m_localPlayer.position;   // a floor change teleports the body: without
         ap().wedgeWinT       = 0.0f;                     // re-anchoring, the first window after it
         ap().wedgeCmdT       = 0.0f;                     // measures a huge phantom "travel" and the
@@ -675,8 +643,14 @@ void Engine::updateAutoplay(f32 dt) {
     // measurement says it cost exactly what the comment there predicts: on a stalled VHALL floor the
     // no-progress timer climbed to 45 s (the ladder's threshold is 4 s) and the ladder never fired,
     // because the commit sits above it in this chain and swallowed every tick.
+    // Which producer ends up owning the intent — reset each tick, stamped by whichever branch of the
+    // remedy chain below wins. Reported by the STALL autopsy: a stalled bot looks identical whether
+    // the brain, a latched commit or the escape ladder is driving, and knowing which one is the
+    // difference between "the rescue never fired" and "the rescue fired and did not work".
+    ap().remedy = "brain";
     if (ap().vhCommit && vhallUpperExit &&
         (lengthSq(v.flowDir) > 1e-6f || v.distToDoor <= 1.5f)) {
+        ap().remedy = "vh-commit";
         // VHALL COMMIT (armed by the floor-stall watchdog; see engine.h). The bot climbed to the balcony
         // story but kept FIGHTING the swarm in place — kite/strafe, never walking to the door — and fell
         // back off the rim (measured: pos.y cycling 3<->0, d2d never closing).
@@ -703,14 +677,6 @@ void Engine::updateAutoplay(f32 dt) {
             in.moveRight = !stop && dr >  kAxis;             //  the WASD feet are overridden toward the exit)
             in.moveLeft  = !stop && dr < -kAxis;
             in.descend   = true;
-            // FAST jump pulse while climbing (edge every ~8 ticks): the bot spends most of a failed ramp
-            // mount AIRBORNE (bouncing off a riser), grounded for only a tick at a time, so a slow ~1.2 s
-            // pulse almost never lands on a grounded frame. A fast pulse catches those frames — one jump
-            // from the base clears the ~0.7 m riser. applyBotIntent gates it on grounded, so it can't
-            // double-jump. Gated on ap().vhOnRamp so the commit WALKS the flat approach (and settles
-            // onto a void pad to be launched) instead of bunny-hopping across it.
-            const bool climbing = m_localPlayer.position.y < m_level.floorDoorPos.y - 0.5f;
-            if (climbing && ap().vhOnRamp && (currentLocalTick() % 8u) < 4u) in.jump = true;
         }
     // A LATCHED COMMIT WITH NOTHING TO DO MUST NOT SHADOW THE ESCAPE LADDER. The commit sits above the
     // escape ladder in this else-if chain and is held for the rest of the floor, so once it latched it
@@ -722,6 +688,7 @@ void Engine::updateAutoplay(f32 dt) {
     // its own 8-direction search and digs the bot out.
     } else if (ap().descentCommit && m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY &&
                (lengthSq(v.flowDir) > 1e-6f || v.distToDoor < Autoplay::DESCEND_STOP_M)) {
+        ap().remedy = "descent-cmt";
         // FOUR_STORY DESCEND COMMIT (armed by the floor-stall watchdog; see engine.h). The bot was
         // standing in the swarm firing instead of descending. Same shape as the VHALL commit: KEEP the
         // brain's combat this tick (aim / fire / dodge / block / class skills / potion) and only OVERRIDE
@@ -749,10 +716,12 @@ void Engine::updateAutoplay(f32 dt) {
             in.moveRight = dr > kAxis; in.moveLeft = dr < -kAxis;
         }
     } else if (atDoor && v.distToDoor < Autoplay::DESCEND_STOP_M) {
+        ap().remedy = "descend";
         in = Autoplay::BotIntent{};
         in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
         in.descend = true;
     } else if (atDoor && v.distToDoor < 2.5f && ap().noProgressTimer < 8.0f) {
+        ap().remedy = "door-walk";
         in = Autoplay::BotIntent{};
         in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
         const Vec3 h{m_level.floorDoorPos.x - m_localPlayer.position.x, 0.0f,
@@ -763,6 +732,7 @@ void Engine::updateAutoplay(f32 dt) {
         }
         in.descend = true;
     } else if (stuck || ap().nudgeTimer > 0.0f || ap().escapeTimer > 0.0f) {
+        ap().remedy = "escape";
         // Remedy B — wedged on geometry: an ESCALATING escape so an AFK bot is NEVER found permanently
         // idle. The longer the bot makes no XZ progress (ap().noProgressTimer keeps climbing while
         // wedged), the more aggressive the escape:
@@ -872,6 +842,7 @@ void Engine::updateAutoplay(f32 dt) {
             in.jump = Autoplay::kitingJumpTick(v.tick);
         }
     } else if (ap().exitBull && v.doorActive && !bossGate) {
+        ap().remedy = "bull";
         // Remedy B2 — EXIT BULL (the exit-progress watchdog latched): the bot is MOVING but getting
         // nowhere useful — orbiting/spiralling the floor, or kited off the exit by a swarm it refuses to
         // shoot — so stop playing and just leave. Ranked BELOW the geometry escape on purpose: when the
@@ -946,6 +917,7 @@ void Engine::updateAutoplay(f32 dt) {
             }
         }
     } else if (ap().breakoffTimer > 0.0f) {
+        ap().remedy = "breakoff";
         // Remedy C — break off a stalled fight (armed in (2b)): firing at an in-band target the shots
         // can't kill (cover/angle), or an enemy body-blocking the bot. The response depends on whether an
         // exit heading exists:
@@ -1180,8 +1152,42 @@ void Engine::updateAutoplay(f32 dt) {
     //     stops it steering toward a safe landing (the ramp riser it hopped for, the balcony it was
     //     flung at). So we lift the veto in the air and let it steer; an airborne drift off an edge is
     //     acceptable (dying is fine, freezing is not), while the grounded rim protection is untouched.
+    // FOLLOWER TAKEOFF INJECTION. The follower asked for the committed jump this tick
+    // (ap().vhFollowJump, stashed by buildBotView); the press fires only when the FEET agree — the
+    // tick's WASD resultant, rebuilt on the CURRENT yaw basis, must be within ~40 degrees of the
+    // committed link axis. That is the FIGHT-interleave guard: combat owns the intent on ~half of
+    // all ticks, and a kiting tick whose feet point off-axis must not take off sideways into the
+    // void. While the press is live, the dodge and block reflexes are suppressed for the takeoff
+    // tick only — a roll is a ~4 m lunge and a block is a 0.4x move-speed launch, and either one
+    // sabotages the arc; eating one hit costs less than a 3 m fall and a re-climb.
+    bool vhTakeoff = false;
+    if (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL && ap().vhFollowJump) {
+        const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
+        const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
+        Vec3 res{0, 0, 0};
+        if (in.moveFwd)   res = res + fwd;
+        if (in.moveBack)  res = res - fwd;
+        if (in.moveRight) res = res + right;
+        if (in.moveLeft)  res = res - right;
+        const f32 rl = sqrtf(lengthSq(res));
+        if (rl > 1e-3f) {
+            const f32 along = (res.x * ap().vhFollowJumpDir.x + res.z * ap().vhFollowJumpDir.z) / rl;
+            if (along > 0.766f) {                      // cos ~40 degrees
+                vhTakeoff = true;
+                in.jump  = true;
+                in.dodge = false;
+                in.block = false;
+            }
+        }
+    }
+
     // Applied per WASD component so the bot slides along the safe axes instead of freezing.
-    if (vhallUpperExit && m_localPlayer.onGround) {
+    // ...EXCEPT on a follower takeoff tick: the whole point of that press is to cross the rim the
+    // veto exists to protect, and the press is already triple-gated (standing on a lip node, feet
+    // aligned with the link axis, StoryNav::planVault confirming a landing) — stricter gates than
+    // the veto's own 1-cell lookahead. Combat feet at the lip on every OTHER tick stay vetoed;
+    // only the aligned, geometry-approved takeoff crosses.
+    if (vhallUpperExit && m_localPlayer.onGround && !vhTakeoff) {
         const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
         const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
         const Vec3 p     = m_localPlayer.position;
@@ -1405,7 +1411,7 @@ void Engine::updateAutoplay(f32 dt) {
     // trace: one paladin floor fired 282 escapes and still took 799 s. SIDEWAYS-FIRST IS THE WRONG
     // REMEDY ON A RAMP. It works on the Descent because that wedge is a flat slab LIP with open floor
     // to either side; a VHALL ramp is a narrow 2-wide graduated slab, so a sidestep walks the bot off
-    // the strip — precisely the drift rampApproachDir exists to correct. A VHALL riser wedge needs a
+    // the strip — precisely the ramp-drift the follower's point servo corrects. A VHALL riser wedge needs a
     // ramp-aware remedy (back off DOWN the strip and re-approach centred, or a centreline hop), not
     // this one. Do not re-extend without measuring that separately.
     if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY && !in.descend &&
@@ -1435,6 +1441,7 @@ void Engine::updateAutoplay(f32 dt) {
 
         if (ap().wedgeEscT > 0.0f) {
             ap().wedgeEscT -= dt;
+            ap().remedy = "wedge";   // overrides every producer above — reported by the STALL autopsy
             // Rotate whatever heading we HAVE. flowDir is the routed one; with none (boxed in) fall
             // back to the facing, so the burst still produces a real direction to shove at.
             Vec3 base = v.flowDir;
@@ -1461,19 +1468,99 @@ void Engine::updateAutoplay(f32 dt) {
     // bot have a route, is it commanding movement, and is it moving? Shipped ON (no env gate)
     // because the last several stalls were diagnosed by rebuilding with a temporary tracer and
     // re-running for half an hour; a stuck floor should explain itself the first time.
-    if (m_autoplayFloorTime > 300.0f) {
-        static f32 dumpT = 0.0f;
-        dumpT += dt;
-        if (dumpT >= 15.0f) {
-            dumpT = 0.0f;
+    // The 5-minute gate is right for a shipped build (a stall is rare and the log must stay quiet),
+    // but it makes the autopsy useless for REPRODUCING one: a repro run needs the geometry dump within
+    // seconds, not after the bot has already been stuck for five minutes. AUTOPLAY_STALL_SEC overrides
+    // the threshold for a diagnostic run without a rebuild — which is the whole point of shipping the
+    // autopsy in the first place, since every stall before it cost a rebuild-with-a-tracer.
+    static const f32 kStallGate = []() -> f32 {
+        const char* s = std::getenv("AUTOPLAY_STALL_SEC");
+        return (s && *s) ? (f32)atof(s) : 300.0f;
+    }();
+    if (m_autoplayFloorTime > kStallGate) {
+        // 15 s is right for a shipped stall (quiet log, and a stall lasts minutes). A REPRO run has
+        // lowered the gate deliberately and needs to see an OSCILLATION, which 15 s samples alias away.
+        const f32 dumpEvery = (kStallGate >= 300.0f) ? 15.0f : 3.0f;
+        ap().stallDumpT += dt;
+        if (ap().stallDumpT >= dumpEvery) {
+            ap().stallDumpT = 0.0f;
             const bool mv = in.moveFwd || in.moveBack || in.moveLeft || in.moveRight;
-            LOG_WARN("[STALL] %s fl=%u t=%.0f | flow=%.2f mv=%d grnd=%d y=%.2f exitY=%.1f d2d=%.1f "
-                     "| tgts=%u fire=%d npt=%.1f | style=%s",
+            const Vec3 p  = m_localPlayer.position;
+
+            // NET TRAVEL between dumps. The old line reported only "is a key held", which cannot
+            // separate a bot that is WEDGED from one that is walking a 1 m loop — and both look
+            // identical in a frozen distance-to-door. This is the number that tells them apart.
+            const Vec3 d  = p - ap().stallAnchor;
+            const f32  netXZ = sqrtf(d.x * d.x + d.z * d.z);
+            ap().stallAnchor = p;
+
+            // THE GEOMETRY UNDER AND AHEAD OF THE BODY. Every stacked-floor stall so far has been
+            // diagnosed by rebuilding with a tracer to answer one question — "can the body actually
+            // make the step the route is asking for?" — so the autopsy answers it directly: the
+            // surface underfoot, the surface of the cell one step along the commanded heading, and
+            // the rise between them against STEP_UP_HEIGHT (the walk/jump threshold).
+            f32 surf = p.y, aheadY = p.y, rise = 0.0f; s32 gx = -1, gz = -1; bool aheadSolid = false;
+            Vec3 dbgMv{0, 0, 0};
+            {
+                u32 cx, cz;
+                if (LevelGridSystem::worldToGrid(m_level.grid, p, cx, cz)) {
+                    gx = (s32)cx; gz = (s32)cz;
+                    surf = LevelGridSystem::effectiveFloorHeight(m_level.grid, cx, cz, p.y);
+                }
+                // Rebuild the world-space heading the WASD flags actually encode (same basis as
+                // faceAndGo) so "ahead" is where the body is being pushed, not where it is aiming.
+                const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
+                const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
+                Vec3 mvDir{0, 0, 0};
+                if (in.moveFwd)   mvDir = mvDir + fwd;
+                if (in.moveBack)  mvDir = mvDir - fwd;
+                if (in.moveRight) mvDir = mvDir + right;
+                if (in.moveLeft)  mvDir = mvDir - right;
+                if (lengthSq(mvDir) > 1e-6f) dbgMv = normalize(mvDir);
+                if (lengthSq(mvDir) > 1e-6f) {
+                    const Vec3 step = p + normalize(mvDir) * m_level.grid.cellSize;
+                    u32 ax, az;
+                    if (LevelGridSystem::worldToGrid(m_level.grid, step, ax, az)) {
+                        aheadSolid = LevelGridSystem::isSolid(m_level.grid, ax, az);
+                        aheadY = LevelGridSystem::effectiveFloorHeight(m_level.grid, ax, az, p.y);
+                        rise   = aheadY - surf;
+                    }
+                }
+            }
+            // HOW MANY BODIES ARE TOUCHING US. On flat ground with no rise ahead, the only thing
+            // left that can stop a moving body is another body — and the swarm is exactly what pins
+            // the no-progress timer near zero (chip damage) so every rescue stays disarmed. Without
+            // this count a body-block and a geometry wedge are indistinguishable in the log, which
+            // is what made the last VHALL fix aim at the wrong one.
+            u32 near2 = 0, near1 = 0;
+            for (u32 ti = 0; ti < v.targetCount; ti++) {
+                if (v.targets[ti].dist < 2.0f) near2++;
+                if (v.targets[ti].dist < 1.2f) near1++;
+            }
+            // `door` / `bossG` separate the two ways a floor can be unexitable, which look identical
+            // from outside: the exit is SEALED behind a live boss (bossG=1 — go fight it), or there is
+            // no ordinary exit on this floor at all (door=0 — the brain returns an EMPTY intent via
+            // onNormalFloor and the bot idles, the same failure the Source chamber had). A measured
+            // 85-minute stall standing 1.0 m from the exit could not be told apart without this.
+            // The ROUTED heading vs the heading the FEET actually encode. A stall where these two
+            // disagree — or where the routed one reverses tick to tick — is a producer conflict, not
+            // geometry, and nothing in the old line could tell those apart.
+            LOG_WARN("[STALL] %s fl=%u t=%.0f | flow=%.2f mv=%d jmp=%d grnd=%d net=%.2f | "
+                     "cell=%d,%d surf=%.2f ahead=%.2f rise=%+.2f%s%s | y=%.2f exitY=%.1f d2d=%.1f | "
+                     "fdir=%+.2f,%+.2f mdir=%+.2f,%+.2f | "
+                     "tgts=%u near2=%u near1=%u fire=%d npt=%.1f | door=%d bossG=%d | "
+                     "cmt=%d vd=%u fm=%u rem=%s | style=%s",
                      kClassDefs[static_cast<u32>(m_playerClass)].name, m_level.currentFloor,
-                     m_autoplayFloorTime, sqrtf(lengthSq(v.flowDir)), (int)mv,
-                     (int)m_localPlayer.onGround, m_localPlayer.position.y, m_level.floorDoorPos.y,
-                     v.distToDoor, v.targetCount, (int)in.fire, ap().noProgressTimer,
-                     LevelGen::styleName(m_level.layoutStyle));
+                     m_autoplayFloorTime, sqrtf(lengthSq(v.flowDir)), (int)mv, (int)in.jump,
+                     (int)m_localPlayer.onGround, netXZ,
+                     gx, gz, surf, aheadY, rise,
+                     (rise > STEP_UP_HEIGHT ? " NEEDS-JUMP" : ""), (aheadSolid ? " WALL" : ""),
+                     p.y, m_level.floorDoorPos.y, v.distToDoor,
+                     v.flowDir.x, v.flowDir.z, dbgMv.x, dbgMv.z,
+                     v.targetCount, near2, near1, (int)in.fire,
+                     ap().noProgressTimer, (int)v.doorActive, (int)(v.hasBoss && v.bossAlive),
+                     (int)ap().vhCommit, (unsigned)ap().vhFollowDist, (unsigned)ap().vhFollow.mode,
+                     ap().remedy, LevelGen::styleName(m_level.layoutStyle));
         }
     }
 
@@ -1801,8 +1888,23 @@ Autoplay::BotView Engine::buildBotView() {
     // is untouched — this is a per-tick view override.
     if (ap().sidearmActive) v.buildCell = Autoplay::rangedCellFor(v.buildCell);
 
-    // --- world gate: idle in town / arena / the Source, and only travel while an ordinary exit exists ---
-    v.onNormalFloor = !(m_level.inTown || m_level.inArena || m_level.inSourceChamber) && m_level.floorDoorActive;
+    // --- world gate: idle in town / arena, and only travel while an ordinary exit exists ---
+    //
+    // THE SOURCE CHAMBER IS A FIGHT, NOT A WORLD THE BRAIN CANNOT EXPRESS. It used to be lumped in
+    // with town/arena as "idle here", and the cost of that was the single largest waste measured in
+    // the 3 h couch soak: three of nine sessions collected all ten Source shards across a full Hell
+    // run, opened the portal on floor 50, walked in — and then stood still for the remaining ~2 hours
+    // (they were the ONLY silent sessions, and the only ones that entered). The brain returns an
+    // empty intent when this is false, so the bot did not fight, drink or move while the Engine and
+    // its summoned waves worked on it. Earning the secret boss and then refusing to play it is the
+    // worst of both outcomes.
+    //
+    // Nothing else needs to change to support it: the chamber has no exit (floorDoorActive is false
+    // by construction, so DESCEND stays disarmed), its flow field is seeded at the centre where the
+    // Engine stands (so TRAVEL walks toward the fight), and pickTarget already skips an invulnerable
+    // target — so while the Engine is shielded the bot fights the adds, which is the intended answer.
+    v.onNormalFloor = !(m_level.inTown || m_level.inArena) &&
+                      (m_level.floorDoorActive || m_level.inSourceChamber);
     // Stacked styles carry walk-on slab storys, so "3 m above me" means "another floor of the
     // building" rather than "up a step" — the policy's cross-story target gate keys off this.
     v.stackedFloor  = (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL) ||
@@ -1887,186 +1989,36 @@ Autoplay::BotView Engine::buildBotView() {
             return !hit.hit || hit.distance >= len - 0.5f;
         };
 
-        ap().vhClimbing = false;
-        ap().vhOnRamp   = false;   // set true below only when within hop range of the exit ramp
         if (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL) {
-            // Cache the floor's JUMP-PAD cells once (VHALL doesn't record them in jumpPads[], so a
-            // grid scan is the only way to see them). Cluster-deduped so a 3x3 pad node is ONE goal.
-            if (m_autoplayPadFloor != m_level.currentFloor) {
-                m_autoplayPadFloor = m_level.currentFloor;
-                m_autoplayPadCount = 0;
-                for (u32 z = 0; z < m_level.grid.depth && m_autoplayPadCount < 8; z++)
-                    for (u32 x = 0; x < m_level.grid.width && m_autoplayPadCount < 8; x++) {
-                        if (!(LevelGridSystem::getCell(m_level.grid, x, z).flags & CELL_JUMPPAD)) continue;
-                        const Vec3 c{(x + 0.5f) * m_level.grid.cellSize, 0.0f, (z + 0.5f) * m_level.grid.cellSize};
-                        bool dup = false;   // fold a pad cluster's cells into one goal
-                        for (u8 k = 0; k < m_autoplayPadCount; k++) {
-                            const f32 dx = c.x - m_autoplayPadCells[k].x, dz = c.z - m_autoplayPadCells[k].z;
-                            if (dx * dx + dz * dz < 9.0f) { dup = true; break; }   // within ~3 m => same pad
-                        }
-                        if (!dup) m_autoplayPadCells[m_autoplayPadCount++] = c;
-                    }
-            }
-
-            // BELOW an UPPER exit: USE A JUMP PAD to climb. The void pad flings the bot up a story
-            // reliably — that is what it is FOR — instead of fighting up the narrow 2-wide ramp (the
-            // hard, flaky part of a VHALL climb). Route to the nearest reachable pad with a clear line;
-            // the collision launch does the vertical. Once up (feet near the exit height) this stops
-            // triggering and the VHallField takes over to cross the upper story to the door. Falls back
-            // to the ramp route when no pad is in reach.
-            const bool belowExit = m_level.floorDoorPos.y > 1.5f && pos.y < m_level.floorDoorPos.y - 0.5f;
-
-            // RAMP CLIMB — an anti-drift assist on top of the VHallField (the user's call: "pathfind to
-            // the ramp, approach it the right way"). See the block below for why it is scoped to "already
-            // on a slab" rather than used to route TO the ramp.
-            // How near a ramp the bot must be before it starts squaring up to mount it. Beyond this
-            // the two-story field owns the approach; inside it, the staging rule below does.
-            constexpr f32 kRampStageDist = 12.0f;
-            bool climbingViaRamp = false;
-            if (belowExit && dg.portalCount > 0) {
-                // Let the story-aware VHallField route EVERYTHING — the ground approach, which ramp to
-                // climb (it routes ground -> foot -> up the slab -> balcony -> door as one shortest
-                // path), and the balcony cross. The ONE thing it can't do is keep the eased-aim walk from
-                // drifting off the narrow 2-wide graduated slab and sliding back (the original "94%
-                // airborne, never crests" stall). So we ADD the centreline steer only as an anti-drift
-                // assist, and ONLY once the bot is confirmed ON a slab (elevated, pos.y > 0.5) — never as
-                // a router. Every attempt to route TO a ramp with it (by segment distance to a chosen
-                // ramp, or to the ramp FOOT via a 2-D RouteField) regressed: it either trapped the bot on
-                // the ground UNDER the slab, or delivered it to the foot XZ where the 2-D field has no
-                // "step up" and it never mounted (measured: max_pos.y stuck at 0). Keying purely on "am I
-                // already on a slab" and centring on the NEAREST ramp is the only version that mounts on
-                // EVERY run. (The residual — it can climb a non-exit ramp and then must cross a catwalk it
-                // falls off — is the open upper-story-crossing problem, tracked in the concept doc.)
-                // Nearest ramp by segment distance — the one we are dealing with either way.
-                s32 nr = -1; f32 brs = 1e18f;
-                for (u8 k = 0; k < dg.portalCount; k++) {
-                    const f32 rs = Autoplay::rampSegDistXZ(dg.portals[k].lowPos, dg.portals[k].highPos, pos);
-                    if (rs < brs) { brs = rs; nr = k; }
-                }
-                if (pos.y > 0.5f) {
-                    // ON THE SLAB — centreline anti-drift, as before. The field mounts it; this keeps
-                    // the eased-aim walk from sliding off the 2-wide strip on the way up.
-                    if (nr >= 0 && brs < 5.0f) {
-                        const Vec3 rd = Autoplay::rampApproachDir(dg.portals[nr].lowPos, dg.portals[nr].highPos, pos);
-                        if (lengthSq(rd) > 1e-6f) { v.flowDir = rd; climbingViaRamp = true; ap().vhOnRamp = true; }
-                    }
-                } else if (nr >= 0 && brs < kRampStageDist) {
-                    // ON THE GROUND, NEAR A RAMP — SQUARE UP, but do NOT take over the routing.
-                    //
-                    // The mount fails when the bot meets the 2-wide graduated slab side-on: it is
-                    // pressed against a riser it cannot step over and scrapes along the edge instead
-                    // of climbing ("vhall loves to hug the stairs"). The cure is to arrive in LINE
-                    // with the ramp — but the first version of this drove a STRAIGHT LINE at a
-                    // staging point behind the foot, and that was worse: a straight line knows
-                    // nothing about walls, and near a ramp it often passes UNDERNEATH the slab, which
-                    // the under-slab pinch veto then refuses outright, leaving the bot pinned against
-                    // the very edge it was supposed to stop hugging.
-                    //
-                    // The two-story field already routes ground -> foot -> up correctly and IS
-                    // wall-aware and under-slab-aware. So it keeps the route, and alignment is added
-                    // as a LATERAL CORRECTION on top: blend the field heading with a pull toward the
-                    // ramp's centreline, strongest when far off it. The bot converges onto the axis
-                    // as it approaches and arrives square, without ever leaving a routed path.
-                    const Vec3 low  = dg.portals[nr].lowPos, high = dg.portals[nr].highPos;
-                    const f32  off  = Autoplay::rampLateralOffset(low, high, pos);
-                    if (off > 0.75f && lengthSq(v.flowDir) > 1e-6f) {
-                        const Vec3 axis = Autoplay::rampUpAxis(low, high);
-                        if (lengthSq(axis) > 1e-6f) {
-                            // Perpendicular from the body toward the centreline (XZ).
-                            const f32 rx = pos.x - low.x, rz = pos.z - low.z;
-                            const f32 along = rx * axis.x + rz * axis.z;
-                            Vec3 toLine{-(rx - axis.x * along), 0.0f, -(rz - axis.z * along)};
-                            if (lengthSq(toLine) > 1e-6f) {
-                                toLine = normalize(toLine);
-                                const f32 w = off > 3.0f ? 0.6f : 0.35f;   // harder pull when far off
-                                Vec3 blended{v.flowDir.x * (1.0f - w) + toLine.x * w, 0.0f,
-                                             v.flowDir.z * (1.0f - w) + toLine.z * w};
-                                if (lengthSq(blended) > 1e-6f) v.flowDir = normalize(blended);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // USE THE JUMP PADS. On an upper-exit VHALL floor a pad is the RELIABLE way up — one
-            // launch clears the whole storey — while the ramp is a narrow 2-wide graduated slab that
-            // the eased-aim walk drifts off, and it is the flaky half of every VHALL climb (measured:
-            // bots spending 99% of a 590 s floor on the ground never mounting, or 38% of a 405 s floor
-            // on the ramp never cresting). So the pad is now the PREFERRED route, not a fallback used
-            // only when the ramp is far: it is picked BEFORE the ramp assist and, once chosen, it is
-            // COMMITTED — a goal re-picked every tick walks the bot back and forth between two pads,
-            // the same failure the ramp crossing already had to fix.
+            // Per-tick takeoff stash: cleared unconditionally so a stale press can never fire later.
+            ap().vhFollowJump    = false;
+            ap().vhFollowJumpDir = Vec3{0, 0, 0};
+            ap().vhFollowDist    = 0xFFFF;
+            // THE FIELD IS THE SINGLE AUTHORITY, THE FOLLOWER ITS ONLY EXECUTOR. The field (with
+            // the broken-catwalk JUMP LINKS as cost-3 edges, which reconnect the isolated W balcony
+            // and delete the legitimate-but-fatal down-the-ramp routes) picks the next node; the
+            // follower latches it and steers at its CENTRE (a point servo — lateral drift
+            // self-corrects); a committed jump is executed with an aligned, planVault-gated press.
+            // Nothing else writes v.flowDir in this branch.
             //
-            // Reach is generous (a pad across the hall is still worth walking to, since taking it
-            // replaces the entire climb) and the commit survives losing line of sight, because the
-            // detour fan rounds corners on the way and a momentary occlusion is not a reason to
-            // abandon the route. It is released when the bot is up, when the pad stops being
-            // reachable at all, or on a timeout so a pad it can never actually get to cannot pin it.
-            bool climbingViaPad = false;
-            // ...but NOT once the climb is already under way. `belowExit` is still true halfway up a
-            // ramp, so without this an in-progress climb gets abandoned for a pad across the hall and
-            // the bot walks back off the slab it had mounted — which reads as scraping along the
-            // stairs. On the ground the pad is the better route; on the slab, finish the climb.
-            const bool onSlabAlready = pos.y > 0.5f;
-            if (belowExit && !onSlabAlready) {
-                constexpr f32 kPadReach     = 34.0f;   // worth crossing the hall for
-                constexpr u32 kPadGoalMaxTick = 25u * 60u;   // ~25 s: drop a pad we cannot reach
-                const u32 nowTick = currentLocalTick();
-                if (ap().padGoal >= 0) {
-                    if (ap().padGoal >= (s8)m_autoplayPadCount ||
-                        nowTick - ap().padGoalTick > kPadGoalMaxTick)
-                        ap().padGoal = -1;      // stale or hopeless: re-pick (or fall back to the ramp)
-                }
-                if (ap().padGoal < 0) {
-                    // Pick the nearest pad we can actually see. The clear-line test is only applied at
-                    // PICK time — see above for why it is not re-tested while committed.
-                    f32 bestD2 = kPadReach * kPadReach; s32 best = -1;
-                    for (u8 k = 0; k < m_autoplayPadCount; k++) {
-                        const f32 dx = m_autoplayPadCells[k].x - pos.x, dz = m_autoplayPadCells[k].z - pos.z;
-                        const f32 d2 = dx * dx + dz * dz;
-                        if (d2 < bestD2 && clearLineTo(m_autoplayPadCells[k])) { bestD2 = d2; best = k; }
-                    }
-                    if (best >= 0) { ap().padGoal = (s8)best; ap().padGoalTick = nowTick; }
-                }
-                if (ap().padGoal >= 0 && ap().padGoal < (s8)m_autoplayPadCount) {
-                    const Vec3 g = m_autoplayPadCells[ap().padGoal];
-                    const Vec3 to{g.x - pos.x, 0.0f, g.z - pos.z};
-                    if (lengthSq(to) > 1e-6f) {
-                        v.flowDir = normalize(to);
-                        climbingViaPad = true;
-                        // Do NOT let the ramp centreline assist fight the pad approach for the feet.
-                        climbingViaRamp = false;
-                        ap().vhOnRamp = false;
-                    }
-                }
-            } else {
-                ap().padGoal = -1;   // up already: the pad has done its job
+            // This REPLACED a stack of four assists (ramp anti-drift, ground centreline blend,
+            // jump-pad beeline, hop-pulse machinery) layered ABOVE a link-free field readout — each
+            // a compensation for the previous one's failure, and the pile the reason a bot could
+            // circle an upper-exit floor for 6000+ s unseen. A/B (one binary + env switch, 6
+            // classes x both arms, 25 min): floors 71 vs 49, kills 2223 vs 1535, upper-exit pins
+            // 132.5/h vs 223/h, worst dwell 874 vs 1425 s; the confirming couch soak cut VHALL from
+            // 78% of all pinned stall samples to 6%, with 8/9 sessions reaching floor 50.
+            // dt is the fixed sim step: updateAutoplay runs once per 1/60 s tick by construction.
+            if (Autoplay::ensureVHallField(ap().vHall, m_level.grid, dg, m_level.floorDoorPos,
+                                           floorStamp, /*useJumpLinks=*/true)) {
+                const Autoplay::VHallFollowOut fo = Autoplay::vhallFollowTick(
+                    ap().vhFollow, ap().vHall, m_level.grid, dg, pos, pos.y,
+                    m_localPlayer.yaw, m_localPlayer.onGround, 1.0f / 60.0f);
+                if (lengthSq(fo.dir) > 1e-6f) v.flowDir = fo.dir;
+                ap().vhFollowJump    = fo.wantJump;
+                ap().vhFollowJumpDir = fo.jumpDir;
+                ap().vhFollowDist    = fo.distHere;
             }
-
-            // The exit is a balcony door on the OPPOSITE story. Routing is a BFS FLOW FIELD over
-            // (cell, STORY) nodes seeded from the door (autoplay_vhall.h) — it routes the whole journey
-            // ground -> ramp foot -> up the ramp -> across the balcony -> door, and can never steer the
-            // bot off a balcony edge. It does the COARSE approach to the ramp foot (before the centreline
-            // steer takes over) and the cross to the door up top — used whenever not on the ramp/pad.
-            if (!climbingViaPad && !climbingViaRamp &&
-                Autoplay::ensureVHallField(ap().vHall, m_level.grid, m_level.floorDoorPos, floorStamp)) {
-                const Vec3 vd = Autoplay::vhallDirection(ap().vHall, m_level.grid, pos);
-                if (lengthSq(vd) > 1e-6f) v.flowDir = vd;
-            }
-            // Climb-assist jump: the ramp is a narrow 2-wide graduated slab, and even with correct
-            // steering the eased-aim walk can stall against the risers. Pulse a hop while the bot is
-            // BELOW the exit height and the exit is UP — i.e. still climbing the RAMP (not while riding a
-            // pad, which does its own launch). (ap().vhClimbing was defaulted false above.)
-            // The margin here must be SMALLER than a ramp riser, or the flag switches off exactly
-            // where the climb still needs it. At 0.5 m it did: a ramp's last step onto the balcony is
-            // ~0.5 m, so a bot at the top of the ramp sits at exactly exitY - 0.5 and the test
-            // `pos.y < exitY - 0.5` reads FALSE — vhClimbing drops, the climb hop it gates dies, and
-            // the bot walks into a 0.5 m riser it cannot step over (STEP_UP_HEIGHT is 0.4) forever.
-            // Measured three separate times as "stuck on the stairs": y pinned at 2.49-2.50 against a
-            // 3.0 m balcony, moving, valid route, distance-to-door frozen, npt climbing past 80 s.
-            // 0.1 m keeps the flag true until the bot is genuinely up on the exit storey.
-            if (!climbingViaPad && m_level.floorDoorPos.y > 1.5f && pos.y < m_level.floorDoorPos.y - 0.1f)
-                ap().vhClimbing = true;
         } else if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY) {
             // The Descent: the exit is always DOWN, so the travel goal is a hole in THIS story's
             // slab — and getting to one is a MAZE routing problem, not a bearing.
@@ -2152,6 +2104,19 @@ Autoplay::BotView Engine::buildBotView() {
             if (haveBoss) {
                 const Vec3 toBoss{bossPos.x - pos.x, 0.0f, bossPos.z - pos.z};
                 const f32  dBoss = length(toBoss);
+                // DROPPING THE DISTANCE GATE WAS TRIED AND MEASURED WORSE (2026-07-30). The couch
+                // soak's boss stalls (251 pinned samples, all on floor 30) sat at d2d ~28.9 m — just
+                // outside this radius — so "seek the boss from any distance, since the exit is sealed
+                // until it dies" looked obviously right. Paired A/B (one binary + env kill-switch, 6
+                // classes x both arms, 25 min) says otherwise, on the DIRECT metric: median dwell on a
+                // boss-gated floor 57 s -> 80 s and median completion 68 s -> 102 s, i.e. boss floors
+                // got SLOWER, while floors reached were a wash (127 vs 125) and per-class results split
+                // 3-2 in favour of keeping the radius. Whole-run pin counts looked much better without
+                // the gate, but those are dominated by VHALL floors this code does not touch — a
+                // confound, not evidence.
+                // Note also that the 1096 s stall this was aimed at did NOT reproduce: neither arm
+                // produced a single boss floor over 300 s. So the deep-floor boss stall is still
+                // unexplained, and it is NOT simply "the seek radius is too small".
                 constexpr f32 kBossSeekRadius = 25.0f;   // covers a major boss's expanded arena
                 const bool flowIdle = lengthSq(v.flowDir) < 1e-6f;
                 const bool wantSeek = (dBoss < kBossSeekRadius || v.atExit || flowIdle) && dBoss > 1e-3f;

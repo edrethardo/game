@@ -142,6 +142,11 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
         } else if (ieq(a, "--arena")) {
             opt.arena  = true;
             opt.active = true;
+        } else if (ieq(a, "--source")) {
+            // Dev door into The Source. Reaching it legitimately means a clean 50-floor run holding
+            // all ten shards, so without this the secret fight could only be exercised by accident.
+            opt.source = true;
+            opt.active = true;
         } else if (ieq(a, "--autoplay-couch")) {
             // Couch co-op AUTOPLAY: split-screen with BOTH local players driven by their own bot.
             // Implies --autoplay. Lane 0 takes --new's class; lane 1 takes an OPTIONAL class argument

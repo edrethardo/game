@@ -889,12 +889,31 @@ static void carveVerticalHall(LevelGrid& grid, GenRNG& rng, DungeonResult& resul
     ramp((s32)wX0 + 5, (s32)sZ1 - 2,  0, -1, 1, 0, (sZ1 - 2) - sZ0 + 1);   // SW corner → W balcony (climb north)
 
     // 4) CATWALKS across the void @ 3 m linking OPPOSITE balconies, so the upper story is its own loop.
-    //    N↔S is INTACT (the reliable high road); W↔E is BROKEN with a 2-cell JUMP gap (miss → fall to the
-    //    void). They cross at the centre, so all four balconies interconnect up top.
+    //    N↔S is INTACT (the reliable high road); W↔E is BROKEN with a 2-cell JUMP gap (miss → fall to
+    //    the void). They cross at the centre — but note the crossing does NOT make all four balconies
+    //    walk-connected: the gap sits on the WEST arm, so N/S/E + the crossing form one component and
+    //    the W balcony is ISOLATED at 3 m unless the gap is JUMPED. That asymmetry is deliberate level
+    //    design (the risky shortcut); the jumpLinks record below is what lets a route reason about it.
     const u32 mx = (cX0 + cX1) / 2, mz = (cZ0 + cZ1) / 2;
     slabRect(mx, mx + 1, nZ1, sZ0, VH_SLAB_Q);                       // N↔S catwalk (intact)
     for (u32 x = wX1; x <= eX0; x++)                                 // W↔E catwalk (broken jump gap)
         if (x < cX0 + 1 || x > cX0 + 2) { slab((s32)x, (s32)mz, VH_SLAB_Q); slab((s32)x, (s32)mz + 1, VH_SLAB_Q); }
+    // Record the gap as a JUMPABLE EDGE, one link per catwalk row (it is 2 wide, and a body jumps
+    // along its own row). Derived from the SAME variables the loop above skipped — the skipped
+    // columns are cX0+1..cX0+2, so the lips are the slab cells at cX0 and cX0+3 — which is what
+    // makes it impossible for the record to disagree with the geometry. Both ends at the slab top
+    // (VH_SLAB_Q quarters); a 2-cell gap at the 1 m cell size is ~2 m of void against a ~4 m
+    // running-jump reach, i.e. comfortably jumpable, which is the design intent of the broken
+    // catwalk ("miss → fall to the void").
+    const f32 lipY = VH_SLAB_Q * 0.25f;
+    for (u32 dz = 0; dz <= 1; dz++) {
+        if (result.jumpLinkCount < MAX_JUMP_LINKS) {
+            result.jumpLinks[result.jumpLinkCount++] = {
+                { (cX0     + 0.5f) * cs, lipY, (mz + dz + 0.5f) * cs },   // west lip (attached to W balcony's stub)
+                { (cX0 + 3 + 0.5f) * cs, lipY, (mz + dz + 0.5f) * cs },   // east lip (start of the east arm)
+            };
+        }
+    }
 
     // 5) COVER PILLARS — floor-to-ceiling solid columns in the four corner rooms and the void, breaking
     //    line-of-sight for the ground fight. Only on BARE floor (never a slab), so a balcony/ramp/catwalk

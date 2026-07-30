@@ -244,6 +244,18 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         LOG_INFO("Launch: entered the ARENA (--arena)");
         return;
     }
+    if (opt.source) {
+        // Dev door (--source): build a normal run, then transition straight into The Source. Unlike
+        // --town/--arena this needs startGame FIRST — enterSourceChamber wipes the current floor's
+        // world and moves the live player in, so there has to be one. The bot is armed BEFORE the
+        // transition for the same reason --town arms it early: this branch returns before the
+        // arming below, and an unarmed hero in the one world we are here to test is useless.
+        startGame(mode);
+        if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
+        enterSourceChamber();
+        LOG_INFO("Launch: entered THE SOURCE (--source)");
+        return;
+    }
     startGame(mode);
     // Arm the bot + force Auto Loot AFTER startGame so it sticks even for a CONTINUE (whose load
     // stamps the saved autoMode); no-op unless --autoplay. See enterAutoplayRun().

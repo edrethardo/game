@@ -3118,15 +3118,36 @@ void Engine::enterSourceChamber() {
         m_localPlayers[lane].pitch       = 0.0f;
         m_localPlayers[lane].invulnTimer = 2.0f;
     }
+    // PERSIST THE ALIAS TO THE LANE ARRAY (the enterTown / enterSourceChamberClient pattern).
+    // The in-game call site runs INSIDE the per-player swap, so swapOutPlayer would write this back
+    // anyway and the line is a harmless no-op there. Any call from OUTSIDE that pass (the --source
+    // dev door) has no swap to persist it, so next frame's swapInPlayer restores the stale floor-50
+    // position — which in the freshly-built chamber grid is outside the world. The client mirror
+    // below already had this line; the host path relied on its one call site and broke the moment a
+    // second one existed.
+    m_localPlayers[m_localPlayerIndex] = m_localPlayer;
     snapCameraToPlayer();                     // no interp smear from the floor-50 camera
 
     // Networked players (remote slots) enter too.
+    //
+    // spawnPosition MUST be re-seeded here, not just position. It is the RESPAWN anchor — every
+    // revive path (the death screen's option 0, the networked respawn request, the autoplay AFK
+    // countdown) teleports to np.spawnPosition — and it is otherwise written only by startGame, so
+    // inside The Source it still holds the FLOOR-50 entrance. That floor's world was wiped and
+    // replaced by the chamber grid, so dying in the secret boss fight put you outside the world with
+    // no way back: the fight was unlosable-but-unfinishable rather than a fight. enterArena already
+    // does this for its pads (engine_arena.cpp); The Source was the one relocating world that didn't.
     for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
         if (!m_players[pi].active) continue;
-        m_players[pi].position    = base + Vec3{(f32)pi * 1.2f - 0.6f, 0.0f, 0.0f};
-        m_players[pi].invulnTimer = 2.0f;
-        m_players[pi].isDead      = false;
+        m_players[pi].position      = base + Vec3{(f32)pi * 1.2f - 0.6f, 0.0f, 0.0f};
+        m_players[pi].spawnPosition = m_players[pi].position;
+        m_players[pi].invulnTimer   = 2.0f;
+        m_players[pi].isDead        = false;
     }
+    // The LOCAL slot is seeded separately: in singleplayer m_players[0] is not "active" in the
+    // networked sense, so the loop above skips it — and singleplayer is exactly where the autoplay
+    // revive reads it.
+    m_players[activeNetSlot()].spawnPosition = m_localPlayer.position;
 
     spawnSourceBoss(center);
     AudioSystem::play(SfxId::BOSS_ROAR);
@@ -3160,6 +3181,10 @@ void Engine::enterSourceChamberClient() {
     m_localPlayer.pitch       = 0.0f;
     m_localPlayer.invulnTimer = 2.0f;
     m_localPlayers[0]         = m_localPlayer;   // client is single-lane (m_localPlayerIndex == 0)
+    // Re-seed the respawn anchor too — see the host twin. A client's own revive prediction reads
+    // this slot, so without it a guest who dies in The Source predicts a respawn at the stale
+    // floor-50 entrance and rubber-bands from outside the chamber.
+    m_players[activeNetSlot()].spawnPosition = m_localPlayer.position;
     snapCameraToPlayer();
     addChatMessage("\?\?\?", "So. You assembled me. Then meet the others.", Vec3{0.62f, 0.30f, 0.95f});
     LOG_INFO("Entered The Source (client).");

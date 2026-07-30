@@ -71,6 +71,40 @@ ctest --test-dir build --output-on-failure   # CTest wrapper
 
 **CI runs the suite** (`ctest`) on the native Linux + macOS jobs. It did not until 2026-07-14 — the tests were built and thrown away, so a red test could not stop a release. The Windows job cross-compiles and cannot execute its own binary, so it still only builds.
 
+**DIFFICULTY PASS 2026-07-30 — and the balance lab was measuring the wrong thing.** Aaron: "make the
+game more difficult, increase mob HP and damage accordingly." Two findings, the second more important
+than the change itself.
+**(1) The lab omitted `difficultyHealthBump`.** `balance_lab.cpp` applied `floorHealthMult` and
+`difficultyDamageBump` but NOT the per-tier HEALTH bump — under a comment claiming to be "the exact
+spawn-time scaling path (engine_spawn.cpp)", which the engine applies at every spawn site. So every
+deep-tier HP/TTK figure the lab ever produced was understated by the whole bump — **3x for Nightmare,
+1.5x for Hell** — and its own model test re-derived the same wrong formula, so it PINNED the omission
+instead of catching it. A model test only catches an omission if it is written against the ENGINE's
+site, not the lab's. Corrected, and the test now mirrors the engine.
+**(2) Normal was inverted, the deep tiers were not too easy.** With the lab fixed: Normal trash TTK
+fell 0.86 s (floor 1) -> **0.33 s** (floor 50) while hits-to-die ROSE 3.5 -> 11-17, i.e. deep Normal
+was by far the safest place in the game; Nightmare and Hell were already at **1.4-2.9 hits-to-die**,
+with **Hell floor 5 at 0.99 — a literal one-shot**. So "increase HP and damage" could not mean a
+uniform raise: the deep tiers have no headroom on the DAMAGE axis at all.
+The pass therefore: **HP slope 0.12 -> 0.345** (solved against the measured 26.9x player-DPS growth
+over Normal, so TTK stops collapsing), **damage slope 0.24 -> 0.40**, both deep-tier damage bumps
+**RE-SOLVED to hold their totals EXACTLY** (NM 7.05 -> 4.30, Hell 12.045 -> 7.31), and the increase
+for those tiers taken purely on **HP (+25% each)** — which walks the HP-over-damage ratio AWAY from
+the one-shot boundary (Hell 1.52 -> 1.90). Measured after: Normal TTK 0.86/1.84/1.34/1.12/0.84 across
+floors 1/10/25/40/50 (was 0.86/0.93/0.56/0.44/0.33) with hits-to-die 3.5-6.8 (was 3.5-17.5);
+Nightmare and Hell a clean uniform **x1.25 TTK with damage unchanged**.
+**`floorHealthMult` is now SPLIT at Normal's last floor** — linear governs Normal, compounding alone
+governs the deep tiers. The old unconditional `max(linear, compounding)` was safe only because the
+0.12 slope was too shallow to reach; at 0.345 it governed to effective floor ~92 and dragged early
+Nightmare to **6.6 s TTK against 1.7 hits-to-die** (sponge and glass cannon at once). Clamping the
+floor ARGUMENT instead was worse and subtler: it pinned Nightmare's first ~25 floors at a constant
+17.9x while player DPS climbed, re-creating the inverted curve INSIDE Nightmare. Both were caught by
+measuring, not by reasoning. Consequence: the raw function now steps DOWN at effective floor 51 and
+must NOT be asserted monotonic on its own — it is never used alone, and the test now pins the PRODUCT
+with the tier bump, walked in progression order (rises within a tier, steps UP into Nightmare, and
+keeps the deliberate ~0.52x Nightmare->Hell dip). **Still open:** Hell floor 5 at 0.99 hits-to-die
+predates this pass and is untouched by it.
+
 **Balance lab.** `tests/balance/` holds a repeatable balance model (spec:
 `docs/superpowers/specs/2026-07-22-balance-lab-design.md`): typical-equipment player power
 (Monte-Carlo through the real `ItemGen`/`BuildScore`/`Inventory` code) vs enemy/boss curves
@@ -432,6 +466,30 @@ background devices and picking one up is unambiguous intent to play). Fails OPEN
 seen once, so a headless/no-WM X server can't leave the game input-dead. Watch it beside other apps in
 **Windowed** or **Borderless** (Options → Display); exclusive **Fullscreen** is the one mode that isn't
 meant for this.
+
+**The bot now PLAYS The Source, and dying there no longer throws you out of the world (2026-07-30).**
+Three separate bugs in the secret-boss chamber, all found by the same 3 h couch soak. (1) **The bot
+idled in it.** `BotView::onNormalFloor` lumped the Source chamber in with town/arena as "a world the
+brain cannot express", and the brain returns an EMPTY intent when that is false — so three of nine
+soak sessions collected all ten shards across a full Hell run, opened the portal on floor 50, walked
+in, and then stood still for the remaining ~2 hours. They were the ONLY silent sessions and the only
+ones that entered; earning the secret fight and then refusing to play it is the worst of both
+outcomes. The chamber is a FIGHT, not a traversal, and nothing else had to change to support it:
+`floorDoorActive` is false by construction (so DESCEND stays disarmed), the flow field is seeded at
+the centre where the Engine stands (so TRAVEL walks toward the fight), and `pickTarget` already skips
+an invulnerable target (so while the Engine is shielded the bot fights the adds). Measured: **0 -> 376
+combat actions** on entry. (2) **`enterSourceChamber` wrote the spawn to `m_localPlayer` only** — the
+swap ALIAS — and relied on being called solely from inside the per-player pass, where `swapOutPlayer`
+persists it. From anywhere else the next frame's `swapInPlayer` restores the stale floor-50 position,
+which in the freshly-built chamber grid is **outside the world**. `enterTown` and the CLIENT mirror
+both already had the persist line; the host path did not. (3) **`spawnPosition` was never re-seeded**,
+and that one is human-facing, not just a bot problem: it is the RESPAWN anchor every revive path
+teleports to, and it is otherwise written only by `startGame` — so **dying in the secret boss fight
+put any player outside the world with no way back**. `enterArena` already re-seeds its pads; The Source
+was the one relocating world that did not. `--source` is the new dev door (it needs `startGame` FIRST,
+unlike `--town`/`--arena`, because the transition wipes the current floor and moves the live player in)
+— without it the one world an autoplay bot could enter but not play was effectively untestable, which
+is why all three of these survived until a soak reached it three times by accident.
 
 **Autoplay mode (AFK bot).** A main-menu "Autoplay" row and the `--autoplay` dev door start a
 **singleplayer, lane-0-only** run (v1) where a bot plays a full character: navigate, fight per the
@@ -974,13 +1032,20 @@ human, then `forceBot`). Dev door `--autoplay-couch [class]` (lane 1 defaults to
 is melee + ranged); the menu's Autoplay row now also arms on the "Start Local Co-op" and
 "Host online together" branches, which previously armed nothing at all.
 
-**The VHALL "stuck on the stairs" stall was a KNIFE-EDGE, and it cost four wrong fixes to find
-(2026-07-29).** Bots pinned at `y = 2.49-2.50` against a 3.0 m balcony — moving, valid route,
-distance-to-door frozen, for entire floors. The chain: a ramp's final step onto the balcony is ~0.5 m
-and `STEP_UP_HEIGHT` is 0.4 m, so that step is **unwalkable by construction** and a hop is the only way
-up; the hop is gated on `vhClimbing`, which was set by `pos.y < floorDoorPos.y - 0.5f` — a margin
-exactly equal to the riser, so the flag switched off at precisely the height the bot got stuck at.
-Fixed by shrinking the margin to 0.1 m. Two stale gates on the same hop had to go with it: an absolute
+**The VHALL "stuck on the stairs" stall — and the WRONG GEOMETRY STORY it was fixed against
+(2026-07-29, corrected 2026-07-30).** Bots pinned at `y = 2.49-2.50` against a 3.0 m balcony — moving,
+valid route, distance-to-door frozen, for entire floors. This paragraph used to explain it as: "a
+ramp's final step onto the balcony is ~0.5 m and `STEP_UP_HEIGHT` is 0.4 m, so that step is unwalkable
+by construction and a hop is the only way up." **That is FALSE.** `carveVerticalHall`'s `ramp()` raises
+the graduated slab by exactly **1 qu = 0.25 m per cell** — half the step-up threshold — so every step of
+every ramp is walkable and the top reaches the balcony height exactly; dumping the real slab profile
+shows `0.25 0.50 ... 2.75 3.00 3.00`, no step over 0.25 m, and no ramp cell pinned under a slab. There
+is no unwalkable riser and never was. The geometry now states itself in
+`tests/world/test_vertical_hall.cpp` ("ramps are walkable end to end", 24 seed/size combinations) so
+the theory cannot be resurrected by reading this file. The `vhClimbing` margin fix (`- 0.5f` -> `- 0.1f`,
+plus dropping the stale absolute `pos.y < 1.5f` gate and the 4-in-72 duty cycle) is kept — it measured
+1/8 -> 7/8 stall-free runs — but its EXPLANATION was wrong, so treat that A/B as "this helped", not as
+evidence for a riser that does not exist. Two stale gates on the same hop had to go with it: an absolute
 `pos.y < 1.5f` (obsoleted by `vhOnRamp`, which is what actually stops bunny-hopping the flat approach)
 and a duty cycle of 4-in-72 ticks, far too thin on the final riser where the bot is grounded ~half the
 time and combat owns most ticks — it now pulses 4-in-8 within one riser of the exit storey and stays
@@ -995,13 +1060,141 @@ two-story field cannot route off an edge, so when it and the 1-cell lookahead di
 is wrong. And `wouldFall` treats **a slab ABOVE the feet as a climb, never a drop** (`effectiveFloorHeight`
 returns the ground for anything past the 0.4 m step window, which made a 0.5 m riser read as a 2.5 m fall).
 
+**The VHALL ramp pin is a FIELD-ROUTE defect, and the obvious fix for it measured 5x WORSE
+(2026-07-30).** With the enriched autopsy the pin finally showed its mechanism: on a pinned cell the
+ROUTED heading (`fdir`) flips between **+1.00 and -1.00 tick to tick, in exact lockstep with
+`vhOnRamp`** — y stepping 2.25 <-> 2.50, under 0.5 m of travel per 3 s, `rem=vh-commit`, and (this is
+the part that killed the tempting explanations) **`near2=0`, i.e. no enemy within 2 m, and
+`rise=+0.25`, a perfectly walkable step**. It is not a body block, not an unwalkable riser, and not a
+missing rescue. Two producers want opposite directions: `LevelGridSystem`'s two-story VHallField
+routes back DOWN that ramp (the bot mounted a NON-exit ramp), while `Autoplay::rampApproachDir` — an
+anti-drift assist — hard-codes the UP-ramp axis and the call site OVERWRITES the routed heading with
+it. The assist's enable gate (`along <= L + 1`) toggles at the ramp top, so the bot alternates.
+
+**The obvious fix is wrong.** Making the assist take its direction from `dot(flowDir, rampUpAxis)` —
+so a routed descent actually descends — was implemented, unit-tested, and A/B'd properly (ONE binary
+plus an env kill-switch, 6 classes x both arms, run concurrently so GPU load is symmetric, 25 min).
+Result, fix ON vs OFF: **floors reached 21 vs 51** (less than half), **kills 635 vs 1946**, VHALL
+upper-exit pinned samples **2302 vs 1270**, worst floor dwell 1472 vs 1378 s — and OFF wins **5 of the
+6 classes** individually (sorcerer 2 vs 13, paladin 6 vs 18, warrior 2 vs 8). **REVERTED.** The always-up override
+is evidently acting as a RATCHET that eventually walks the bot onto the balcony; remove it and the bot
+faithfully follows a route that climbs a ramp and comes straight back down. So the defect is UPSTREAM
+— the two-story field emitting a down-the-ramp heading from a cell the bot should be climbing — and
+the fix belongs in VHallField's routing, not in relaxing the assist. Do not retry the "assist follows
+the field" shape without measuring it.
+
+**A/B METHOD, learned the hard way here:** build BOTH arms from ONE binary with an env kill-switch.
+The first attempt built the control by `git stash`-ing the source, which also reverted this file's
+telemetry — so the control emitted no `[STALL]` lines at all and the comparison measured the
+instrumentation rather than the behaviour (it read as "0 stalls, fix infinitely worse"). Also: run
+both arms CONCURRENTLY (a sequential A/B on a busy box measures the box), cap at ~12 instances (16
+drops the GPU to ~36 FPS, and a fixed-timestep sim then buys less sim-time per wall-second), and
+check the arms actually launched — a shell `$var` that expands to `FOO=1` is a command word, not an
+assignment, so one arm silently ran with the switch unset.
+
+**The VHALL ramp pin was a LIMIT CYCLE in `belowExit`, not a routing failure (2026-07-30).** The
+enriched autopsy made it unmistakable at scale: in a 67-minute couch soak, **1044 of 1312 pinned stall
+samples (80%) were VERTICAL_HALL**, and **1021 of them sat at feet y = 2.47-2.50 m** against a 3.0 m
+exit storey — with the route valid on 100% of ticks, no enemy within 2 m on 100%, geometry ahead clear
+on 100%, and `door=0` on ZERO samples. Nothing was blocking and nothing was missing.
+`belowExit` gates the ramp-climb assist and read `pos.y < floorDoorPos.y - 0.5f` — a threshold of
+**exactly 2.50 m** on a 3.0 m exit. Below it the assist pushed UP the ramp; at it the assist switched
+OFF and the VHallField's own heading took over, which on a non-exit ramp points back DOWN; the bot
+stepped to 2.25, the assist re-engaged, and it climbed to 2.50 again. **It could never cross its own
+gate.** The escape ladder was armed (`npt > 4 s`) on 99% of those samples and could not help, because
+the bot was not stuck — it was being steered in a circle. Margin 0.5 -> 0.1 m.
+This is the SAME failure shape as the `vhClimbing` margin fixed the day before, on a DIFFERENT flag,
+and it is worth stating as a rule: **on a stacked floor, any "am I below the exit storey" test wants a
+hair of tolerance, not half a metre** — a margin comparable to a storey pitch or a slab thickness will
+sooner or later land exactly on a real surface height and become a trap.
+It also explains why the earlier `rampApproachDir` experiment measured 5x WORSE: that change made the
+assist steer DOWN on the 2.25-2.49 half of the cycle, accelerating the very loop this margin creates.
+**Verification note, honestly:** two paired A/Bs failed to REPRODUCE the pin after the fix — fresh
+characters on the rebalanced build die before reaching a ramp top, and the geared save rolled
+ground-exit floors — so the evidence for this fix is the exact arithmetic match between the threshold
+and 1021 measured samples, plus the soak that follows it, NOT an A/B.
+
+**The boss stall was a SEEK RADIUS one metre too small (2026-07-30).** The second routing failure the
+soak exposed: 251 pinned samples, **all on floor 30**, with `bossG=1` (exit sealed by a live milestone
+boss), a valid heading on 100% of ticks, and `d2d` frozen at **~28.9 m**. The boss seek was gated on
+`dBoss < 25 m` — so at 29 m it never engaged, travel kept aiming at a door that CANNOT open until the
+boss dies, and the bot ground down an endless supply of adds instead. One session spent **1096 s** on
+that floor. The distance gate is now gone entirely: while a milestone boss lives there is nothing else
+on the floor to walk toward, so distance cannot be a reason not to seek it. This only sets the TRAVEL
+heading — the FIGHT branch still preempts for anything nearby, and the clear-line vs wall-aware
+route-field split is untouched, so the "don't beeline through a wall" behaviour still holds.
+Note the DISARM asymmetry between the two stalls, because it explains why neither rescued itself: on
+the VHALL pin `npt` was ABOVE the 4 s escape threshold on 99% of samples (armed and ineffective), while
+on the boss floor it NEVER reached 4 s (chip damage on the adds reset it every second). A rescue keyed
+on a no-progress timer is blind to both.
+
+**VHALL NAVIGATION WAS REWORKED AT THE ROOT (2026-07-30) — the paragraphs above this one describing
+ramp-climb machinery are HISTORY, not current behaviour.** Aaron: "find a way to fix this on a
+conceptual level; we are doing something fundamentally wrong." Two defects, both verified: (1) the
+correct two-story `VHallField` was the LOWEST-priority travel-heading writer, under four stacked
+assists (always-up ramp anti-drift, ground centreline blend, jump-pad beeline, hop-pulse machinery)
+— each a compensation for the previous one's failure; direction-following is memoryless, and on a
+stacked floor a local error changes your STORY, which teleports you elsewhere in the route graph and
+the per-tick re-read silently redirects. (2) The broken catwalk's 2-cell gap genuinely ISOLATES the
+W balcony at 3 m (the "all four balconies interconnect up top" claim was false — the gap is on the W
+arm), and the exit is on W ~25% of floors, so wrong-ramp climbs legitimately route back DOWN — which
+is why the earlier "assist follows the field" fix measured 5x worse. The fix: `carveVerticalHall`
+RECORDS the gap as `DungeonResult::jumpLinks` (from the carve's own variables; property-tested incl.
+the negative pin that W is isolated without them); `VHallField` runs a small-cost Dijkstra with the
+links as cost-3 edges + a per-node u16 `dist`; and a pure NODE-COMMITTED FOLLOWER
+(`autoplay_vhall.{h,cpp}`) executes it — point-servo at a latched node's centre, grounded-only
+releases (arrived / dead node / story change / WALK-only leash / advanced-past-by-dist), and a
+triple-gated jump across the gap (on the lip node ∧ real facing arrived ∧ `StoryNav::planVault`
+viable; 2.5 s blocked-jump timeout + 1.5 s backoff; airborne ticks steer at the landing and NEVER
+re-read the route — the story read over the gap says GROUND). Driver: nothing else writes the VHALL
+travel heading; the travel-commit is bypassed there (the node latch replaces it); the fall veto
+stands down ONLY on the takeoff tick (whose own gates are stricter); dodge/block suppressed for that
+tick only. All four assists + the pad cache/goal + `vhClimbing`/`vhOnRamp` and both hop-pulse sites
+are DELETED. Measured: A/B (one binary + env switch since stripped, 6 classes x both arms, 25 min,
+--vhall) floors 71 vs 49, kills 2223 vs 1535, upper-exit pins 132.5 vs 223/bot-h, worst dwell 874 vs
+1425 s, 4 of 6 classes; confirming 2 h couch soak: VHALL fell from **78% of all pinned stall samples
+to 6%**, **8/9 sessions reached floor 50** (was 6/9), residual VHALL pins are entrance death-cycling
+on the rebalanced difficulty (all WALK-mode, ground story, no enemy contact), zero pins in the jump
+modes. `[STALL]` now carries `vd=` (remaining route cost — frozen vd with large net travel is the
+circling detector) and `fm=` (follower mode). Plan: `~/.claude/plans/rosy-percolating-wreath.md`.
+
+**THE NEW TOP STALL (2026-07-30 soak): a GAUNTLET escape-ladder livelock.** With VHALL fixed, the
+worst remaining floor was 7102 s on a gauntlet floor: BOTH couch lanes pinned in a 1-cell pocket
+8-10 m from an OPEN door, route valid (`fdir` steady toward it), `rem=escape` on 908/908 samples —
+the escape ladder owned the intent for two hours, emitting alternating +-z lateral nudges
+perpendicular to the route while both bots fired at 4 targets they never damaged (`npt` climbed to
+7074 s: the false-LOS standoff shape). The ladder never tried the route direction and never gave up.
+Untouched by the follower work (`vd=65535, fm=0` — not VHALL); needs its own pass on the ladder's
+stage escalation.
+
 **A stalled floor now explains itself.** `[STALL]` (`engine_autoplay.cpp`, shipped ON, no env gate)
-fires every 15 s once a single floor has run over 5 minutes, reporting route / commanded movement /
-grounded / height vs exit height / distance-to-door / target count / fire / no-progress timer / layout
-style. It is cheap because it is rare, and it exists because the last several stalls each cost a
-rebuild-with-a-tracer and a half-hour re-run to diagnose — the knife-edge above had been sitting in the
-logs as `y=2.50 exitY=3.0` since the first trace of the day and only became chaseable once every stuck
-floor printed it automatically.
+fires once a single floor has run over 5 minutes. It exists because the last several stalls each cost a
+rebuild-with-a-tracer and a half-hour re-run to diagnose. The first version reported only route /
+commanded movement / grounded / height / distance-to-door / targets / fire / no-progress timer / style,
+and a 3 h couch soak proved that **is not enough to diagnose anything**: it cannot tell a body that is
+WEDGED from one walking a 1 m loop, cannot say whether the step the route wants is even possible, and
+cannot say which producer is driving. So it now also reports **net XZ travel between dumps** (wedge vs
+churn), the **geometry under and ahead of the body** (`cell` / `surf` / `ahead` / `rise`, flagged
+`NEEDS-JUMP` past `STEP_UP_HEIGHT` and `WALL` if solid — "can the body make the step it is being asked
+to make?"), **hostiles within 2 m and 1.2 m** (body-block vs geometry), the **routed heading vs the
+heading the WASD actually encode** (`fdir` / `mdir` — a producer conflict shows as these disagreeing or
+reversing), the VHALL ramp flags, and a **`rem=` tag naming the branch that owns the intent**
+(`brain` / `vh-commit` / `descent-cmt` / `escape` / `bull` / `breakoff` / `wedge` / `descend`), so
+"the rescue never fired" and "the rescue fired and did not work" stop looking identical. The dump timer
+is **per-lane** (it was a function-local `static`, i.e. one timer shared by both couch lanes, so a couch
+stall log was two half-sampled bots). `AUTOPLAY_STALL_SEC=<n>` overrides the 5-minute gate for a repro
+run (and under 300 it samples every 3 s instead of 15, because a 15 s sample aliases an oscillation
+away). The added fields immediately overturned TWO standing explanations: the unwalkable-riser story
+above, and a fresh body-blocking hypothesis of my own — `near2=0` on 9 of 9 pinned samples killed it
+before it became a fix.
+
+**Couch soaks were reporting DOUBLE every duration (fixed 2026-07-30).** `m_autoplayRunTime` /
+`m_autoplayFloorTime` / `m_autoplayHbTimer` are deliberately GLOBAL (one run, one floor, one clock),
+but `updateAutoplay` runs once per LOCAL LANE — so with two lanes every one of them advanced at 2x real
+time. A 3 h couch soak reported `elapsed=21525`, the "30 s" heartbeat fired every 15 s, per-floor dwell
+read double, and the `[STALL]` autopsy's 5-minute gate tripped after 2.5 real minutes. They now advance
+once per FRAME (`m_localPlayerIndex == 0`). Any duration read off a couch soak logged before this is
+2x too large — halve it before comparing against a singleplayer run.
 
 **The AFK revive could STRAND a run on the death screen — the real "autoplay gets stuck" (measured
 2026-07-28).** An 8-run back-to-back Descent stress test had **6 of 8 runs go completely silent for
@@ -1165,6 +1358,19 @@ W through that lag walks the bot wherever it happened to be pointing, which in a
 wall. The heading is projected onto the CURRENT forward/right basis (matching `player.cpp` exactly) so the
 bot steps sideways out of the corner immediately and straightens as the turn completes. This affects
 **every** layout, and flat floors measured slightly better after it, not worse.
+
+**What a 3 h / 9-session COUCH soak says (2026-07-30, 18 bot-played characters, ~27 GPU-hours).**
+The run is healthy in the ways that are easy to get wrong and broken in one specific way. **RSS is
+flat** — 118-125 MB -> 139-143 MB per process over 3 h, plateauing, no leak (the `AllocationTracker`
+"1.3 GB still live at shutdown" is exactly the churn artefact documented above; do not chase it).
+**Six of nine sessions reached Hell floor 50** (eff=150), 46,719 kills, `deaths == revives` held. But
+**36% of the entire soak was five bots stuck on ONE floor each**: 4568 / 8242 / 5095 / 7310 / 9268 s of
+single-floor dwell (durations halved for the couch double-count fixed above). Of 5003 `[STALL]`
+samples, **VERTICAL_HALL is 78%** — cavern 13%, descent 6%, and rooms/hub/gauntlet ~2.5% combined, so
+the flat styles are essentially solved and the stacked ones are not. The three worst floors were all
+VHALL upper-exit, and the cleanest of them had **`tgts=0`** — no enemies at all, the bot commanding
+movement for 2.6 hours against pure geometry with the no-progress timer at **6828 s** while the escape
+ladder's threshold is 4 s. A rescue being "armed" is not the same as it working.
 
 **Where v1 actually stands (measured, 2026-07-24).** On **flat** floors (`rooms` / `cavern` / `gauntlet` /
 `hub`) the bot plays unattended for all three archetypes — in ~2-minute `--autoplay --new` runs a Warrior

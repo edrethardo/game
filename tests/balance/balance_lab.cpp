@@ -24,10 +24,19 @@ EnemyCurve enemyTrashAt(const EnemyDefTable& table, u8 rawFloor, u8 difficulty) 
     const u32 n = collectTierDefs(table, enemyTierForFloor(rawFloor), defs, MAX_ENEMY_DEFS);
     if (n == 0) return c;
 
-    // The exact spawn-time scaling path (engine_spawn.cpp): HP compounds via floorHealthMult,
-    // damage is linear floorDamageMult x the per-tier difficulty bump.
+    // The exact spawn-time scaling path (engine_spawn.cpp): HP compounds via floorHealthMult AND
+    // takes the per-tier difficultyHealthBump; damage is linear floorDamageMult x its own per-tier
+    // difficultyDamageBump.
+    //
+    // difficultyHealthBump was MISSING here until 2026-07-30, and the comment above it already
+    // claimed to be "the exact spawn-time scaling path" — so the omission read as deliberate. The
+    // engine applies it at every spawn site (trash, nests, boss, Source), so the lab was
+    // under-reporting enemy HP by the whole bump: 3x for Nightmare and 1.5x for Hell at the time it
+    // was found. Every deep-tier HP/TTK number the lab had ever produced was wrong, which means the
+    // tier could not be tuned against its own report — exactly the scorer-drift failure the lab's
+    // four single-source extractions exist to prevent, re-created by simply forgetting a term.
     const u32 eff   = effectiveFloor(rawFloor, difficulty);
-    const f32 hpMul = GameConst::floorHealthMult(eff);
+    const f32 hpMul = GameConst::floorHealthMult(eff) * GameConst::difficultyHealthBump(difficulty);
     const f32 dmMul = GameConst::floorDamageMult(eff) * GameConst::difficultyDamageBump(difficulty);
 
     f32 hp[MAX_ENEMY_DEFS], hit[MAX_ENEMY_DEFS], dps[MAX_ENEMY_DEFS];
@@ -56,7 +65,8 @@ BossCurve bossAt(const BossDefTable& table, u8 rawFloor, u8 difficulty) {
     const u32 eff = effectiveFloor(rawFloor, difficulty);
     c.present = true;
     c.name    = bd->name;
-    c.hp      = bd->baseHp  * GameConst::floorHealthMult(eff);
+    c.hp      = bd->baseHp  * GameConst::floorHealthMult(eff)
+              * GameConst::difficultyHealthBump(difficulty);   // see the trash path above
     c.hit     = bd->baseDmg * GameConst::floorDamageMult(eff)
               * GameConst::difficultyDamageBump(difficulty);
     c.dps     = (bd->atkCooldown > 0.0f) ? c.hit / bd->atkCooldown : c.hit;

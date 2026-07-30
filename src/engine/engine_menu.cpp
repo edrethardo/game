@@ -411,7 +411,6 @@ void Engine::enterAutoplayRun(bool freshCharacter) {
     m_autoplayFloorStartDeaths = 0;
     m_autoplayFloorStartKills  = 0;
     m_autoplayHbTimer         = 0.0f;
-    m_autoplayPadFloor        = 0xFFFFFFFFu;   // rescan jump pads on the first floor of the run
     AP.descentStory    = 1e9f;          // re-adopt the spawn storey on the first Descent floor
     // (AP.bossRoute needs no reset — its staleness stamp is the floor's seed identity, which a
     // new run/floor can never match, exactly like the Descent/VHall fields.)
@@ -436,7 +435,6 @@ void Engine::enterAutoplayRun(bool freshCharacter) {
     AP.gapCloseCd  = 0.0f;
     AP.lookBehindTimer = 0.0f;
     AP.lookBehindDone  = false;
-    AP.vhClimbing  = false;
     }
     // The two story flow fields need no reset here: their staleness stamp is the floor's seed
     // identity (levelSeed + floor + difficulty, see buildBotView), which a new run can never match.

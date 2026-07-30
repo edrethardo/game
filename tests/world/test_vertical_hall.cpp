@@ -15,6 +15,8 @@
 #include <doctest/doctest.h>
 #include "world/level_gen.h"
 #include "world/level_grid.h"
+#include "world/collision.h"   // STEP_UP_HEIGHT — the walk-up threshold the ramp gradient must respect
+#include <algorithm>
 
 #include <cmath>
 #include <vector>
@@ -189,4 +191,158 @@ TEST_CASE("Migration: setPlatform collapses an overlapping-band double-write to 
     CHECK(c.platCount == 1);
     CHECK(c.platHeight[0] == 8);              // last write wins — no accumulation
     CHECK(c.platHeight[1] == 0);
+}
+
+// EVERY RAMP STEP MUST BE WALKABLE. The pinwheel ramps are the only route from the ground story to
+// the balconies, and `ramp()` raises the graduated slab by exactly 1 qu (0.25 m) per cell — half the
+// 0.4 m STEP_UP_HEIGHT — so a body walks the whole climb without jumping.
+//
+// This is pinned because the project spent a long time believing the opposite. CLAUDE.md asserted
+// that "a ramp's final step onto the balcony is ~0.5 m and STEP_UP_HEIGHT is 0.4, so that step is
+// unwalkable by construction and a hop is the only way up", and an Autoplay fix (the vhClimbing
+// margin) was built on that premise. Dumping the real slab profile showed every step is 0.25 m and
+// no ramp cell is pinned under a slab: the bots stalling at y=2.50 were NOT failing an unwalkable
+// riser. A wrong belief about geometry sent two fixes to the wrong place, so the geometry now states
+// itself in a test — if someone later makes the climb genuinely unwalkable, this fails rather than
+// quietly resurrecting that theory.
+TEST_CASE("VERTICAL_HALL ramps are walkable end to end (no step exceeds STEP_UP_HEIGHT)") {
+    for (u32 N : {44u, 52u}) {
+        for (u32 seed = 1; seed <= 12; seed++) {
+            LevelGrid g;
+            LevelGridSystem::init(g, N, N, 2.0f);
+            const DungeonResult r = LevelGen::generate(g, seed, N, N,
+                                                       LevelGen::LayoutStyle::VERTICAL_HALL);
+            REQUIRE(r.portalCount > 0);
+            for (u8 k = 0; k < r.portalCount; k++) {
+                const Vec3 lo = r.portals[k].lowPos, hi = r.portals[k].highPos;
+                const s32 x0 = (s32)(lo.x / g.cellSize), z0 = (s32)(lo.z / g.cellSize);
+                const s32 x1 = (s32)(hi.x / g.cellSize), z1 = (s32)(hi.z / g.cellSize);
+                const s32 dx = (x1 > x0) - (x1 < x0), dz = (z1 > z0) - (z1 < z0);
+                const s32 n  = std::max(std::abs(x1 - x0), std::abs(z1 - z0));
+                f32 prev = 0.0f;                       // the corner floor the foot abuts
+                for (s32 i = 0; i <= n; i++) {
+                    const u32 x = (u32)(x0 + dx * i), z = (u32)(z0 + dz * i);
+                    f32 top = 0.0f;
+                    for (u8 pi = 0; pi < LevelGridSystem::platformCount(g, x, z); pi++)
+                        top = std::fmax(top, LevelGridSystem::getPlatformTop(g, x, z, pi));
+                    CHECK(top - prev <= STEP_UP_HEIGHT);
+                    // ...and the climb must never trap the body under the slab above it.
+                    CHECK_FALSE(LevelGridSystem::bodyPinnedUnderSlab(g, x, z, top));
+                    prev = top;
+                }
+                // The top must actually reach the balcony story, not end in mid-air.
+                CHECK(prev == doctest::Approx(hi.y));
+            }
+            LevelGridSystem::shutdown(g);
+        }
+    }
+}
+
+// THE BROKEN CATWALK'S GAP IS RECORDED AS A JUMPABLE EDGE — and the record must agree with the
+// geometry it describes. jumpLinks is the ledger the two-story route field reads to treat the gap as
+// an edge; if it ever drifts from the carve (wrong cells, wrong height, gap not actually 2 void
+// cells) the bot would confidently jump into a wall or a hole that isn't there.
+TEST_CASE("VERTICAL_HALL records the broken-catwalk jump links, and they match the geometry") {
+    for (u32 N : {44u, 52u}) {
+        for (u32 seed = 1; seed <= 12; seed++) {
+            LevelGrid g;
+            LevelGridSystem::init(g, N, N, 1.0f);
+            const DungeonResult r = LevelGen::generate(g, seed, N, N,
+                                                       LevelGen::LayoutStyle::VERTICAL_HALL);
+            REQUIRE(r.jumpLinkCount == 2);   // one per catwalk row (the catwalk is 2 wide)
+            for (u8 k = 0; k < r.jumpLinkCount; k++) {
+                const Vec3 a = r.jumpLinks[k].a, b = r.jumpLinks[k].b;
+                CHECK(a.y == doctest::Approx(3.0f));
+                CHECK(b.y == doctest::Approx(3.0f));
+                CHECK(a.z == doctest::Approx(b.z));           // a jump runs along one row
+                const u32 ax = (u32)(a.x / g.cellSize), az = (u32)(a.z / g.cellSize);
+                const u32 bx = (u32)(b.x / g.cellSize);
+                // Both lips are 3 m slab cells...
+                CHECK(LevelGridSystem::hasPlatform(g, ax, az));
+                CHECK(LevelGridSystem::getPlatformTop(g, ax, az) == doctest::Approx(3.0f));
+                CHECK(LevelGridSystem::hasPlatform(g, bx, az));
+                CHECK(LevelGridSystem::getPlatformTop(g, bx, az) == doctest::Approx(3.0f));
+                // ...separated by EXACTLY the 2-cell void gap, and every between-cell is slab-free
+                // (this is the "record can't drift from the carve" pin).
+                CHECK(bx - ax == 3);
+                for (u32 x = ax + 1; x < bx; x++)
+                    CHECK_FALSE(LevelGridSystem::hasPlatform(g, x, az));
+            }
+            LevelGridSystem::shutdown(g);
+        }
+    }
+}
+
+// THE LINK IS LOAD-BEARING: with it the upper storey is ONE component (any ramp top reaches every
+// balcony at 3 m), without it the WEST balcony is ISOLATED. The first half is the property the whole
+// navigation rework rests on — "crest any ramp -> walk the upper loop -> door" is only the shortest
+// route because the link completes the loop. The second half pins the reason the link exists at all,
+// so a future carve change that quietly heals the gap (making the link dead code) fails here and has
+// to say so.
+TEST_CASE("VERTICAL_HALL upper storey: connected WITH the jump links, W balcony isolated WITHOUT") {
+    for (u32 N : {44u, 52u}) {
+        for (u32 seed = 1; seed <= 8; seed++) {
+            LevelGrid g;
+            LevelGridSystem::init(g, N, N, 1.0f);
+            const DungeonResult r = LevelGen::generate(g, seed, N, N,
+                                                       LevelGen::LayoutStyle::VERTICAL_HALL);
+            REQUIRE(r.portalCount == 4);
+            REQUIRE(r.jumpLinkCount == 2);
+
+            // 4-connected flood over 3 m slab cells, optionally hopping the recorded links.
+            auto flood = [&](u32 sx, u32 sz, bool useLinks, std::vector<u8>& vis) {
+                std::vector<std::pair<u32,u32>> q{{sx, sz}};
+                vis.assign(g.width * g.depth, 0);
+                vis[sz * g.width + sx] = 1;
+                auto push = [&](u32 x, u32 z) {
+                    if (x >= g.width || z >= g.depth || vis[z * g.width + x]) return;
+                    if (!LevelGridSystem::hasPlatform(g, x, z)) return;
+                    if (std::fabs(LevelGridSystem::getPlatformTop(g, x, z) - 3.0f) > 0.01f) return;
+                    vis[z * g.width + x] = 1; q.push_back({x, z});
+                };
+                while (!q.empty()) {
+                    auto [x, z] = q.back(); q.pop_back();
+                    push(x + 1, z); push(x - 1, z); push(x, z + 1); push(x, z - 1);
+                    if (useLinks) {
+                        for (u8 k = 0; k < r.jumpLinkCount; k++) {
+                            const u32 ax = (u32)(r.jumpLinks[k].a.x / g.cellSize),
+                                      az = (u32)(r.jumpLinks[k].a.z / g.cellSize),
+                                      bx = (u32)(r.jumpLinks[k].b.x / g.cellSize);
+                            if (x == ax && z == az) push(bx, az);
+                            if (x == bx && z == az) push(ax, az);
+                        }
+                    }
+                }
+            };
+            // Balcony centres: the ramp TOPS are on the balconies (one per balcony by construction),
+            // so "every ramp top reaches every other ramp top" == "the upper storey is one loop".
+            std::vector<u8> vis;
+            for (u8 from = 0; from < 4; from++) {
+                const u32 sx = (u32)(r.portals[from].highPos.x / g.cellSize);
+                const u32 sz = (u32)(r.portals[from].highPos.z / g.cellSize);
+                flood(sx, sz, /*useLinks=*/true, vis);
+                for (u8 to = 0; to < 4; to++) {
+                    const u32 tx = (u32)(r.portals[to].highPos.x / g.cellSize);
+                    const u32 tz = (u32)(r.portals[to].highPos.z / g.cellSize);
+                    CHECK(vis[tz * g.width + tx] == 1);
+                }
+            }
+            // Negative pin: WITHOUT the links, at least one ramp-top pair is unreachable (the W
+            // balcony's). Assert the disconnection exists rather than naming W — the carve owns
+            // which arm carries the gap, the test only owns that a gap severs the loop.
+            u32 disconnected = 0;
+            {
+                const u32 sx = (u32)(r.portals[0].highPos.x / g.cellSize);
+                const u32 sz = (u32)(r.portals[0].highPos.z / g.cellSize);
+                flood(sx, sz, /*useLinks=*/false, vis);
+                for (u8 to = 0; to < 4; to++) {
+                    const u32 tx = (u32)(r.portals[to].highPos.x / g.cellSize);
+                    const u32 tz = (u32)(r.portals[to].highPos.z / g.cellSize);
+                    if (!vis[tz * g.width + tx]) disconnected++;
+                }
+            }
+            CHECK(disconnected > 0);
+            LevelGridSystem::shutdown(g);
+        }
+    }
 }

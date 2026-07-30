@@ -53,6 +53,10 @@ struct LaunchOptions {
 
     bool town = false;                         // --town: after --load/--new, enter the TOWN hub
     bool arena = false;                        // --arena: after --load/--new, enter the PvP ARENA
+    // --source: after --load/--new, go straight into The Source (the secret Engine fight). Normally
+    // it costs a full 50-floor run with all ten shards, which made the one world an autoplay bot can
+    // enter but not play effectively untestable — a 3 h soak reached it three times by accident.
+    bool source = false;
     bool arenaCouch = false;                   // --arena-couch: local-versus arena, two fresh lanes
     bool autoplayCouch = false;                // --autoplay-couch: split-screen, BOTH lanes bot-driven
     bool verticalHall = false;                 // --vhall: force the two-story VERTICAL_HALL layout on non-boss floors (dev)

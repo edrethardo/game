@@ -455,9 +455,15 @@ No flags / `--help` / any invalid value → a warning + usage and a normal menu 
 | `--town` | dev door: land the hero in the TOWN hub (skips `startGame`) |
 | `--arena` | dev door: straight into the PvP ARENA (with `--host`: hosts it; joiners follow the sentinel seed) |
 | `--arena-couch` | local-versus arena: two fresh lanes of `--new`'s class, split-screen |
+| `--source` | dev door: straight into THE SOURCE (the secret Engine fight). Unlike `--town`/`--arena` it runs `startGame` FIRST, because `enterSourceChamber` wipes the current floor and moves the live player in. Reaching it legitimately costs a clean 50-floor run holding all ten shards, so without this the chamber was effectively untestable |
 | `--vhall` / `--fourstory` / `--lava` | force the next floor's layout (VERTICAL_HALL / FOUR_STORY / Hellforge lava) — modifiers on `--new`/`--load`, not standalone |
 | `--autoloot` | force Auto Loot & Equip on lane 0 |
 | `--autoplay` | arm the lane-0 Autoplay bot (implies `--autoloot`); a singleplayer AFK run (see CLAUDE.md "Autoplay mode") |
+| `--autoplay-couch [class]` | split-screen with BOTH lanes bot-driven; lane 1 defaults to Marksman so the pair is melee + ranged |
+
+**Env overrides (diagnostics, not flags):** `AUTOPLAY_STALL_SEC=<n>` lowers the `[STALL]` autopsy's
+5-minute gate so a short repro run emits the per-tick geometry dump (under 300 it also samples every
+3 s instead of 15, since a 15 s sample aliases an oscillation away).
 
 Examples: `DungeonEngine --host --load 1` · `--host --new sorcerer --floor 5 --lan` ·
 `--join 192.168.1.5 --load 2` · `--load 3` · `--arena --host --lan --new warrior`. JOIN ends in

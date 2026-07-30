@@ -52,9 +52,16 @@ TEST_CASE("enemy trash curve: multiplier path matches the spawn code exactly") {
     const u32 n = collectTierDefs(t, enemyTierForFloor(rawFloor), defs, MAX_ENEMY_DEFS);
     REQUIRE(n > 0);
     f32 hp[MAX_ENEMY_DEFS], hit[MAX_ENEMY_DEFS], dps[MAX_ENEMY_DEFS];
+    // BOTH per-tier bumps, mirroring engine_spawn.cpp. This test used to omit difficultyHealthBump
+    // on the HP line while applying difficultyDamageBump on the damage line — so it PINNED the lab's
+    // own missing term instead of catching it, and the deep-tier HP in every report the lab produced
+    // was understated by the whole bump (3x Nightmare, 1.5x Hell when it was found, 2026-07-30).
+    // A model test that re-derives the formula from the same constants the code uses can only catch
+    // a typo; it catches an omission only if it is written against the ENGINE's site, not the lab's.
     const f32 dmMul = GameConst::floorDamageMult(eff) * GameConst::difficultyDamageBump(difficulty);
+    const f32 hpMul = GameConst::floorHealthMult(eff) * GameConst::difficultyHealthBump(difficulty);
     for (u32 i = 0; i < n; i++) {
-        hp[i]  = defs[i]->health * GameConst::floorHealthMult(eff);
+        hp[i]  = defs[i]->health * hpMul;
         hit[i] = defs[i]->damage * dmMul;
         // Per-hit fallback when cooldown<=0 — mirrors the lab's guard for a malformed def.
         dps[i] = (defs[i]->attackCooldown > 0.0f) ? hit[i] / defs[i]->attackCooldown : hit[i];
@@ -95,7 +102,8 @@ TEST_CASE("boss curve exists on every authored boss floor and scales like the sp
         const BalanceLab::BossCurve c = BalanceLab::bossAt(bt, bd.floor, 1);   // Nightmare
         CHECK(c.present);
         const u32 eff = bd.floor + 50u;
-        CHECK(c.hp  == doctest::Approx(bd.baseHp  * GameConst::floorHealthMult(eff)));
+        CHECK(c.hp  == doctest::Approx(bd.baseHp  * GameConst::floorHealthMult(eff)
+                                       * GameConst::difficultyHealthBump(1)));
         CHECK(c.hit == doctest::Approx(bd.baseDmg * GameConst::floorDamageMult(eff)
                                        * GameConst::difficultyDamageBump(1)));
         if (bd.atkCooldown > 0.0f)

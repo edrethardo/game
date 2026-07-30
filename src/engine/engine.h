@@ -338,8 +338,6 @@ private:
         f32              travelHold = 0.0f;      // s left on the commit
         u32              velId[AIM_VEL_SLOTS]  = {};   // 0 = free slot
         Vec3             velEma[AIM_VEL_SLOTS] = {};
-        bool             vhClimbing = false;
-        bool             vhOnRamp = false;
         bool             vhCommit = false;
         bool             descentCommit = false;
         u8               blockStreak      = 0;      // perfect blocks landed this streak
@@ -358,8 +356,14 @@ private:
         Autoplay::DescentField descent;
         f32 descentStory = 1e9f;
         Autoplay::VHallField vHall;
-        s8               padGoal  = -1;
-        u32              padGoalTick = 0;   // tick it was picked, so a hopeless goal is released
+        // Node-committed follower state (the VHALL executor; see autoplay_vhall.h). The two
+        // per-tick stash fields carry the follower's takeoff request from buildBotView to the jump
+        // injection + fall-veto exemption later in updateAutoplay — cleared at the top of the VHALL
+        // branch every tick, so a stale press can never fire on a later frame.
+        Autoplay::VHallFollow vhFollow;
+        bool vhFollowJump    = false;     // this tick: the follower wants the committed jump pressed
+        Vec3 vhFollowJumpDir = {0,0,0};   // the committed link axis (injection gate + veto exemption)
+        u16  vhFollowDist    = 0xFFFF;    // remaining route cost at the bot's node ([STALL] vd=)
         f32              lookBehindTimer = 0.0f; // >0 = mid look-behind, holding the reversed aim
         f32              lookBehindYaw   = 0.0f; // the reversed yaw captured when the turn armed
         bool             lookBehindDone  = false;// this stuck episode has already spent its turn
@@ -367,6 +371,13 @@ private:
         f32            throwLeash    = 0.0f;   // s until the bot may throw again
         f32            reloadThrow   = 0.0f;   // s until the next THROWAWAY reload throw
         bool           reloadPulse   = false;  // one-tick RELOAD press for the reload throw
+        // --- STALL AUTOPSY (per-lane; see the [STALL] emitter in engine_autoplay.cpp). The dump
+        // cadence used to be a function-local `static`, i.e. ONE timer shared by both couch lanes:
+        // each lane's dt advanced it, so it fired at half the intended period and alternated lanes,
+        // which is why a couch stall log reads as two half-sampled bots instead of two bots.
+        f32            stallDumpT    = 0.0f;   // s since this lane last dumped
+        Vec3           stallAnchor   {0,0,0};  // position at the last dump — net travel between dumps
+        const char*    remedy        = "-";    // which producer owned the intent this tick
     };
     AutoplayLane m_apLanes[MAX_LOCAL_PLAYERS];
     AutoplayLane&       ap()       { return m_apLanes[m_localPlayerIndex < MAX_LOCAL_PLAYERS ? m_localPlayerIndex : 0]; }
@@ -444,18 +455,6 @@ private:
     // against 2.4 deg without, a 10x amplification, at ~11-22 direction reversals per second. That
     // is the "ultra high frequency low amplitude" shake, and it is ranged-only because melee and
     // hitscan aim straight at t.pos. One EMA per tracked target, matched by entity id.
-    // Set each tick buildBotView routes an UNFINISHED climb (the exit is up and the bot is below it).
-    // updateAutoplay reads it to pulse a climb-assist JUMP: the VERTICAL_HALL ramps are narrow 2-wide
-    // graduated slabs, and the eased-aim + WASD walk drifts the bot off the strip and slides it back
-    // down before it can crest — measured, on some seeds it never got past ~1 m of a 3 m climb. A
-    // periodic hop while climbing carries it up over the risers and back onto the slab. Reset false
-    // whenever not actively climbing (crossed, descending, or off VERTICAL_HALL).
-    // The bot is close enough to the EXIT RAMP segment that the climb-assist hop should fire (set in
-    // buildBotView from rampSegDistXZ). The hop must NOT fire during the flat approach: pulsing a jump
-    // while walking the void ground bunny-hops the bot across it (airborne half the time), which under
-    // the airborne fall-veto carve-out means it never settles onto a void pad to be launched and crawls
-    // to the ramp foot ("bunnyhopping while approaching the pad doesn't work"). Gated to ~3.5 m of the
-    // ramp, the bot WALKS grounded to the foot / onto the pad and only pogos up the narrow riser slab.
     // VHALL COMMIT latch. On a VERTICAL_HALL upper-exit floor the bot climbs to the balcony story but
     // then FIGHTS the balcony swarm in place (kite/strafe, never walking to the door) and falls back off
     // the rim — the "climb-roam" that dominated the deep-floor stalls (measured: 5 of 6 genuine stalls in
@@ -511,9 +510,6 @@ private:
     // bot — it only ever climbed the ramp and never used the pad. Cached (cluster centres, deduped) so
     // the bot can route to one to CLIMB to an upper exit: a pad flings it up a story reliably, which is
     // exactly what the pad is for, instead of fighting the narrow ramp. Rescanned on a floor change.
-    Vec3             m_autoplayPadCells[8];
-    u8               m_autoplayPadCount = 0;
-    u32              m_autoplayPadFloor = 0xFFFFFFFFu;
     // COMMITTED pad goal for a VHALL climb (-1 = none). The pad is the RELIABLE way up a two-story
     // floor — one launch clears the storey — while the 2-wide graduated ramp is the flaky part of the
     // climb, so on an upper-exit floor the bot goes for a pad FIRST and only falls back to the ramp

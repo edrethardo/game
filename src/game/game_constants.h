@@ -70,7 +70,22 @@ namespace GameConst {
     // it makes trash meatier wherever the linear curve governs (all of Normal, the first floors
     // of Nightmare); from effective floor 53 the compounding curve takes over (see
     // DIFFICULTY_HP_COMPOUND_RATE), so mid-Nightmare and Hell don't notice.
-    static constexpr f32 FLOOR_STAT_MULT     = 0.12f;
+    // 0.12 -> 0.345 (2026-07-30, Aaron: "make the game more difficult"). The balance lab measured
+    // Normal STILL INVERTING despite the 0.10 -> 0.12 pass above: trash TTK fell 0.86 s at floor 1 to
+    // 0.33 s at floor 50 while hits-to-die ROSE 3.5 -> 11-17, i.e. deep Normal was the safest place in
+    // the game by a wide margin. The cause is arithmetic, not tuning: player DPS grows ~26.9x from
+    // floor 1 to 50 (item level), and at 0.12 enemy HP grew only 10.3x, so the gap widened every floor.
+    // 0.345 is SOLVED against that measurement, not chosen by feel — (1 + 49*0.345) * 1.5 = 26.8x
+    // matches the 26.9x DPS growth, which flattens Normal's TTK curve instead of merely lifting it.
+    //
+    // It leaks into EARLY Nightmare on purpose. floorHealthMult takes max(linear, compounding), so the
+    // steeper line now governs up to effective floor ~92 (was ~53) — which lifts Nightmare floors 1-42
+    // (2.7x at NM 1, tapering to 1.0 at NM 42) and leaves NM 50 and ALL of Hell exactly as they were,
+    // since compounding still dominates there. That is the right shape: the tier-entry dip (Hell 1 is
+    // a deliberate 0.52x step down from NM 50) was the other place the curve read as getting easier.
+    static constexpr f32 FLOOR_STAT_MULT     = 0.345f;
+    // Last effective floor of Normal — where the linear HP term stops growing (see floorHealthMult).
+    static constexpr u32 NORMAL_LAST_FLOOR   = 50;
 
     // Floor-10+ enemy toughness pass (2026-07-26, Aaron: "mobs in tier 10+ have 50% more HP").
     // Folded into floorHealthMult (below) — the ONE source every spawn site, the boss AI, and the
@@ -109,7 +124,14 @@ namespace GameConst {
     // tier while Normal's slope-side damage rose +17% at floor 5 and +37% at floor 50 (+45%/+70%
     // total with its 1.25 -> 1.55 bump). Do not reach for this to make the endgame hurt — reach for
     // the bump.
-    static constexpr f32 FLOOR_DAMAGE_MULT   = 0.24f;
+    // 0.24 -> 0.40 (2026-07-30, same pass). Normal's hits-to-die was 5.5-17.5 from floor 10 on — the
+    // player out-tanking the curve exactly as it out-damaged it. This lifts Normal damage ~1.5-1.6x
+    // from floor 10 upward while leaving floor 1 alone (the slope's "+1" dominates there).
+    //
+    // Per the note above, the slope is a NORMAL dial: it cannot move Hell, and both deep-tier bumps
+    // are RE-SOLVED against it below so Nightmare and Hell land exactly where this pass intends
+    // rather than being dragged by a lever aimed at Normal.
+    static constexpr f32 FLOOR_DAMAGE_MULT   = 0.40f;
 
     // --- Difficulty / floor enemy scaling ----------------------------------------
     // Every enemy scales by its "effective floor" = raw floor + difficulty*50
@@ -153,12 +175,34 @@ namespace GameConst {
     // Called once per enemy spawn, never per frame.
     inline f32 floorHealthMult(u32 effectiveFloor) {
         if (effectiveFloor < 1) effectiveFloor = 1;
-        f32 linear = 1.0f + static_cast<f32>(effectiveFloor - 1) * FLOOR_STAT_MULT;
         // (1 + rate)^(effectiveFloor-1) by repeated multiply — keeps this header free of
         // <cmath> and is exact enough; effectiveFloor <= ~150 so the loop is trivial.
         f32 comp = 1.0f;
         for (u32 i = 1; i < effectiveFloor; ++i) comp *= (1.0f + DIFFICULTY_HP_COMPOUND_RATE);
-        f32 mult = comp > linear ? comp : linear;
+
+        // THE LINEAR TERM GOVERNS NORMAL; THE DEEP TIERS RIDE COMPOUNDING ALONE.
+        //
+        // This used to be an unconditional max(linear, compounding), so that a compounding change
+        // could only ever make enemies tougher. At the old shallow 0.12 slope that was harmless —
+        // compounding overtook at effective floor 53, so the line never really governed a deep tier.
+        // At the 0.345 slope needed to fix Normal's inverted curve it is NOT harmless: the line would
+        // have governed to effective floor ~92 and dragged early Nightmare up with a lever aimed
+        // squarely at Normal (measured: Nightmare floor 10 at 6.6 s trash TTK against 1.7
+        // hits-to-die — a bullet sponge and a glass cannon at once, both failure modes the tier notes
+        // below warn about). Clamping the floor ARGUMENT instead was worse in a subtler way: it
+        // pinned the line at a constant 17.9x for Nightmare's first ~25 floors while player DPS kept
+        // climbing, which re-created inside Nightmare exactly the inverted curve this pass exists to
+        // remove.
+        // So the split is explicit. Normal keeps max(linear, compounding); past Normal the linear
+        // term is simply not part of the curve. The cost is that Nightmare floors 1-2 lose the ~2%
+        // the old line contributed there — the only place the max() was ever load-bearing.
+        f32 mult;
+        if (effectiveFloor <= NORMAL_LAST_FLOOR) {
+            const f32 linear = 1.0f + static_cast<f32>(effectiveFloor - 1) * FLOOR_STAT_MULT;
+            mult = comp > linear ? comp : linear;
+        } else {
+            mult = comp;
+        }
         // Floor-10+ toughness pass (see TIER10_HP_BOOST above): +50% HP from floor 10 upward.
         if (effectiveFloor >= TIER10_HP_BOOST_FLOOR) mult *= TIER10_HP_BOOST;
         return mult;
@@ -232,9 +276,24 @@ namespace GameConst {
             // becomes ~3,280 = 1.13 hits. Hell-50 trash is now very close to a ONE-SHOT on a geared
             // character; the "lethal, but not a one-shot" promise in the note above no longer holds at
             // the very end of Hell. Anyone re-solving this should start from that sentence.
-            case 1:  return 7.05f;  // Nightmare — 4.70 x 1.5 (2026-07-29)
-            case 2:  return 12.045f;// Hell      — 8.03 x 1.5 (2026-07-29); see the one-shot note above
-            default: return 1.55f;  // Normal    (was 1.25 -> 1.40) — flat raise on top of the steeper slope
+            // 2026-07-30 RE-SOLVE against the 0.24 -> 0.40 slope. Both deep bumps MUST move or the
+            // Normal-aimed slope silently drags them: at NM's effective floors the slope factor goes
+            // 24.76 -> 40.60 and at Hell's 36.76 -> 60.60, so holding a tier still means dividing its
+            // bump by the same factor. Nightmare is then given a deliberate +25% on top; HELL IS HELD
+            // EXACTLY, because it has no headroom left — the note above records that Hell-50 trash
+            // already kills a geared paladin in 1.13 hits, and the balance lab measures Hell FLOOR 10
+            // at 1.44 hits-to-die. Raising Hell damage at all would make trash a literal one-shot and
+            // invert the "HP outscales damage" invariant. Hell gets its increase on the HP axis only
+            // (see difficultyHealthBump) — which pushes the invariant the SAFE way.
+            // NIGHTMARE IS HELD EXACTLY TOO, on the same reasoning as Hell: the corrected lab (see
+            // the balance-lab health-bump fix) puts Nightmare at 1.7-2.9 hits-to-die across the tier
+            // and Hell at 1.4-2.8. Neither has room on the damage axis; both take this pass's
+            // increase on HP, where the invariant moves the safe way.
+            //   Nightmare: 174.6 (held exactly) / 40.60 = 4.30
+            //   Hell:      442.8 (held exactly) / 60.60 = 7.31
+            case 1:  return 4.30f;  // Nightmare — re-solved to HOLD its damage exactly (was 7.05)
+            case 2:  return 7.31f;  // Hell      — re-solved to HOLD its damage exactly (was 12.045)
+            default: return 1.55f;  // Normal    — unchanged; the steeper slope carries Normal's raise
         }
     }
 
@@ -272,9 +331,15 @@ namespace GameConst {
         // goes 1.14x -> 1.71x HP-over-damage and Hell-50 1.52x -> 2.28x. Enemies get spongier, never
         // more lethal. If damage is ever raised to match, re-check those ratios first.
         switch (difficulty) {
-            case 1:  return 3.0f;   // Nightmare — tripled (2026-07-29); was 2.0
-            case 2:  return 1.5f;   // Hell      — same 1.5x factor, so the tier step is unchanged
-            default: return 1.0f;   // Normal    — unchanged
+            // 2026-07-30 ("make the game more difficult"): HP is the axis with headroom, so both deep
+            // tiers take their increase here rather than on damage. Hell's +25% is the whole of its
+            // difficulty increase this pass (its damage is held exactly — see difficultyDamageBump),
+            // which also walks the HP-over-damage ratio further AWAY from the one-shot boundary
+            // instead of toward it. Nightmare takes +20% on top of the early-tier lift the steeper
+            // FLOOR_STAT_MULT already gives its floors 1-42.
+            case 1:  return 3.75f;  // Nightmare — 3.0 x 1.25, matching Hell's +25%
+            case 2:  return 1.875f; // Hell      — 1.5 x 1.25, the safe axis
+            default: return 1.0f;   // Normal    — unchanged; the steeper slope carries Normal's raise
         }
     }
 

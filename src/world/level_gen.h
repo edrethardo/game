@@ -40,6 +40,16 @@ static constexpr u32 MAX_DROP_HOLES = 64;
 // generator records where it put them, exactly like StoryPortal does for ramps.
 static constexpr u32 MAX_JUMP_PADS = 32;
 
+// A JUMPABLE GAP: two slab lips a body can leap between (both at slab height, a short run of void
+// cells strictly between). Recorded, never carved — the geometry is unchanged; this is the ledger
+// entry that lets a route treat the gap as an EDGE. The one shipping producer is VERTICAL_HALL's
+// deliberately BROKEN W-E catwalk (2 void cells), whose gap ISOLATES the west balcony at 3 m:
+// without this record the upper storey is two components and any route to a W-balcony exit must
+// descend and re-climb — the measured "climbs a ramp and comes straight back down" behaviour.
+// Recorded from the carve's own variables so the record can never drift from the geometry.
+struct JumpLink { Vec3 a, b; };
+static constexpr u32 MAX_JUMP_LINKS = 4;
+
 struct DungeonResult {
     Vec3 spawnPos;                         // player spawn (world coords)
     DungeonRoom rooms[MAX_DUNGEON_ROOMS];  // generated rooms
@@ -64,6 +74,12 @@ struct DungeonResult {
     // up and without this the cross-story chase is dead. Zero/unused for styles with no pads.
     Vec3 jumpPads[MAX_JUMP_PADS] = {};
     u8   jumpPadCount = 0;
+
+    // Jumpable-gap edges (world coords, both ends at slab height). VERTICAL_HALL's broken catwalk
+    // records one per catwalk row (it is 2 wide). Zero/unused for every other style. Host-local
+    // derived data rebuilt from the seed on both ends — no wire or save change.
+    JumpLink jumpLinks[MAX_JUMP_LINKS] = {};
+    u8       jumpLinkCount = 0;
 };
 
 namespace LevelGen {
