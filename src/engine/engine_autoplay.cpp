@@ -2591,3 +2591,76 @@ void Engine::exitAutoplayRun() {
     m_autoplayRespawnTimer = 0.0f;
     m_autoplayBotDeath     = false;      // leaving the run must not leave a revive latched
 }
+
+// THE STANDARD ENDING'S CONTINUATION (2026-08-01). Beating the game used to END an autoplay run:
+// the VICTORY screen returned to the MENU and disarmed the bot, so the single best outcome the mode
+// can produce was also the one that stopped it playing — the same class of hole as the credits park
+// and the death-screen strand, one screen further on. (The Engine-slayer's ending already rolls into
+// the TOWN and continues from there; this is the OTHER ending.) A finished run now mints the next
+// one directly.
+//
+// Three rules make that safe rather than merely automatic:
+//   * NEVER overwrite the champion. A menu-started run owns a real save slot, so the next run takes
+//     the first FREE one; if the save list is full — or the run never had a slot at all (a CLI/dev
+//     run saves nowhere: slot 0 is `saveCharacter`'s own "don't save" sentinel) — the new run plays
+//     UNSAVED. Losing a run's progress is recoverable; clobbering a character is not.
+//   * ROTATE the class per lane. An endless loop replaying one class is a worse demo and a much
+//     worse soak than one that walks the roster — soak13's 100x wdps spread across classes is
+//     exactly the kind of thing a single-class loop hides.
+//   * Fresh hero, floor 1, back down to Normal. The difficulty ladder is a per-RUN progression
+//     (floor 50 -> next difficulty) and this hero just finished the whole of it.
+void Engine::autoplayNextRun() {
+    const u8 lanes = (m_splitPlayerCount > 0) ? m_splitPlayerCount : 1;
+
+    for (u8 L = 0; L < lanes && L < MAX_LOCAL_PLAYERS; L++) {
+        const u8 next = static_cast<u8>((static_cast<u8>(m_playerClasses[L]) + 1) %
+                                        static_cast<u8>(PlayerClass::CLASS_COUNT));
+        m_playerClasses[L] = static_cast<PlayerClass>(next);
+    }
+
+    // Slot reassignment. RE-SCAN FIRST — this is load-bearing, not hygiene: `m_saveSlots` is only
+    // ever refreshed by the menu, so on this path it can be stale by an entire run. A hero that
+    // started as a fresh New Game in slot 12 wrote save_12 during play, and against a scan taken
+    // before that the slot still reads FREE — so the "never overwrite the champion" rule would hand
+    // the new run the champion's own slot. (A CLI launch never scans at all, which would make every
+    // slot read free and put the new run on slot 1, on top of whatever lives there.)
+    scanSaveSlots();
+    // ...then per lane, COLLISION-CHECKED: nothing has been written for the NEW run yet, so
+    // firstFreeSaveSlot() would hand both couch lanes the same empty slot and the second save would
+    // silently eat the first.
+    u8 taken = 0;
+    for (u8 L = 0; L < MAX_LOCAL_PLAYERS; L++) {
+        if (m_playerSaveSlot[L] == 0) continue;          // was already an unsaved (dev/CLI) lane
+        u8 slot = firstFreeSaveSlot();
+        if (slot != 0 && slot == taken) {                // lane 0 just claimed it — take the next
+            slot = 0;
+            for (u32 i = taken; i < MAX_SAVE_SLOTS; i++)
+                if (!m_saveSlots[i].exists) { slot = static_cast<u8>(i + 1); break; }
+        }
+        m_playerSaveSlot[L] = slot;                      // 0 = the list is full: play on, don't save
+        if (slot != 0) taken = slot;
+    }
+
+    m_difficulty               = 0;   // Normal — the ladder restarts with the hero
+    m_level.currentFloor       = 1;
+    m_level.inSourceChamber    = false;
+    m_level.sourcePortalActive = false;
+    m_level.exitPortalActive   = false;
+
+    applyClassToLane0(m_playerClasses[0]);
+    if (lanes > 1) {
+        // Couch: prepare BOTH lanes explicitly and start `lanesPrepared`, exactly as the
+        // --autoplay-couch dev door does (the NEW_GAME wipe only equips lane 0's hero).
+        for (u8 L = 0; L < lanes && L < MAX_LOCAL_PLAYERS; L++) equipFreshLane(L);
+        startGame(GameStart::NEW_GAME, /*lanesPrepared=*/true);
+    } else {
+        startGame(GameStart::NEW_GAME);
+    }
+    enterAutoplayRun(/*freshCharacter=*/true);   // re-arms the bot + seeds each lane's build cell
+
+    LOG_INFO("[AUTOPLAY] run finished -> next run: %s%s%s, slot %u",
+             kClassDefs[static_cast<u32>(m_playerClasses[0])].name,
+             lanes > 1 ? " + " : "",
+             lanes > 1 ? kClassDefs[static_cast<u32>(m_playerClasses[1])].name : "",
+             (unsigned)m_playerSaveSlot[0]);
+}

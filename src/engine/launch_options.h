@@ -57,6 +57,10 @@ struct LaunchOptions {
     // it costs a full 50-floor run with all ten shards, which made the one world an autoplay bot can
     // enter but not play effectively untestable — a 3 h soak reached it three times by accident.
     bool source = false;
+    // --victory: after --load/--new, roll the STANDARD ending's credits immediately. Same reasoning
+    // as --source: the ending costs a full clear to reach (a 3 h soak produced exactly one), so the
+    // credits-park strand and the run-continuation below it were effectively untestable.
+    bool victory = false;
     bool arenaCouch = false;                   // --arena-couch: local-versus arena, two fresh lanes
     bool autoplayCouch = false;                // --autoplay-couch: split-screen, BOTH lanes bot-driven
     bool verticalHall = false;                 // --vhall: force the two-story VERTICAL_HALL layout on non-boss floors (dev)

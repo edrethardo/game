@@ -855,18 +855,28 @@ void Engine::update(f32 dt) {
         // Final victory (Hell floor 50 cleared) — "You conquered the Dungeon Engine."
         // MENU_BACK is in the set so ESC/B dismiss this screen like every other menu.
         if (m_autoplayActive) m_autoplayEndT += dt;
-        if ((m_autoplayActive &&
-             m_autoplayEndT > (m_autoplayControl.botInControl() ? 10.0f : 45.0f)) ||
+        {
+        const bool botAdvance = m_autoplayActive &&
+            m_autoplayEndT > (m_autoplayControl.botInControl() ? 10.0f : 45.0f);
+        if (botAdvance ||
             Input::isActionPressed(GameAction::MENU_CONFIRM) ||
             Input::isActionPressed(GameAction::MENU_BACK) ||
             Input::isActionPressed(GameAction::JUMP) ||
             Input::isKeyPressed(SDL_SCANCODE_SPACE) ||
             Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
             // Soak-visible: names the branch the ending takes (town = engine-slain roll-on,
-            // menu = standard ending / orderly end of the autoplay run).
+            // next = standard ending rolling into a fresh run, menu = orderly end of the run).
+            const bool toTown = s_engineSlain && m_netRole != NetRole::CLIENT;
+            // THE STANDARD ENDING CONTINUES (2026-08-01) — but only when the BOT advanced the
+            // screen. A key press is a human saying "I'm done" (ESC especially), and answering it by
+            // starting a whole new run would be the game refusing to be quit. Singleplayer only:
+            // a host silently re-rolling a new dungeon would strand its guests, so an online session
+            // still ends at the menu, where the teardown below disconnects it properly.
+            const bool nextRun = m_autoplayActive && botAdvance && !toTown &&
+                                 m_netRole == NetRole::NONE;
             if (m_autoplayActive)
                 LOG_INFO("[AUTOPLAY] ending advance after %.1f s -> %s", m_autoplayEndT,
-                         (s_engineSlain && m_netRole != NetRole::CLIENT) ? "town" : "menu");
+                         toTown ? "town" : (nextRun ? "next run" : "menu"));
             m_autoplayEndT = 0.0f;
             // A bot-advanced ending: reclaim control on the way back into a world (the freed cursor
             // has usually flipped the latch to "human", the death-screen lesson) so the town-portal
@@ -878,7 +888,7 @@ void Engine::update(f32 dt) {
             // marker (Continue must land in town forever after) and walk out into the town.
             // Clients keep the menu path — a guest that waits is pulled in by the host's
             // town sentinel; pressing the key is explicitly leaving the session.
-            if (s_engineSlain && m_netRole != NetRole::CLIENT) {
+            if (toTown) {
                 if (m_level.currentFloor <= 50) {
                     m_level.currentFloor = 51;              // the FreePlay::saveCleared marker
                     m_level.savedFloor   = 51;
@@ -887,6 +897,17 @@ void Engine::update(f32 dt) {
                 saveAllCharacters();
                 s_engineSlain = false;
                 enterTown();
+                break;
+            }
+            if (nextRun) {
+                // Persist the champion BEFORE the roll-on (autoplayNextRun moves the lane onto a
+                // fresh slot, so this is the last chance to write the hero that just won), then
+                // clear the session-only secret-boss state the menu return clears — these are file
+                // statics here, so they can't live inside autoplayNextRun.
+                saveAllCharacters();
+                s_sourceShards = 0;
+                s_engineSlain  = false;
+                autoplayNextRun();
                 break;
             }
             exitAutoplayRun();   // the ending returns to the menu: disarm the bot
@@ -908,6 +929,7 @@ void Engine::update(f32 dt) {
             m_level.inSourceChamber    = false;
             m_level.sourcePortalActive = false;
             m_level.exitPortalActive   = false;
+        }
         }
         break;
     }

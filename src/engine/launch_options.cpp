@@ -147,6 +147,12 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             // all ten shards, so without this the secret fight could only be exercised by accident.
             opt.source = true;
             opt.active = true;
+        } else if (ieq(a, "--victory")) {
+            // Dev door onto the ENDING screens: builds the world, then rolls the standard ending's
+            // credits on the spot. Exercises credits -> victory -> (autoplay) next-run continuation
+            // without the 50-floor clear that is the only other way to see them.
+            opt.victory = true;
+            opt.active  = true;
         } else if (ieq(a, "--autoplay-couch")) {
             // Couch co-op AUTOPLAY: split-screen with BOTH local players driven by their own bot.
             // Implies --autoplay. Lane 0 takes --new's class; lane 1 takes an OPTIONAL class argument

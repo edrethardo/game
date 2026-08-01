@@ -574,14 +574,13 @@ and every exit-seeking watchdog is gated OFF while a boss lives), so a boss with
 on from ANY range rather than ignored for being across its arena. Both the FIGHT gate and `pickTarget`'s
 sticky-range release exempt `BotTarget::isBoss` (they MUST agree). And because the exit portal sits at the
 boss room's CENTRE (where the boss spawns) but a major boss's arena is 4× its room, the bot used to reach
-the sealed door and idle with the boss beyond the ceiling; so **`buildBotView` STEERS travel toward the
-boss** (a cheap one-boss scan, gated on `floorHasBoss`) — but ONLY with a **CLEAR LINE** to it (a world-only
-raycast): the exit flow field is a wall-aware BFS that routes all the way into the arena, and the only gap
-it leaves is the last open stretch to a boss offset from the exit cell, so the straight bearing does just
-that. Through a WALL the flow field is kept — a straight bearing there jams the bot into the wall and the
-veto zeroes the heading (measured: frozen 8 m from the boss against the wall between them — "it wants to
-navigate to the boss even behind a wall"). Live: killed The Butcher (floor 5) and Ygara (floor 10, 20×24
-arena) and descended past each. **A fleeing LOOT GOBLIN is rushed the same way and harder** —
+the sealed door and idle with the boss beyond the ceiling; travel on a boss floor is now **GOAL
+SUBSTITUTION** — the boss-seeded wall-aware `RouteField` IS the travel field while the boss lives, with a
+clear-line straight bearing only as the last-metres fallback (see "BOSS FLOORS" further down for the full
+design; two earlier assist-shaped versions are recorded there as measured failures). The clear-line rule's
+lesson stands: a straight bearing through a WALL jams the bot into it (measured: frozen 8 m from the boss —
+"it wants to navigate to the boss even behind a wall"). Live: killed The Butcher (floor 5) and Ygara
+(floor 10, 20×24 arena) and descended past each. **A fleeing LOOT GOBLIN is rushed the same way and harder** —
 `BotTarget::isLootGoblin` wins `pickTarget` outright (nearest visible one, bypassing stickiness/ceiling),
 is engaged from any range, and `decideCombat` chases it flat out (`moveFwd`, never kite/strafe) since it
 never attacks and its escape clock is running. **INVULNERABLE enemies are never the shot target** —
@@ -605,9 +604,9 @@ watermark), plus `BotView.skillIsAoe[4]` from the `SkillDef` (shards / bounces /
 blast). **Skill SELECTION** (`decideCombat`) is no longer "lowest castable slot" — that left a Sorcerer
 spamming Fireball while its deep pool and Frozen Orb / Chain / Meteor went unused. Now: a **GROUP**
 (`GROUP_MIN`=3 hostiles within `GROUP_RADIUS`=6 m of the aim target) fires the **biggest castable AoE**, any
-class; else a **MAGIC** build casts its **biggest castable skill** (highest unlocked slot off cooldown — a
-caster's skills ARE its damage and its pool is deep, so it spends it on the largest nuke); else a martial
-build keeps the cheap slot-0 filler (its high slots are often defensive). Verified live: a floor-12 Sorcerer
+class; else **EVERY class dumps biggest-first** — 2026-07-31, Aaron's design; the earlier
+martial-keeps-the-cheap-filler rule is RETIRED (see "CLASS AI: every class dumps its kit" further down for
+the in-reach/in-band gates and the reactive COUNTER-skill carve-out). Verified live: a floor-12 Sorcerer
 selects Frozen Orb (slot 1) ~89% of casts. **The class-skill press is PULSED, not held** (`applyBotIntent`,
 even ticks only): activation is edge-triggered (`isActionPressed`), and because *some* skill (cheap Fireball)
 is almost always castable the button would stay held every engaging tick and the edge would fire **once per
@@ -1224,9 +1223,29 @@ human — the credits free the cursor, so a stray motion flips the takeover latc
 re-strand), with `forceBot()` on the way back into a world and a LOG LINE at each advance
 (`[AUTOPLAY] credits auto-advance` / `ending advance -> town|menu`) so a soak can tell a bot-advanced
 ending from a park. The engine-slain ending rolls into the TOWN (portal -> Free-Play -> next run, the
-existing machinery); a STANDARD ending still returns to the MENU and ends the run there — verified in
-soak13 (rogue: full clear at 79 min, both lines fired, then 85 min idle at menu). Whether a standard
-ending should instead roll into a new run is an OPEN product decision.
+existing machinery); the STANDARD ending now **rolls into a fresh run** (`Engine::autoplayNextRun`,
+2026-08-01) instead of ending at the menu — beating the game was the single best outcome the mode can
+produce and also the one that stopped it playing. Three rules make that safe rather than merely
+automatic. (1) **Never overwrite the champion**: the finished hero is saved FIRST, then the new run
+takes the first FREE slot — and `scanSaveSlots()` is re-run before picking, which is load-bearing, not
+hygiene, because `m_saveSlots` is otherwise only refreshed by the MENU: a hero that started as a New
+Game in slot 12 wrote save_12 during play, and against a stale scan that slot still reads free, so the
+rule would hand the new run the champion's own file (a CLI launch, which never scans at all, would
+read every slot free and land on slot 1). With the list full — or on a run that never had a slot
+(slot 0 is `saveCharacter`'s own "don't save" sentinel) — the new run plays UNSAVED; losing a run is
+recoverable, clobbering a character is not. Couch lanes are collision-checked against each other,
+since nothing is written yet when both are assigned. (2) **The class ROTATES per lane** — an endless
+loop replaying one class is a worse demo and a much worse soak than one that walks the roster (the
+100x wdps spread below is exactly what a single-class loop hides). (3) **Only a BOT-advanced ending
+continues**: a key press is a human saying "I'm done" (ESC especially), and answering that by starting
+a new run would be the game refusing to be quit; online sessions still end at the menu, where the
+teardown disconnects them (a host silently re-rolling a dungeon would strand its guests).
+**`--victory` is the new dev door** (composes with `--autoplay`/`--autoplay-couch`): it builds the
+world and rolls the standard ending on the spot. Same rationale as `--source` — the ending otherwise
+costs a full 50-floor clear, which is why the credits park went unnoticed until a 3 h soak produced
+exactly one victory. Verified live through it: credits -> victory -> next run, Warrior->Ranger solo
+and Paladin+Marksman->Combat Engineer+Tinkerer couch, both bots playing on within seconds; and both
+slot branches (list full -> unsaved; slot free -> claimed) with every other save byte-identical after.
 
 **What soak13 says (2026-07-31, 3 h, all 9 classes, one SP instance each).** Zero crashes, zero
 silent strands, `deaths==revives` held, `rem=escape` extinct, wedge rescue live. The headline is

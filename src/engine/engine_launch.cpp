@@ -184,6 +184,12 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         LOG_INFO("Launch: COUCH AUTOPLAY — P1 %s + P2 %s, both bot-driven (--autoplay-couch)",
                  kClassDefs[static_cast<u32>(opt.cls)].name,
                  kClassDefs[static_cast<u32>(opt.cls2)].name);
+        // --victory composes with this door: the run continuation has a COUCH path of its own
+        // (both lanes re-prepared, `lanesPrepared` start), and this is the only way to exercise it.
+        if (opt.victory) {
+            beginCreditsSequence(/*engineSlain=*/false);
+            LOG_INFO("Launch: rolled the STANDARD ending (--victory, couch)");
+        }
         return;
     }
 
@@ -254,6 +260,18 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
         enterSourceChamber();
         LOG_INFO("Launch: entered THE SOURCE (--source)");
+        return;
+    }
+    if (opt.victory) {
+        // Dev door (--victory): build the world, arm the bot, then roll the STANDARD ending on the
+        // spot. Needs startGame first for the same reason --source does — startCredits only fires
+        // from IN_GAME. This is the only way to exercise the ending screens without a 50-floor
+        // clear, which is why the credits park (and the run continuation after it) went unnoticed
+        // until a 3 h soak happened to produce exactly one victory.
+        startGame(mode);
+        if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
+        beginCreditsSequence(/*engineSlain=*/false);
+        LOG_INFO("Launch: rolled the STANDARD ending (--victory)");
         return;
     }
     startGame(mode);

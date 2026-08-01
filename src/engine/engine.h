@@ -1627,6 +1627,10 @@ private:
     // Disarm the Autoplay bot when a run ends to the menu (immediate, so the synthetic-input overlay
     // isn't left armed under the menu). Mirrors enterAutoplayRun's arm step. Defined in engine_autoplay.cpp.
     void exitAutoplayRun();
+    // Roll a finished autoplay run straight into the next one: fresh hero(es) of the NEXT class,
+    // floor 1 / Normal, re-armed. The standard ending's continuation — see the VICTORY handler.
+    // Never overwrites the save of the hero that just won (picks a free slot, else plays unsaved).
+    void autoplayNextRun();
     // Autoplay driver (engine_autoplay.cpp). updateAutoplay runs once per sim tick from gameUpdate,
     // BEFORE the input-consuming blocks: it maintains the takeover latch, then (when the bot holds
     // control) builds a read-only view of live state, runs the pure Autoplay::decide, and applies the
