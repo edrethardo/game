@@ -235,20 +235,28 @@ void computeRow(u8 difficulty, u8 rawFloor, u8 cell, u32 trials,
 // char[48], so the worst case (47 chars, all quotes) is 2 + 47*2 + 1 = 97 bytes — the fixed
 // buffer always fits.
 //
-// It ALSO rewrites any comma in the label to a semicolon, which is deliberate and not merely
+// It ALSO drops any COMMA OR SEMICOLON from the label, which is deliberate and not merely
 // belt-and-braces. Quoting alone is correct CSV and the shipped consumer (tools/balance_chart.py,
 // csv.DictReader) reads it fine — but boss names really do contain commas ("Ygara, the
 // Broodqueen"), so 162 of the 1350 rows split into 34 fields under any ad-hoc `awk -F,` /
 // `line.split(',')`, silently shifting every column after the name. In a metrics file whose only
 // text column is a human LABEL, keeping the delimiter out of the data is worth more than preserving
-// the punctuation of a boss's title: every row now has exactly 33 fields for every parser, naive or
-// strict. (Measured 2026-08: this shift misread ttkBoss as hitsToDie and produced "70 hits to die".)
+// the punctuation of a boss's title. (Measured 2026-08: that shift misread ttkBoss as hitsToDie and
+// produced a reported "70 hits to die".)
+//
+// BOTH characters go, not just the comma, because the file has two dialects: `,` separates in the
+// international form and `;` separates in the German one. A first cut rewrote the comma to a
+// semicolon and was immediately wrong in German mode — the "fix" had injected that dialect's own
+// delimiter into the data. The character is dropped rather than substituted because every comma in
+// the shipped names is followed by a space, so "Ygara, the Broodqueen" reads as "Ygara the
+// Broodqueen" with nothing else disturbed.
 static const char* csvQuote(const char* s, char (&buf)[100]) {
     u32 o = 0;
     buf[o++] = '"';
     for (const char* p = s; *p && o < sizeof buf - 3; p++) {   // -3: closing quote + nul + room to double
+        if (*p == ',' || *p == ';') continue;                  // never let a delimiter into the data
         if (*p == '"') buf[o++] = '"';
-        buf[o++] = (*p == ',') ? ';' : *p;
+        buf[o++] = *p;
     }
     buf[o++] = '"';
     buf[o] = '\0';
@@ -278,21 +286,45 @@ struct CNumericLocale {
     ~CNumericLocale() { std::setlocale(LC_NUMERIC, saved); }
 };
 
+static CsvDialect s_dialect = CsvDialect::INTERNATIONAL;
+void setCsvDialect(CsvDialect d) { s_dialect = d; }
+CsvDialect csvDialect() { return s_dialect; }
+
+// Emit a line that was BUILT in the international form (`,` separators, `.` decimals, and — because
+// csvQuote already stripped commas from the only text column — no commas inside any field). That
+// invariant is what makes the German translation a safe two-character swap rather than a parse:
+// every remaining `,` is a separator and every `.` is a decimal mark.
+//
+// The swap's one assumption is that the sole text column carries no DOT either (a "St. Ulrich"
+// would come out as "St, Ulrich"). That is not left to luck: "boss labels carry no CSV punctuation"
+// in test_balance_lab.cpp walks the shipped boss table and fails if a name ever gains one.
+static void emitLine(FILE* fp, char* line) {
+    if (s_dialect == CsvDialect::GERMAN)
+        for (char* p = line; *p; p++) {
+            if      (*p == ',') *p = ';';
+            else if (*p == '.') *p = ',';
+        }
+    std::fputs(line, fp);
+}
+
 void writeCsvHeader(FILE* fp) {
     CNumericLocale cLocale;   // header carries no floats, but keep both writers symmetrical
-    std::fprintf(fp,
+    char line[512];
+    std::snprintf(line, sizeof line,
         "difficulty,floor,effFloor,cell,row,col,"
         "wDps10,wDps50,wDps90,cDps10,cDps50,cDps90,tDps10,tDps50,tDps90,"
         "ehp10,ehp50,ehp90,sus10,sus50,sus90,"
         "enHpMed,enHpMin,enHpMax,enHit,enDps,"
         "bossName,bossHp,bossHit,"
         "ttkTrash,ttkBoss,hitsToDie,secondsToDie\n");
+    emitLine(fp, line);   // header column NAMES carry no dots, so only the separators translate
 }
 
 void writeCsvRow(FILE* fp, const MetricsRow& r) {
     CNumericLocale cLocale;   // every field below is a float — see the guard's comment
     char nameBuf[100];
-    std::fprintf(fp,
+    char line[1024];
+    std::snprintf(line, sizeof line,
         "%u,%u,%u,%u,%u,%u,"
         "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,"
         "%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,"
@@ -309,6 +341,7 @@ void writeCsvRow(FILE* fp, const MetricsRow& r) {
         r.enemy.hpMedian, r.enemy.hpMin, r.enemy.hpMax, r.enemy.hitMedian, r.enemy.dpsMedian,
         csvQuote(r.boss.present ? r.boss.name : "", nameBuf), r.boss.hp, r.boss.hit,
         r.ttkTrash, r.ttkBoss, r.hitsToDie, r.secondsToDie);
+    emitLine(fp, line);
 }
 
 } // namespace BalanceLab

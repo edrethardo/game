@@ -106,6 +106,18 @@ void computeRow(u8 difficulty, u8 rawFloor, u8 cell, u32 trials,
                 const EnemyDefTable& enemies, const BossDefTable& bosses,
                 MetricsRow& out);
 
+// CSV dialect. The two forms below are the only SELF-CONSISTENT ones; the bug this guards against
+// was the third combination — comma separator with comma decimals — which no parser can read.
+//   INTERNATIONAL (default): `,` separates, `.` is the decimal mark. What tools/balance_chart.py,
+//     CI, awk and pandas expect.
+//   GERMAN: `;` separates, `,` is the decimal mark — the convention in de/fr/nl locales, and what a
+//     German Excel/LibreOffice opens with a double-click instead of dumping every row into column A.
+// The writers always FORMAT in the C locale and translate afterwards, so output depends on this
+// setting alone and never on the machine's LC_NUMERIC.
+enum struct CsvDialect : u8 { INTERNATIONAL, GERMAN };
+void setCsvDialect(CsvDialect d);   // process-wide; the report case reads BALANCE_CSV_DIALECT
+CsvDialect csvDialect();
+
 void writeCsvHeader(FILE* fp);
 void writeCsvRow(FILE* fp, const MetricsRow& r);
 

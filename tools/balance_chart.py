@@ -43,13 +43,33 @@ def _metric_keys():
     return keys
 
 
+def _sniff_dialect(path):
+    """Return (delimiter, decimal_comma) by looking at the header line.
+
+    The lab writes two self-consistent dialects (BALANCE_CSV_DIALECT): the default
+    international form (',' separates, '.' decimals) and the German one (';' separates,
+    ',' decimals) that a de/fr/nl spreadsheet opens natively. They are told apart by the
+    header alone, which is pure ASCII column names plus separators — if it contains a
+    semicolon it is the German file. Reading the header, rather than trusting a flag, is
+    what keeps a file self-describing.
+    """
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            head = f.readline()
+    except OSError as e:
+        sys.exit(f"balance_chart: cannot open {path}: {e.strerror or e}")
+    return (";", True) if ";" in head else (",", False)
+
+
 def load(path):
     """Parse the CSV into row dicts: every field float except bossName (str).
 
-    bossName is RFC-4180 double-quoted in the file (names contain commas) —
-    csv.DictReader handles that natively. Non-finite numerics are clamped to 0
-    so the JSON we later emit can never contain NaN/Infinity tokens.
+    Handles both dialects (see _sniff_dialect). bossName is RFC-4180 double-quoted and
+    carries no delimiter of either dialect (the writer strips them), so DictReader is
+    safe either way. Non-finite numerics are clamped to 0 so the JSON we later emit can
+    never contain NaN/Infinity tokens.
     """
+    delim, decimal_comma = _sniff_dialect(path)
     needed = _metric_keys() | {"difficulty", "floor", "effFloor", "cell",
                                "row", "col", "bossName", "bossHp", "bossHit"}
     rows = []
@@ -58,7 +78,7 @@ def load(path):
     except OSError as e:
         sys.exit(f"balance_chart: cannot open {path}: {e.strerror or e}")
     with f:
-        rd = csv.DictReader(f)
+        rd = csv.DictReader(f, delimiter=delim)
         missing = needed - set(rd.fieldnames or [])
         if missing:
             sys.exit("balance_chart: CSV is missing columns: " + ", ".join(sorted(missing)))
@@ -69,7 +89,8 @@ def load(path):
                     row[k] = (v or "").strip()
                     continue
                 try:
-                    x = float(v)
+                    # German dialect: "8429,50" — swap the decimal mark before float().
+                    x = float(v.replace(",", ".") if (decimal_comma and v) else v)
                 except (TypeError, ValueError):
                     x = 0.0
                 if not math.isfinite(x):  # belt-and-braces: JSON must stay finite

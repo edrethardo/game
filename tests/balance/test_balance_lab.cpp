@@ -382,6 +382,15 @@ TEST_CASE("balance report: full sweep CSV when BALANCE_REPORT is set") {
     static SkillDef skills[MAX_SKILL_DEFS];
     u32 ic = 0, ac = 0, sc = 0; loadAllTables(items, ic, affixes, ac, skills, sc);
 
+    // BALANCE_CSV_DIALECT=de writes the German form (`;` separates, `,` is the decimal mark) so the
+    // report opens in a de/fr/nl spreadsheet with a double-click instead of landing entirely in
+    // column A. Default stays international — that is what balance_chart.py, CI and awk want.
+    // (balance_chart.py sniffs the delimiter, so it reads either.)
+    const char* dialect = std::getenv("BALANCE_CSV_DIALECT");
+    const bool german = dialect && (dialect[0] == 'd' || dialect[0] == 'D');
+    BalanceLab::setCsvDialect(german ? BalanceLab::CsvDialect::GERMAN
+                                     : BalanceLab::CsvDialect::INTERNATIONAL);
+
     FILE* fp = std::fopen(path, "w");
     // doctest::String: a raw const char* stringifies as a pointer address, not the path.
     REQUIRE_MESSAGE(fp, "BALANCE_REPORT path not writable: ", doctest::String(path));
@@ -396,7 +405,9 @@ TEST_CASE("balance report: full sweep CSV when BALANCE_REPORT is set") {
                 BalanceLab::writeCsvRow(fp, r);
             }
     std::fclose(fp);
-    MESSAGE("balance report written: ", doctest::String(path), " (1350 rows + header)");
+    BalanceLab::setCsvDialect(BalanceLab::CsvDialect::INTERNATIONAL);   // don't leak into later cases
+    MESSAGE("balance report written: ", doctest::String(path), " (1350 rows + header, ",
+            doctest::String(german ? "German ;/, dialect" : "international ,/. dialect"), ")");
 }
 
 // --- the CSV must be parseable no matter what locale the machine runs -----------------------------
@@ -452,6 +463,55 @@ TEST_CASE("balance CSV is locale-independent") {
     for (const char* p = line; *p; p++) if (*p == ',') fields++;
     CHECK(fields == 33);                        // the header's column count, naive split included
     CHECK(std::strchr(line, '.') != nullptr);   // decimals are dots, so strtod/float() can read them
-    CHECK(std::strstr(line, "Ygara; the") != nullptr);   // the label's comma became a semicolon
+    CHECK(std::strstr(line, "Ygara the") != nullptr);    // the label lost its comma entirely
     CHECK(std::strstr(line, "\"\"Brood\"\"") != nullptr); // ...and embedded quotes are still doubled
+}
+
+// The German dialect: `;` separates and `,` is the decimal mark — what a de/fr/nl spreadsheet opens
+// natively. Pinned because the translation is a blind two-character swap that is only safe while the
+// international form it starts from has no comma or dot inside any field (see the next case).
+TEST_CASE("balance CSV German dialect uses ; and comma decimals") {
+    BalanceLab::MetricsRow r;
+    r.difficulty = 2; r.rawFloor = 10; r.cell = 4;
+    r.ehp[1] = 8429.5f; r.enemy.hitMedian = 8096.25f; r.hitsToDie = 1.0412f;
+    r.boss.present = true;
+    r.boss.name    = "Ygara, the Broodqueen";
+
+    BalanceLab::setCsvDialect(BalanceLab::CsvDialect::GERMAN);
+    FILE* fp = std::tmpfile();
+    REQUIRE(fp != nullptr);
+    BalanceLab::writeCsvHeader(fp);
+    BalanceLab::writeCsvRow(fp, r);
+    BalanceLab::setCsvDialect(BalanceLab::CsvDialect::INTERNATIONAL);   // restore before asserting
+
+    std::rewind(fp);
+    char header[1024] = {}, line[2048] = {};
+    REQUIRE(std::fgets(header, sizeof header, fp) != nullptr);
+    REQUIRE(std::fgets(line, sizeof line, fp) != nullptr);
+    std::fclose(fp);
+
+    u32 hFields = 1, fields = 1;
+    for (const char* p = header; *p; p++) if (*p == ';') hFields++;
+    for (const char* p = line;   *p; p++) if (*p == ';') fields++;
+    CHECK(hFields == 33);
+    CHECK(fields  == 33);                              // splitting on ';' alone is enough
+    CHECK(std::strchr(line, '.') == nullptr);          // no dots survive: decimals are commas now
+    CHECK(std::strstr(line, "8429,50") != nullptr);    // ...and they really are decimal marks
+    CHECK(std::strstr(line, "Ygara the") != nullptr);  // label carries neither delimiter
+}
+
+// The German swap ('.' -> ',') is blind, so it would corrupt a boss LABEL containing a dot
+// ("St. Ulrich" -> "St, Ulrich"). No shipped name has one; this fails the day that stops being true,
+// rather than letting a mangled label reach a report nobody re-reads.
+TEST_CASE("boss labels carry no CSV punctuation") {
+    const BossDefTable& t = bossTable();
+    REQUIRE(t.count > 0);
+    for (u32 i = 0; i < t.count; i++) {
+        const char* n = t.defs[i].name;
+        CHECK_MESSAGE(std::strchr(n, '.') == nullptr,
+                      "boss name must not contain '.' (breaks the German decimal swap): ",
+                      doctest::String(n));
+        CHECK_MESSAGE(std::strchr(n, '"') == nullptr,
+                      "boss name must not contain '\"' (doubles under quoting): ", doctest::String(n));
+    }
 }

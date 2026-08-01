@@ -144,11 +144,23 @@ after the first float shifted, and `balance_chart.py` clamped the unparseable va
 warned; a deep-tier figure read off such a file went into this document as fact. Both CSV writers now
 pin `LC_NUMERIC` to "C" for the write and restore it after (the guard lives in the WRITER, not the
 call site, so `LC_ALL=C ./dungeon_tests` fixing one invocation can't leave the trap armed for the
-next). `csvQuote` additionally rewrites commas inside the boss-name label to semicolons: quoting alone
-is valid CSV and `csv.DictReader` handles it, but "Ygara, the Broodqueen" split 162 of 1350 rows into
-34 fields under any `awk -F,`, which once misread `ttkBoss` as `hitsToDie` and produced "70 hits to
-die". Every row is now exactly 33 fields for every parser. Pinned by "balance CSV is
-locale-independent" in `test_balance_lab.cpp` (verified by sabotage: removing the guard fails it).
+next). `csvQuote` additionally DROPS commas and semicolons from the boss-name label: quoting alone is valid
+CSV and `csv.DictReader` handles it, but "Ygara, the Broodqueen" split 162 of 1350 rows into 34 fields
+under any `awk -F,`, which once misread `ttkBoss` as `hitsToDie` and produced "70 hits to die". Every
+row is now exactly 33 fields for every parser.
+**Two DIALECTS, because `,`/`.` is not universal** (`BALANCE_CSV_DIALECT=de`): the default
+international form (`,` separates, `.` decimals — what the chart tool, CI and awk want) and the German
+one (`;` separates, `,` decimals) that a de/fr/nl spreadsheet opens with a double-click instead of
+dumping every row into column A. Those are the only two SELF-CONSISTENT combinations; the bug above
+was the third. Rows are always FORMATTED in the C locale and translated afterwards, so the output
+depends on the dialect alone and never on the machine. `tools/balance_chart.py` SNIFFS the delimiter
+from the header and swaps the decimal mark, so it reads either file and both parse to identical
+values (verified: 1350/1350 rows equal). The label sanitation drops BOTH delimiters for this reason —
+a first cut rewrote the comma to a semicolon and was instantly wrong in German mode, having injected
+that dialect's own separator into the data. Pinned by "balance CSV is locale-independent", "balance
+CSV German dialect uses ; and comma decimals", and "boss labels carry no CSV punctuation" (which fails
+the day a boss name gains a `.` — the German swap is blind and would render it "St, Ulrich") in
+`test_balance_lab.cpp`; the locale guard was verified by sabotage.
 Phase 2 (pending): chosen target bands become REQUIREs in `test_balance_lab.cpp` so CI fails
 when a content/constant change knocks a floor out of band.
 
