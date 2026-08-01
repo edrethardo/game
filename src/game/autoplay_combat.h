@@ -259,6 +259,46 @@ inline f32 engageCeiling(const BotView& v, const Doctrine& d) {
     return (band > THREAT_RADIUS) ? band : THREAT_RADIUS;
 }
 
+// --- BOSS-FLOOR CLOSING COMMIT (soak13: "ranged never closes") ----------------------------------
+// A milestone boss seals the exit, so the boss must die — but its adds never run dry, and while any
+// target is engaged the FIGHT branch owns the feet. A melee doctrine closes on its targets and so
+// drifts into the arena by accident; a RANGED doctrine holds its band and strafes, which parks it at
+// the adds' distance forever (measured: ranger 78 min on one NM-25 boss floor, all 292 stall samples
+// with dB frozen at 44-45 m and no boss LOS). The boss movement FILL doesn't help — it fires only on
+// an empty-WASD intent, and a strafing ranged bot always has WASD. So the driver latches a COMMIT
+// when a window proves the bot is not closing on the boss, and while latched the feet are overridden
+// toward the boss route (combat — aim/fire/dodge/block/skills/potion — stays the brain's, the
+// descend-commit pattern). Released the moment the boss is genuinely fightable from here: LOS and
+// inside the release range, at which point normal targeting (boss-floor priority + the any-range
+// boss exemption) takes over and holds it.
+//
+// The release range is min(weaponRange, THREAT_RADIUS): melee releases at its true reach (it is AT
+// the boss), ranged releases once the boss is close enough to be inside both its fire band and the
+// nearest-16 target scan — releasing on raw LOS at 40 m would flap, because a boss that far behind
+// 16 nearer adds never enters the target list and the bot would drift straight back out.
+constexpr f32 BOSS_COMMIT_WINDOW_SEC = 20.0f;  // no-approach dwell before latching (any real fight
+                                               // that HAPPENS to close 2 m resets it — see latch)
+constexpr f32 BOSS_COMMIT_PROGRESS_M = 2.0f;   // closing less than this per window = not approaching
+
+inline f32 bossCommitReleaseRange(f32 weaponRange) {
+    return (weaponRange < THREAT_RADIUS) ? weaponRange : THREAT_RADIUS;
+}
+
+// Evaluated by the driver at window expiry: latch unless the window closed ≥ PROGRESS_M of distance
+// or the boss is already fightable (LOS + inside release range — the warrior AT Korvath must never
+// latch: it is standing on the boss and simply cannot out-DPS it, which no commit fixes).
+inline bool bossCommitShouldLatch(f32 windowStartDb, f32 windowBestDb,
+                                  bool bossLOS, f32 dBoss, f32 releaseRange) {
+    if (bossLOS && dBoss <= releaseRange) return false;
+    return (windowStartDb - windowBestDb) < BOSS_COMMIT_PROGRESS_M;
+}
+
+// Held until the boss is fightable (or dead — the gate itself clears then). Blind-but-close does NOT
+// release: 5 m from a boss behind a wall is exactly the case the commit exists to walk around.
+inline bool bossCommitShouldRelease(bool bossAlive, bool bossLOS, f32 dBoss, f32 releaseRange) {
+    return !bossAlive || (bossLOS && dBoss <= releaseRange);
+}
+
 // --- CROSS-STORY TARGETS ------------------------------------------------------------------------
 // On a STACKED floor (VERTICAL_HALL balconies, the four-story Descent) a hostile can have clear
 // line of sight through a drop hole or off a balcony rim and still be somewhere the bot cannot walk
@@ -313,6 +353,28 @@ inline s32 pickTarget(const BotView& v, const Doctrine& d) {
               gd = v.targets[i].dist; g = static_cast<s32>(i);
           }
       if (g >= 0) return g; }
+
+    // BOSS-FLOOR PRIORITY (a live milestone boss seals the exit, so the fight IS the floor):
+    //   1. SUSTAIN FIRST — the nearest visible healer/necromancer wins outright (goblin-style:
+    //      bypasses stickiness and the ceiling). Every point of damage into anything else can be
+    //      healed back or resurrected while these live, which is precisely the measured boss-floor
+    //      grind (3006 s on Normal 30 with rescues disarmed by the endless add stream).
+    //   2. THEN THE BOSS — with sustain down, a visible boss beats nearer ordinary adds (focus), so
+    //      the bot's damage goes into the one HP pool that opens the exit. The SHIELDED-boss rule
+    //      still wins over focus: while the brood shield is up the boss takes 25%, so adds first —
+    //      that ordering is handled by the shielded check below, which this block defers to.
+    //   Adds are only the target when neither a healer nor an unshielded boss is in sight.
+    if (v.hasBoss && v.bossAlive) {
+        s32 h = -1; f32 hd = 1e9f; s32 b = -1;
+        for (u32 i = 0; i < v.targetCount; i++) {
+            const BotTarget& t = v.targets[i];
+            if (!t.hasLOS || t.invulnerable || !sameStory(v, t)) continue;
+            if (t.isHealer && t.dist < hd) { hd = t.dist; h = static_cast<s32>(i); }
+            if (t.isBoss && !t.bossShielded) b = static_cast<s32>(i);
+        }
+        if (h >= 0) return h;
+        if (b >= 0) return b;
+    }
 
     s32 best = -1; f32 bestD = 1e9f;
     s32 shieldedFb = -1; f32 shieldedFbD = 1e9f;   // shielded-boss fallback (prefer the adds; see below)
@@ -520,11 +582,41 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
             for (s8 s = 3; s >= 0; s--) if (v.castableSkill[s] && v.skillIsAoe[s]) { slot = s; break; }
         }
         if (slot < 0) {
-            if (col == 0) {   // caster: the biggest nuke it can afford (highest slot off cooldown)
-                for (s8 s = 3; s >= 0; s--) if (v.castableSkill[s]) { slot = s; break; }
-            } else {          // martial: the cheap always-on filler (high slots are often defensive)
-                for (s8 s = 0; s <  4; s++) if (v.castableSkill[s]) { slot = s; break; }
+            // A MELEE build IN WEAPON REACH fights like a caster: biggest castable slot first
+            // (Aaron: the paladin should "gap close -> use all other skills while attacking,
+            // abusing the Divine Judgement invulnerability"). The old martial rule pinned it to
+            // the slot-0 filler forever — and its centrepiece never fired at all, because Divine
+            // Judgment's 2.5 m radius sits under the >=3 m AoE threshold, so even the GROUP
+            // branch above skipped it. "Defensive" high slots cast mid-scrum are not a waste for
+            // a melee build, they are the play: invulnerability, stun and ground AoE are worth
+            // the most exactly where the bot is standing. OUT of reach the cheap filler stays —
+            // burning a 12 s cooldown before arriving wastes it, and slot 0 (the dash-smite) is
+            // the gap-closer anyway.
+            // EVERY class dumps its kit while genuinely engaged (Aaron's call): casters always,
+            // melee at blade range, ranged while firing in band — buffs (Rapid Fire, Overcharged
+            // Magazine, Mark Prey, Overclock, Mech Overdrive) weave in on their own because energy
+            // and cooldowns self-limit. Only a melee build still CLOSING keeps the cheap filler, so
+            // long cooldowns are not burnt before arrival. COUNTER skills (Deflect) are excluded
+            // here — they fire on the reactive trigger below, never blind.
+            const bool meleeClosing = (col == 1) && t.dist > v.weaponRange;
+            if (!meleeClosing) {
+                for (s8 s = 3; s >= 0; s--)
+                    if (v.castableSkill[s] && !v.skillIsCounter[s]) { slot = s; break; }
+            } else {
+                for (s8 s = 0; s <  4; s++)
+                    if (v.castableSkill[s] && !v.skillIsCounter[s]) { slot = s; break; }
             }
+        }
+        // TIMED COUNTER (Wanderer Deflect): the parry is cast exactly like the perfect-block tap —
+        // a melee swing inside the block lead, or a tracked projectile about to land — and it
+        // PREEMPTS whatever the dump chose this tick (a parry window outranks one more filler cast).
+        for (s8 s = 0; s < 4; s++) {
+            if (!v.castableSkill[s] || !v.skillIsCounter[s]) continue;
+            bool incoming = v.incomingProjectileEta >= 0.0f &&
+                            v.incomingProjectileEta < PERFECT_BLOCK_LEAD;
+            for (u32 i = 0; i < v.targetCount && !incoming; i++)
+                if (swingIsLanding(v.targets[i])) incoming = true;
+            if (incoming) { slot = s; break; }
         }
         out.classSkillSlot = slot;
         // EQUIPMENT legendary skills (boots F / helmet G) ride the same rule and for the same

@@ -1158,14 +1158,87 @@ on the rebalanced difficulty (all WALK-mode, ground story, no enemy contact), ze
 modes. `[STALL]` now carries `vd=` (remaining route cost — frozen vd with large net travel is the
 circling detector) and `fm=` (follower mode). Plan: `~/.claude/plans/rosy-percolating-wreath.md`.
 
-**THE NEW TOP STALL (2026-07-30 soak): a GAUNTLET escape-ladder livelock.** With VHALL fixed, the
+**The GAUNTLET escape-ladder livelock (found 2026-07-30, FIXED 2026-07-31).** With VHALL fixed, the
 worst remaining floor was 7102 s on a gauntlet floor: BOTH couch lanes pinned in a 1-cell pocket
 8-10 m from an OPEN door, route valid (`fdir` steady toward it), `rem=escape` on 908/908 samples —
 the escape ladder owned the intent for two hours, emitting alternating +-z lateral nudges
 perpendicular to the route while both bots fired at 4 targets they never damaged (`npt` climbed to
 7074 s: the false-LOS standoff shape). The ladder never tried the route direction and never gave up.
-Untouched by the follower work (`vd=65535, fm=0` — not VHALL); needs its own pass on the ladder's
-stage escalation.
+A four-link chain, each hiding the next: the false-LOS standoff pinned `npt` high, the escape
+heading was demoted to a strafe-side HINT by the unstick helper, the strafe axis happened to be
+walled, and the exit BULL — the one remedy built for exactly that pocket — sat BELOW the escape
+branch in the else-if chain, unreachable while the ladder churned. Two fixes in
+`engine_autoplay.cpp`: a LATCHED bull now PREEMPTS the escape branch (`!(exitBull && doorActive &&
+!bossGate)` on the escape condition), and `unstickCombatMove` gained a `commitWalk` mode (armed by
+the escape site once `noProgressTimer > 10 s`) that WALKS the preferred heading as commanded WASD
+instead of demoting it to a strafe hint. Verified: sp_soak1 gauntlet pins 906 -> 43 and the
+`rem=escape` monopoly gone; soak13 (3 h, 9 classes) had `rem=escape` on ZERO of 2302 stall samples.
+
+**BOSS FLOORS: the boss is the travel GOAL, healers die first, and the bot commits to closing
+(2026-07-31 pass).** A milestone boss seals the exit, so the fight IS the floor; four coordinated
+changes make the bot treat it that way. (1) **Goal SUBSTITUTION, not a seek assist** (`buildBotView`):
+while the boss lives, the wall-aware boss-seeded `RouteField` IS the travel field (the exit field
+takes over the tick it dies); the straight bearing survives only as the last-metres fallback when the
+route field is invalid AND the line is clear. Two prior shapes both failed and are recorded in the
+code: the 25 m seek radius left the at-door park (4256 s at eff65, bot ON the sealed door), and just
+DROPPING the radius A/B'd WORSE (57 -> 80 s median boss-floor dwell) because an always-on straight
+seek fought the exit field — the defect was WHICH FIELD ruled, not the assist's tuning. (2)
+**Healer-first / boss-focus `pickTarget`** (Aaron: "clear all healing enemies first and then Focus
+the Boss"): on a boss floor the nearest visible HEALER/SUMMONER (`EnemyRole` mask on `BotTarget
+::isHealer`) wins outright, then an unshielded BOSS beats nearer ordinary adds; a SHIELDED boss stays
+deprioritized (adds drop the shield) with a lone-shielded fallback. The brain's FIGHT gate exempts
+healers on boss floors from the engagement ceiling like bosses. (3) **Boss movement FILL**: soak11
+made the residual self-describing — 273 boss-gated pins, dB median 40 m, `mv=0` on 232 — FIGHT emits
+WASD only when kiting/closing/strafing, so a bot fighting in place never walks the heading toward the
+one enemy that opens the exit. When the intent carries no movement on a boss-gated floor, the feet
+are filled toward the boss (flowDir, else the RouteField re-read directly). Verified soak12:
+boss-gated pins 273 -> 0. (4) **Boss CLOSING COMMIT** (`autoplay_combat.h` `bossCommit*` +
+driver window): soak13's residual — a RANGED doctrine strafes its add-band, so it always HAS WASD and
+the fill never fires; the ranger orbited one NM-25 boss floor for 78 min with dB frozen at 44-45 m
+and no boss LOS, because the adds never run dry. A 20 s window tracks closing on the boss; under
+2 m of approach (and boss not already fightable) LATCHES a commit that overrides the feet toward the
+boss route over a live FIGHT intent (combat stays the brain's — the descend-commit shape), tagged
+`rem=boss-cmt`. RELEASE requires LOS inside `min(weaponRange, THREAT_RADIUS)` — raw LOS at 40 m
+would flap, since a boss behind 16 nearer adds never enters the nearest-16 target list; at 12 m it
+is inside both the fire band and the scan, so normal targeting holds the fight. The warrior standing
+ON Korvath (dB=1, firing, simply out-DPS'd) never latches by construction — that is a BALANCE wall,
+not a movement problem. `[STALL]` carries `dB=`/`bL=` (boss distance / clear line) on boss floors.
+
+**CLASS AI: every class dumps its kit (2026-07-31, Aaron's design).** Skill selection no longer
+defaults to the cheap slot-0 filler for martial builds. The rules, in order (`decideCombat`):
+summons first (unchanged); a GROUP fires the biggest castable AoE (unchanged); then EVERY class
+dumps BIGGEST-FIRST — a melee build IN REACH of its target and a ranged build IN BAND cast their
+highest castable slot (a melee build closing to a target beyond weapon reach still uses the cheap
+filler — the big hit lands when it can connect); COUNTER skills (`BotView.skillIsCounter`, today
+Wanderer's DEFLECT) are withheld from the dump and cast reactively on the block triggers
+(`swingIsLanding` / `incomingProjectileEta < PERFECT_BLOCK_LEAD`) — a timed counter, per Aaron.
+Two old test pins encoding cheap-first were rewritten to pin the new policy. Measured: paladin
+Divine Judgment 0 -> 9 casts/100 s; the paladin now plays gap-close -> dump -> block as designed.
+
+**The ENDING no longer strands an autoplay run (2026-07-31).** CREDITS and VICTORY are non-gameplay
+screens (`updateAutoplay`/`logStats` only run IN_GAME), so a victory used to convert the healthiest
+sessions into silence — 3 of 9 soak10 sessions beat the game in 56-82 min and then parked on the
+credits for the rest of the soak (the death-screen strand's exact shape). Both screens now
+auto-advance under `m_autoplayActive` on a bounded countdown (10 s bot / 45 s if control reads
+human — the credits free the cursor, so a stray motion flips the takeover latch; a gate would
+re-strand), with `forceBot()` on the way back into a world and a LOG LINE at each advance
+(`[AUTOPLAY] credits auto-advance` / `ending advance -> town|menu`) so a soak can tell a bot-advanced
+ending from a park. The engine-slain ending rolls into the TOWN (portal -> Free-Play -> next run, the
+existing machinery); a STANDARD ending still returns to the MENU and ends the run there — verified in
+soak13 (rogue: full clear at 79 min, both lines fired, then 85 min idle at menu). Whether a standard
+ending should instead roll into a new run is an OPEN product decision.
+
+**What soak13 says (2026-07-31, 3 h, all 9 classes, one SP instance each).** Zero crashes, zero
+silent strands, `deaths==revives` held, `rem=escape` extinct, wedge rescue live. The headline is
+CLASS POWER, not navigation: final wdps spread 367 (Tinkerer) to 38371 (Wanderer) — 100x. Rogue
+BEAT THE GAME (Hell 50) in 79 min; Wanderer reached Hell 45 with 6438 kills; Marksman cleared
+Normal; Ranger NM 27, Paladin NM 24 — while Sorcerer ended on Normal 49, CE Normal 41, Warrior
+Normal 30 (115 min AT Korvath, 444/459 stall samples at dB=1 bL=1 fire=1 — the melee DAMAGE WALL:
+AI blameless, cannot out-DPS the rebalanced boss), Tinkerer Normal 23 with 705 deaths (88 min on
+one floor, wdps 367). The two SUMMON classes are the two weakest, which recasts the standing
+"CE always in the stuck pair" mystery as CLASS WEAKNESS (death-cycling churn, `rem=brain/breakoff`),
+not a nav loop. VHALL residual = the known entrance death-cycling only (all fm=WALK). Open, in
+order: the summon-class power gap, the Korvath damage wall, standard-ending continuation.
 
 **A stalled floor now explains itself.** `[STALL]` (`engine_autoplay.cpp`, shipped ON, no env gate)
 fires once a single floor has run over 5 minutes. It exists because the last several stalls each cost a

@@ -271,6 +271,11 @@ private:
     // BALANCE TELEMETRY (the driver is the playtest rig — emit per-floor + heartbeat records, greppable
     // `[TELEM]`, so a soak run is a balance dataset: time/deaths/kills per floor and player power
     // (HP / sustained weapon DPS / gear score) against the effective floor, plus boss floors flagged).
+    // Ending-screen auto-advance (the death-screen pattern: a victory must not strand an AFK run).
+    // Counts up while CREDITS/VICTORY show during an autoplay run; the bot advances at 10 s, a
+    // human (takeover latch reads human — often just a stray cursor motion, so it is a GRACE, not a
+    // gate) at 45 s. Reset whenever gameplay resumes.
+    f32              m_autoplayEndT = 0.0f;
     f32              m_autoplayRunTime = 0.0f;          // total elapsed this run
     f32              m_autoplayFloorTime = 0.0f;        // seconds on the current floor
     u32              m_autoplayTelemFloor = 0;          // floor the per-floor accumulators track (detects change)
@@ -364,6 +369,15 @@ private:
         bool vhFollowJump    = false;     // this tick: the follower wants the committed jump pressed
         Vec3 vhFollowJumpDir = {0,0,0};   // the committed link axis (injection gate + veto exemption)
         u16  vhFollowDist    = 0xFFFF;    // remaining route cost at the bot's node ([STALL] vd=)
+        f32  bossDist = -1.0f;            // boss floors: XZ distance to the live boss ([STALL] dB=)
+        u8   bossLOS  = 0;                //   ...and whether the line to it is clear ([STALL] bL=)
+        // Boss-floor closing commit (autoplay_combat.h bossCommit*): latched when a 20 s window
+        // shows the bot not closing on the sealed-exit boss (the soak13 ranged-orbit shape),
+        // released when the boss is fightable from here. StartDb < 0 = window unseeded.
+        bool bossCommit     = false;
+        f32  bossCmtWinT    = 0.0f;       // no-approach window accumulator (seconds)
+        f32  bossCmtStartDb = -1.0f;      // dB when the window opened
+        f32  bossCmtBestDb  = -1.0f;      // min dB seen inside the window
         f32              lookBehindTimer = 0.0f; // >0 = mid look-behind, holding the reversed aim
         f32              lookBehindYaw   = 0.0f; // the reversed yaw captured when the turn armed
         bool             lookBehindDone  = false;// this stuck episode has already spent its turn

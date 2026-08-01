@@ -256,15 +256,16 @@ TEST_CASE("does not cast at nothing: no LOS target => no cast") {
     CHECK(out.classSkillSlot == -1);
 }
 
-TEST_CASE("prefers the lowest castable slot") {
-    // A MARTIAL build (selfAt is Moderate/Ranged): its skills are a sidearm, so the cheap-first pick
-    // stands — the lowest castable slot.
+TEST_CASE("prefers the highest castable slot (every class dumps its kit while engaged)") {
+    // 2026-07-31 (Aaron): the old martial cheap-first rule left ranged classes never casting their
+    // buff/burst slots at all (Rapid Fire, Overcharged Magazine, Mark Prey, Overclock). While
+    // firing in band, every column now picks biggest-first; energy + cooldowns self-limit.
     BotView v = selfAt({0,0,0});
     BotTarget t{}; t.pos = {0, 1.7f, -15.0f}; t.dist = 15.0f; t.hasLOS = true;
     v.targets = &t; v.targetCount = 1;
     v.castableSkill[2] = v.castableSkill[3] = true;   // 0/1 unavailable this tick
     BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
-    CHECK(out.classSkillSlot == 2);
+    CHECK(out.classSkillSlot == 3);
 }
 
 TEST_CASE("a MAGIC build casts its BIGGEST skill, not the cheap filler (uses the mana pool)") {
@@ -298,7 +299,7 @@ TEST_CASE("fires the biggest castable AoE at a GROUP (Frozen Orb clears packs)")
     CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == 1);   // only 0/1 castable, magic => highest = 1
 }
 
-TEST_CASE("a MARTIAL build still casts cheap-first on a lone target, AoE on a group") {
+TEST_CASE("a MARTIAL build dumps on a lone target; the AoE branch still steers packs") {
     BotView v = selfAt({0,0,0});                     // Moderate / Ranged (martial)
     BotTarget ts[3];
     ts[0] = {}; ts[0].pos = {0,1.7f,-10.0f};  ts[0].dist = 10.0f; ts[0].hasLOS = true;
@@ -306,8 +307,8 @@ TEST_CASE("a MARTIAL build still casts cheap-first on a lone target, AoE on a gr
     ts[2] = {}; ts[2].pos = {-2,1.7f,-11.0f}; ts[2].dist = 11.2f; ts[2].hasLOS = true;
     v.castableSkill[0] = true;                       // cheap filler
     v.castableSkill[2] = true; v.skillIsAoe[2] = true;  // an AoE up top
-    v.targets = ts; v.targetCount = 1;               // lone target: cheap-first
-    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == 0);
+    v.targets = ts; v.targetCount = 1;               // lone target: the dump picks the highest
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == 2);
     v.targetCount = 3;                               // a pack: the AoE fires
     CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == 2);
 }
@@ -1203,4 +1204,148 @@ TEST_CASE("Autoplay: no gap-close at a target only reachable by falling") {
     CHECK(gap.moveFwd);                   // movement stays the fall veto's job, not this rule's
     CHECK(gap.classSkillSlot != 0);       // ...but no teleport across the gap
     CHECK_FALSE(gap.dodgeIsGapClose);     // and no charging roll either
+}
+
+// BOSS-FLOOR TARGET PRIORITY (Aaron: "clear all healing enemies first and then focus the boss").
+// A live milestone boss seals the exit, so the fight IS the floor — and the measured failure was a
+// 3006 s grind where every rescue stayed disarmed because the add stream never ended. Sustain
+// enemies (HEALER shamans / SUMMONER necromancers) are what make it endless, so they die first;
+// with them down the boss beats nearer ordinary adds so the damage goes into the HP pool that
+// actually opens the exit. Off boss floors nothing changes.
+TEST_CASE("pickTarget: boss floor kills sustain first, then focuses the boss") {
+    Autoplay::BotTarget arr[16] = {};
+    Autoplay::BotView v{};
+    v.targets = arr;
+    v.hasBoss = true; v.bossAlive = true;
+    v.weaponRange = 10.0f;
+    const Autoplay::Doctrine d = Autoplay::doctrineFor(4);   // Moderate/Melee — any cell works here
+
+    auto tgt = [&](f32 dist, bool healer, bool boss) {
+        Autoplay::BotTarget& t = arr[v.targetCount];
+        t.id = v.targetCount + 1; t.dist = dist; t.hasLOS = true;
+        t.isHealer = healer; t.isBoss = boss;
+        t.pos = {dist, 0, 0};
+        return v.targetCount++;
+    };
+
+    SUBCASE("a healer beats a nearer add AND a nearer boss") {
+        tgt(2.0f, false, false);                    // nearest: ordinary add
+        tgt(5.0f, false, true);                     // the boss
+        const u32 h = tgt(18.0f, true, false);      // distant shaman — still first
+        CHECK(Autoplay::pickTarget(v, d) == (s32)h);
+    }
+    SUBCASE("sustain down: the boss beats a nearer add (focus)") {
+        tgt(2.0f, false, false);
+        const u32 b = tgt(9.0f, false, true);
+        CHECK(Autoplay::pickTarget(v, d) == (s32)b);
+    }
+    SUBCASE("a SHIELDED boss still defers to the adds (the shield rule wins over focus)") {
+        const u32 add = tgt(2.0f, false, false);
+        const u32 b   = tgt(9.0f, false, true);
+        arr[b].bossShielded = true;
+        CHECK(Autoplay::pickTarget(v, d) == (s32)add);
+    }
+    SUBCASE("a blind or invulnerable healer does not hijack the pick") {
+        const u32 add = tgt(2.0f, false, false);
+        const u32 h1  = tgt(6.0f, true, false); arr[h1].hasLOS = false;
+        const u32 h2  = tgt(7.0f, true, false); arr[h2].invulnerable = true;
+        CHECK(Autoplay::pickTarget(v, d) == (s32)add);
+    }
+    SUBCASE("off a boss floor the healer gets no priority (nearest wins as ever)") {
+        v.hasBoss = false; v.bossAlive = false;
+        const u32 add = tgt(2.0f, false, false);
+        tgt(6.0f, true, false);
+        CHECK(Autoplay::pickTarget(v, d) == (s32)add);
+    }
+    SUBCASE("boss dead: no boss-floor priority left") {
+        v.bossAlive = false;
+        const u32 add = tgt(2.0f, false, false);
+        tgt(6.0f, true, false);
+        CHECK(Autoplay::pickTarget(v, d) == (s32)add);
+    }
+}
+
+// MELEE-IN-REACH SKILL DUMP (Aaron: the paladin should gap-close then use ALL its skills while
+// attacking, abusing the Divine Judgment invulnerability). The old martial rule pinned melee builds
+// to the slot-0 filler — and the paladin's centrepiece (2.5 m radius, under the AoE threshold)
+// never fired at all. In weapon reach a melee build now picks biggest-first like a caster; out of
+// reach it keeps the cheap filler so long cooldowns aren't burnt before arriving.
+TEST_CASE("decideCombat: melee build dumps highest skill in reach, filler while closing") {
+    Autoplay::BotTarget arr[16] = {};
+    Autoplay::BotView v{};
+    v.targets = arr; v.targetCount = 1;
+    v.buildCell = 4;                 // Moderate/Melee (col 1)
+    v.weaponRange = 4.0f;
+    v.hp = 100.0f; v.maxHp = 100.0f; v.energy = 200.0f;
+    for (u8 s2 = 0; s2 < 4; s2++) v.castableSkill[s2] = true;   // whole kit off cooldown
+    arr[0].id = 1; arr[0].hasLOS = true; arr[0].pos = {2.0f, 0, 0};
+
+    SUBCASE("in reach: highest castable slot (Divine Judgment analogue)") {
+        arr[0].dist = 2.0f;          // at blade range
+        const Autoplay::BotIntent out = Autoplay::decideCombat(v, Autoplay::doctrineFor(v.buildCell));
+        CHECK(out.classSkillSlot == 3);
+    }
+    SUBCASE("out of the fire band: no cast at all — cooldowns are saved for arrival") {
+        // Melee's fire band (engageMax x reach) sits INSIDE weapon reach, so a firing melee bot is
+        // always in reach and the dump applies whenever it fights; while still closing it casts
+        // nothing (the gap-close block owns the dash separately).
+        arr[0].dist = 9.0f; arr[0].pos = {9.0f, 0, 0};
+        const Autoplay::BotIntent out = Autoplay::decideCombat(v, Autoplay::doctrineFor(v.buildCell));
+        CHECK(out.classSkillSlot == -1);
+    }
+    SUBCASE("ranged column dumps too: in band, highest castable (buffs weave on cooldown)") {
+        v.buildCell = 5;             // Moderate/Ranged (col 2)
+        v.weaponRange = 20.0f; arr[0].dist = 10.0f;
+        const Autoplay::BotIntent out = Autoplay::decideCombat(v, Autoplay::doctrineFor(v.buildCell));
+        CHECK(out.classSkillSlot == 3);
+    }
+    SUBCASE("a COUNTER slot is withheld from the dump and fired on the block trigger") {
+        arr[0].dist = 2.0f;
+        v.skillIsCounter[3] = true;  // Deflect analogue in the top slot
+        Autoplay::BotIntent out = Autoplay::decideCombat(v, Autoplay::doctrineFor(v.buildCell));
+        CHECK(out.classSkillSlot == 2);              // dump skips the counter...
+        arr[0].isRanged = false; arr[0].attackRange = 3.0f;
+        arr[0].attackTimer = 0.05f;                  // ...until a swing is inside the block lead
+        out = Autoplay::decideCombat(v, Autoplay::doctrineFor(v.buildCell));
+        CHECK(out.classSkillSlot == 3);
+    }
+}
+
+// --- boss-floor closing commit (soak13 "ranged never closes") ------------------------------------
+// Pure latch/release only — the 20 s window bookkeeping lives in the driver; these pin the DECISIONS
+// so the two ends of the commit can never disagree about what "fightable" means.
+TEST_CASE("boss commit: latches only on a proven non-approach at an unfightable boss") {
+    const f32 relR = Autoplay::bossCommitReleaseRange(24.0f);   // ranged: clamped to THREAT_RADIUS
+    CHECK(relR == doctest::Approx(Autoplay::THREAT_RADIUS));
+    CHECK(Autoplay::bossCommitReleaseRange(4.3f) == doctest::Approx(4.3f));   // melee: true reach
+
+    // The soak13 ranger shape: dB frozen 44-45 over the window, no LOS -> latch.
+    CHECK(Autoplay::bossCommitShouldLatch(45.0f, 44.0f, false, 44.0f, relR));
+    // Real approach (closed >= 2 m across the window) -> no latch, window just restarts.
+    CHECK(!Autoplay::bossCommitShouldLatch(45.0f, 40.0f, false, 40.0f, relR));
+    // The warrior AT Korvath: LOS and inside release range -> never latches, no matter the window
+    // (it is standing on the boss and cannot out-DPS it; a movement commit fixes nothing there).
+    CHECK(!Autoplay::bossCommitShouldLatch(2.0f, 1.0f, true, 1.0f, 4.3f));
+    // Blind but CLOSE is still latchable: 5 m from a boss behind a wall is exactly the walk-around case.
+    CHECK(Autoplay::bossCommitShouldLatch(5.5f, 5.0f, false, 5.0f, relR));
+}
+
+TEST_CASE("boss commit: releases exactly when the boss is fightable (or gone)") {
+    const f32 relR = Autoplay::bossCommitReleaseRange(24.0f);
+    // LOS inside the release range -> normal targeting can hold the fight from here.
+    CHECK(Autoplay::bossCommitShouldRelease(true, true, relR - 1.0f, relR));
+    // LOS far outside it does NOT release: a boss behind 16 nearer adds never enters the
+    // nearest-16 target list, so releasing on raw LOS at 40 m would flap straight back out.
+    CHECK(!Autoplay::bossCommitShouldRelease(true, true, 40.0f, relR));
+    // Blind at any distance holds the commit.
+    CHECK(!Autoplay::bossCommitShouldRelease(true, false, 5.0f, relR));
+    // Boss dead -> release unconditionally (the gate clears with it).
+    CHECK(Autoplay::bossCommitShouldRelease(false, false, 40.0f, relR));
+    // Latch and release use the SAME fightable test, so a state that just latched cannot
+    // instantly release (and vice versa): unfightable here must fail the release...
+    CHECK(Autoplay::bossCommitShouldLatch(45.0f, 44.5f, true, 44.0f, relR));
+    CHECK(!Autoplay::bossCommitShouldRelease(true, true, 44.0f, relR));
+    // ...and fightable here must refuse the latch.
+    CHECK(!Autoplay::bossCommitShouldLatch(45.0f, 45.0f, true, relR - 1.0f, relR));
+    CHECK(Autoplay::bossCommitShouldRelease(true, true, relR - 1.0f, relR));
 }

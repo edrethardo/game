@@ -825,24 +825,55 @@ void Engine::update(f32 dt) {
         // otherwise the scroll's end (checked against the row count in renderCredits) lands
         // there too via m_creditsScroll.
         m_creditsScroll += dt * 40.0f;   // ~40 px/s at 720p reference scale
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) ||
-            Input::isActionPressed(GameAction::MENU_BACK) ||   // ESC/B skip, like every menu
-            Input::isActionPressed(GameAction::JUMP) ||
-            Input::isKeyPressed(SDL_SCANCODE_SPACE) ||
-            Input::isKeyPressed(SDL_SCANCODE_RETURN) ||
-            Input::isKeyPressed(SDL_SCANCODE_ESCAPE) ||
-            m_creditsScroll > Credits::scrollEnd()) {
-            m_gameState = GameState::VICTORY;
+        // AFK auto-advance: an autoplay victory used to park HERE for the rest of the session
+        // (updateAutoplay only runs IN_GAME, so 3 of 9 soak sessions went silent within 82 min of
+        // beating the game — the healthiest runs converted to dead time). Bounded countdown, not a
+        // botInControl() gate: the credits free the cursor, and a stray motion flips the takeover
+        // latch — the exact strand the death screen fixed. A watching human gets 45 s; unattended,
+        // the run rolls on at 10 s.
+        if (m_autoplayActive) m_autoplayEndT += dt;
+        {
+            // Named so the soak can distinguish "bot advanced" from "human key / scroll end" —
+            // soak11 could not tell a standard ending at the menu from a credits PARK in the logs.
+            const bool botAdvance = m_autoplayActive &&
+                m_autoplayEndT > (m_autoplayControl.botInControl() ? 10.0f : 45.0f);
+            if (botAdvance ||
+                Input::isActionPressed(GameAction::MENU_CONFIRM) ||
+                Input::isActionPressed(GameAction::MENU_BACK) ||   // ESC/B skip, like every menu
+                Input::isActionPressed(GameAction::JUMP) ||
+                Input::isKeyPressed(SDL_SCANCODE_SPACE) ||
+                Input::isKeyPressed(SDL_SCANCODE_RETURN) ||
+                Input::isKeyPressed(SDL_SCANCODE_ESCAPE) ||
+                m_creditsScroll > Credits::scrollEnd()) {
+                if (botAdvance) LOG_INFO("[AUTOPLAY] credits auto-advance after %.1f s", m_autoplayEndT);
+                m_gameState = GameState::VICTORY;
+                m_autoplayEndT = 0.0f;
+            }
         }
         break;
     case GameState::VICTORY:
         // Final victory (Hell floor 50 cleared) — "You conquered the Dungeon Engine."
         // MENU_BACK is in the set so ESC/B dismiss this screen like every other menu.
-        if (Input::isActionPressed(GameAction::MENU_CONFIRM) ||
+        if (m_autoplayActive) m_autoplayEndT += dt;
+        if ((m_autoplayActive &&
+             m_autoplayEndT > (m_autoplayControl.botInControl() ? 10.0f : 45.0f)) ||
+            Input::isActionPressed(GameAction::MENU_CONFIRM) ||
             Input::isActionPressed(GameAction::MENU_BACK) ||
             Input::isActionPressed(GameAction::JUMP) ||
             Input::isKeyPressed(SDL_SCANCODE_SPACE) ||
             Input::isKeyPressed(SDL_SCANCODE_RETURN)) {
+            // Soak-visible: names the branch the ending takes (town = engine-slain roll-on,
+            // menu = standard ending / orderly end of the autoplay run).
+            if (m_autoplayActive)
+                LOG_INFO("[AUTOPLAY] ending advance after %.1f s -> %s", m_autoplayEndT,
+                         (s_engineSlain && m_netRole != NetRole::CLIENT) ? "town" : "menu");
+            m_autoplayEndT = 0.0f;
+            // A bot-advanced ending: reclaim control on the way back into a world (the freed cursor
+            // has usually flipped the latch to "human", the death-screen lesson) so the town-portal
+            // machinery actually drives. The engine-slain branch below lands in the TOWN, where
+            // autoplayTownStep + the Free-Play one-shot continue the run; the standard ending
+            // returns to the MENU, which exitAutoplayRun below makes an orderly, logged end.
+            if (m_autoplayActive) m_autoplayControl.forceBot();
             // The Engine-slayer's ending leads HOME, not to the menu: persist the cleared
             // marker (Continue must land in town forever after) and walk out into the town.
             // Clients keep the menu path — a guest that waits is pulled in by the host's

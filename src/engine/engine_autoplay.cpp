@@ -106,9 +106,17 @@ static Vec3 rotateY_XZ(Vec3 v, f32 a) {
 // silently pressed into them and its HP regenerated. Returns an intent whose move/fire flags are empty
 // only when there is genuinely nothing to do (no target AND no heading) — the caller then keeps its
 // current intent rather than forcing a no-op.
+// `commitWalk`: after the strafe has had its chance (deep no-progress), WALK the hint heading while
+// still aiming and firing at the target — feet and guns are independent, exactly as kiting proves.
+// The strafe-only default is right for the common body-blocker orbit; commitWalk is the escalation
+// for the false-LOS standoff, where the strafe axis (perpendicular to the aim) can be exactly the
+// walled axis of a pocket and the bot side-steps into walls forever while its escape heading — which
+// points at the open route — is used for nothing but picking the strafe side (the 7102 s gauntlet
+// livelock, couch_soak8).
 static Autoplay::BotIntent unstickCombatMove(const Autoplay::BotView& v, Vec3 hint,
                                              const LevelGrid& grid, f32 feetY, bool lavaFloor,
-                                             Vec3 anchor, Vec3 selfPos, f32 selfYaw) {
+                                             Vec3 anchor, Vec3 selfPos, f32 selfYaw,
+                                             bool commitWalk) {
     Autoplay::BotIntent out{};
     out.aimYaw = selfYaw; out.aimPitch = 0.0f;
 
@@ -148,6 +156,18 @@ static Autoplay::BotIntent unstickCombatMove(const Autoplay::BotView& v, Vec3 hi
         // the one that best follows `pref` so the circling motion also drifts toward the exit.
         const f32 cy = cosf(out.aimYaw), sy = sinf(out.aimYaw);
         const Vec3 rightW{cy, 0.0f, -sy}, leftW{-cy, 0.0f, sy};
+        if (commitWalk && havePref) {
+            // Deep escalation: decompose the escape heading onto the aim basis (the vh-commit /
+            // faceAndGo convention) so the feet WALK the route while the guns stay on the target.
+            const Vec3 fwdW{-sy, 0.0f, -cy};
+            const f32 df = dot(pref, fwdW), dr = dot(pref, rightW);
+            constexpr f32 kAxis = 0.35f;               // ~20°, matches every other decomposition
+            out.moveFwd   = df >  kAxis;
+            out.moveBack  = df < -kAxis;
+            out.moveRight = dr >  kAxis;
+            out.moveLeft  = dr < -kAxis;
+            return out;
+        }
         const bool rOk = Autoplay::stepAllowed(grid, selfPos, feetY, rightW, lavaFloor);
         const bool lOk = Autoplay::stepAllowed(grid, selfPos, feetY, leftW, lavaFloor);
         const f32 rScore = havePref ? dot(rightW, pref) : 0.0f;
@@ -513,6 +533,10 @@ void Engine::updateAutoplay(f32 dt) {
         ap().wedgeVetoT      = 0.0f;
         ap().wedgeTry        = 0;
         ap().wedgeCount      = 0;
+        ap().bossCommit      = false;                    // the next boss floor opens its own window
+        ap().bossCmtWinT     = 0.0f;
+        ap().bossCmtStartDb  = -1.0f;
+        ap().bossCmtBestDb   = -1.0f;
     }
     if (v.doorActive && !bossGate) {
         if (ap().exitBull) {
@@ -731,7 +755,16 @@ void Engine::updateAutoplay(f32 dt) {
             in.aimYaw = y; in.aimPitch = 0.0f; in.moveFwd = true;   // close the last metre
         }
         in.descend = true;
-    } else if (stuck || ap().nudgeTimer > 0.0f || ap().escapeTimer > 0.0f) {
+    } else if ((stuck || ap().nudgeTimer > 0.0f || ap().escapeTimer > 0.0f) &&
+               !(ap().exitBull && v.doorActive && !bossGate)) {
+        // ^ A LATCHED BULL PREEMPTS THE ESCAPE LADDER. The 7102 s gauntlet livelock (couch_soak8):
+        // a false-LOS standoff kept `stuck` true on every tick, so this branch consumed the whole
+        // chain and the bull below — the one remedy built for exactly that pocket (A*-route to the
+        // door, fire through everything on the path) — never executed despite being latched. Same
+        // failure class as "a latched commit must not shadow the escape ladder", inverted. Falling
+        // through is safe against the reverse shadow: on a flat floor with an active door the bull
+        // ALWAYS has a heading (A* first leg, uncapped exit-flow-field fallback), it releases on a
+        // kill, and the floor-change reset clears the latch.
         ap().remedy = "escape";
         // Remedy B — wedged on geometry: an ESCALATING escape so an AFK bot is NEVER found permanently
         // idle. The longer the bot makes no XZ progress (ap().noProgressTimer keeps climbing while
@@ -831,8 +864,11 @@ void Engine::updateAutoplay(f32 dt) {
         // bot's current intent alone. This is what stops the >4 s escape zone from silently holstering the
         // guns and freezing next to enemies it could have killed.
         {
+            // commitWalk past 10 s: Stages 1-2 gave the strafe its chance; from here the ladder's
+            // heading is COMMANDED, not advisory (see unstickCombatMove).
             Autoplay::BotIntent u = unstickCombatMove(v, esc, m_level.grid, feetY, m_level.lavaFloor,
-                                                      anchor, m_localPlayer.position, m_localPlayer.yaw);
+                                                      anchor, m_localPlayer.position, m_localPlayer.yaw,
+                                                      /*commitWalk=*/ap().noProgressTimer > 10.0f);
             if (intentActs(u)) in = u;
             // JUMP as part of the escape. The ladder above only ever tried new HEADINGS, and a body
             // caught on a lip, a step edge or the inside of a corner does not need a new heading —
@@ -936,7 +972,8 @@ void Engine::updateAutoplay(f32 dt) {
             in.aimYaw = yaw; in.aimPitch = 0.0f; in.moveFwd = true;
         } else {
             Autoplay::BotIntent u = unstickCombatMove(v, Vec3{0, 0, 0}, m_level.grid, feetY, m_level.lavaFloor,
-                                                      ap().lastPos, m_localPlayer.position, m_localPlayer.yaw);
+                                                      ap().lastPos, m_localPlayer.position, m_localPlayer.yaw,
+                                                      /*commitWalk=*/false);   // break-off keeps the orbit
             if (intentActs(u)) in = u;
         }
     }
@@ -997,6 +1034,72 @@ void Engine::updateAutoplay(f32 dt) {
     // and reading the flag after it would let a release beat walk the bot off the door it is opening.
     // Skipped when standing ON the drop hole (atDescentGoal) — it is about to fall and steering it now
     // would walk it back off the hole — and while the deliberate stand-stills are live.
+    // BOSS-FLOOR MOVEMENT FILL — the Descent fill's twin, for the residual boss stall soak11 made
+    // self-describing: 273 boss-gated pins, dB median 40 m, mv=0 on 232 and flow=0 on 208 — the bot
+    // fights in place while the heading toward the one enemy that opens the exit never reaches the
+    // feet (FIGHT emits WASD only when kiting/closing/strafing, and every no-progress rescue is
+    // disarmed by the chip damage it keeps dealing). When the intent carries no movement on a
+    // boss-gated floor, walk toward the boss: prefer the (possibly veto-adjusted) travel heading,
+    // else re-read the wall-aware boss RouteField DIRECTLY — the buildBotView copy can be zeroed by
+    // the detour fan on cavern niches, but the field's own step is wall-aware by construction. Only
+    // the FEET are filled; aim / fire / dodge / block / potion stay the brain's.
+    // BOSS-FLOOR CLOSING COMMIT (soak13 "ranged never closes" — see autoplay_combat.h bossCommit*).
+    // The movement fill below only fires on an EMPTY-WASD intent, and a ranged doctrine strafing its
+    // add-band always has WASD — the ranger orbited one NM-25 boss floor for 78 min at dB 44-45 with
+    // no boss LOS. So a 20 s window tracks whether the bot is CLOSING on the boss at all; when it
+    // provably is not (and the boss isn't already fightable — the warrior standing ON Korvath must
+    // never latch), the commit latches and the feet are OVERRIDDEN toward the boss route even over a
+    // live FIGHT intent, exactly the descend-commit shape: combat stays the brain's, only the WASD
+    // is rewritten. Released the moment the boss has LOS inside the release range — from there the
+    // boss-floor target priority + the any-range boss exemption hold it in the fight normally.
+    // Env kill-switch NO_BOSSCMT=1 for the A/B; remove once measured.
+    static const bool sNoBossCmt = std::getenv("NO_BOSSCMT") != nullptr;   // A/B arm, read once
+    if (bossGate && ap().bossDist >= 0.0f && !sNoBossCmt) {
+        const f32 relR = Autoplay::bossCommitReleaseRange(v.weaponRange);
+        if (ap().bossCommit) {
+            if (Autoplay::bossCommitShouldRelease(v.bossAlive, ap().bossLOS != 0,
+                                                  ap().bossDist, relR)) {
+                ap().bossCommit     = false;
+                ap().bossCmtWinT    = 0.0f;
+                ap().bossCmtStartDb = -1.0f;   // fightable now: next window seeds fresh if it drifts
+            }
+        } else {
+            if (ap().bossCmtStartDb < 0.0f) {   // window unseeded (fresh floor / just released)
+                ap().bossCmtStartDb = ap().bossCmtBestDb = ap().bossDist;
+                ap().bossCmtWinT    = 0.0f;
+            }
+            if (ap().bossDist < ap().bossCmtBestDb) ap().bossCmtBestDb = ap().bossDist;
+            ap().bossCmtWinT += dt;
+            if (ap().bossCmtWinT >= Autoplay::BOSS_COMMIT_WINDOW_SEC) {
+                ap().bossCommit = Autoplay::bossCommitShouldLatch(
+                    ap().bossCmtStartDb, ap().bossCmtBestDb,
+                    ap().bossLOS != 0, ap().bossDist, relR);
+                ap().bossCmtStartDb = -1.0f;   // either way the window restarts (latched: idle until release)
+            }
+        }
+    } else if (!bossGate) {
+        ap().bossCommit = false; ap().bossCmtStartDb = -1.0f;   // boss died / left the floor mid-window
+    }
+
+    if (m_level.floorHasBoss && v.hasBoss && v.bossAlive &&
+        (ap().bossCommit ||
+         (!in.moveFwd && !in.moveBack && !in.moveLeft && !in.moveRight)) &&
+        !in.descend && !v.stunned && !v.rolling &&
+        ap().lookBehindTimer <= 0.0f && ap().lootDwell <= 0.0f) {
+        Vec3 h = v.flowDir;
+        if (lengthSq(h) < 1e-6f && ap().bossRoute.valid)
+            h = Autoplay::routeDirection(ap().bossRoute, m_level.grid, m_localPlayer.position);
+        if (lengthSq(h) > 1e-6f) {
+            const f32  cy = cosf(m_localPlayer.yaw), sy = sinf(m_localPlayer.yaw);
+            const Vec3 fwd{-sy, 0.0f, -cy}, right{cy, 0.0f, -sy};
+            const f32  df = h.x * fwd.x + h.z * fwd.z, dr = h.x * right.x + h.z * right.z;
+            constexpr f32 kAxis = 0.35f;
+            in.moveFwd = df > kAxis; in.moveBack = df < -kAxis;
+            in.moveRight = dr > kAxis; in.moveLeft = dr < -kAxis;
+            if (ap().bossCommit) ap().remedy = "boss-cmt";   // [STALL]: this branch owns the feet
+        }
+    }
+
     if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY &&
         !in.moveFwd && !in.moveBack && !in.moveLeft && !in.moveRight &&
         !in.descend && !v.stunned && !v.rolling &&
@@ -1549,7 +1652,7 @@ void Engine::updateAutoplay(f32 dt) {
                      "cell=%d,%d surf=%.2f ahead=%.2f rise=%+.2f%s%s | y=%.2f exitY=%.1f d2d=%.1f | "
                      "fdir=%+.2f,%+.2f mdir=%+.2f,%+.2f | "
                      "tgts=%u near2=%u near1=%u fire=%d npt=%.1f | door=%d bossG=%d | "
-                     "cmt=%d vd=%u fm=%u rem=%s | style=%s",
+                     "cmt=%d vd=%u fm=%u dB=%.0f bL=%u rem=%s | style=%s",
                      kClassDefs[static_cast<u32>(m_playerClass)].name, m_level.currentFloor,
                      m_autoplayFloorTime, sqrtf(lengthSq(v.flowDir)), (int)mv, (int)in.jump,
                      (int)m_localPlayer.onGround, netXZ,
@@ -1560,7 +1663,7 @@ void Engine::updateAutoplay(f32 dt) {
                      v.targetCount, near2, near1, (int)in.fire,
                      ap().noProgressTimer, (int)v.doorActive, (int)(v.hasBoss && v.bossAlive),
                      (int)ap().vhCommit, (unsigned)ap().vhFollowDist, (unsigned)ap().vhFollow.mode,
-                     ap().remedy, LevelGen::styleName(m_level.layoutStyle));
+                     ap().bossDist, (unsigned)ap().bossLOS, ap().remedy, LevelGen::styleName(m_level.layoutStyle));
         }
     }
 
@@ -1793,6 +1896,8 @@ Autoplay::BotView Engine::buildBotView() {
             // whenever they are off cooldown rather than saving them for a good moment.
             v.skillIsSummon[s] = (id == SkillId::SWARM_DEPLOY)  || (id == SkillId::SWARM_QUEEN) ||
                                  (id == SkillId::DEPLOY_TURRET) || (id == SkillId::TESLA_COIL);
+            // Reactive parry (Wanderer Deflect): cast on the block-tap triggers, never on cooldown.
+            v.skillIsCounter[s] = (id == SkillId::DEFLECT);
             // BLOOD_NOVA pays HEALTH, not energy (tryActivate refuses to suicide); everything else
             // draws the shared pool. Mirroring the split keeps the bot off a skill it can't afford.
             if (id == SkillId::BLOOD_NOVA) {
@@ -2104,41 +2209,33 @@ Autoplay::BotView Engine::buildBotView() {
             if (haveBoss) {
                 const Vec3 toBoss{bossPos.x - pos.x, 0.0f, bossPos.z - pos.z};
                 const f32  dBoss = length(toBoss);
-                // DROPPING THE DISTANCE GATE WAS TRIED AND MEASURED WORSE (2026-07-30). The couch
-                // soak's boss stalls (251 pinned samples, all on floor 30) sat at d2d ~28.9 m — just
-                // outside this radius — so "seek the boss from any distance, since the exit is sealed
-                // until it dies" looked obviously right. Paired A/B (one binary + env kill-switch, 6
-                // classes x both arms, 25 min) says otherwise, on the DIRECT metric: median dwell on a
-                // boss-gated floor 57 s -> 80 s and median completion 68 s -> 102 s, i.e. boss floors
-                // got SLOWER, while floors reached were a wash (127 vs 125) and per-class results split
-                // 3-2 in favour of keeping the radius. Whole-run pin counts looked much better without
-                // the gate, but those are dominated by VHALL floors this code does not touch — a
-                // confound, not evidence.
-                // Note also that the 1096 s stall this was aimed at did NOT reproduce: neither arm
-                // produced a single boss floor over 300 s. So the deep-floor boss stall is still
-                // unexplained, and it is NOT simply "the seek radius is too small".
-                constexpr f32 kBossSeekRadius = 25.0f;   // covers a major boss's expanded arena
-                const bool flowIdle = lengthSq(v.flowDir) < 1e-6f;
-                const bool wantSeek = (dBoss < kBossSeekRadius || v.atExit || flowIdle) && dBoss > 1e-3f;
-                if (wantSeek) {
-                    if (clearLineTo(bossPos)) {
-                        // Open arena, no wall between us: a straight bearing is the snappiest way to
-                        // close on (and catch a kiting) boss.
-                        v.flowDir = normalize(toBoss);
-                    } else {
-                        // A WALL is in the way. A straight bearing here jams into it (the reported
-                        // "trying to get to the boss through a wall", every build). Route via a WALL-
-                        // AWARE BFS flow field seeded from the boss (autoplay_route.h) — the same proven
-                        // primitive the exit / Descent / VHall fields use: it routes the whole way around
-                        // walls, is defined on every reachable cell (no straight-line dead ends), steers
-                        // at cell centres (no wall-hug), has no A* cell cap (a boss across the floor still
-                        // routes), and rebuilds only when the boss changes cell (a moving target). Falls
-                        // back to the exit field only if the boss is genuinely unreachable.
-                        if (Autoplay::ensureRouteField(ap().bossRoute, m_level.grid, bossPos, floorStamp)) {
-                            const Vec3 rd = Autoplay::routeDirection(ap().bossRoute, m_level.grid, pos);
-                            if (lengthSq(rd) > 1e-6f) v.flowDir = rd;
-                        }
+                // GOAL SUBSTITUTION, not a seek assist. Two prior shapes both failed, differently:
+                // the 25 m radius left the at-door park (4256 s at eff65: the bot ON the sealed door,
+                // d2d median 1 m, boss alive, never closing), and simply DROPPING the radius A/B'd
+                // WORSE (boss floors slower, 57->80 s median dwell) because an always-on straight
+                // seek fought the exit field and the local fight. The conceptual defect was that the
+                // EXIT field stayed the travel authority on a floor whose exit cannot open: at the
+                // door it reads "at goal" and emits nothing, and the seek was an assist competing
+                // with it. So while a milestone boss lives, the boss-seeded wall-aware RouteField IS
+                // the travel field (the exit field takes over the tick the boss dies); the straight
+                // bearing survives only as the last-metres fallback when the route field is invalid
+                // AND the line is clear. dBoss/bLOS are stashed for the boss-floor [STALL] autopsy.
+                ap().bossDist = dBoss;
+                ap().bossLOS  = clearLineTo(bossPos) ? 1 : 0;
+                const bool substitute = dBoss > 1e-3f;
+                if (substitute) {
+                    // The wall-aware BFS RouteField seeded from the boss (autoplay_route.h): routes
+                    // around walls, defined on every reachable cell, steers at cell centres, no A*
+                    // cap, rebuilds only when the boss changes cell. THE authority here.
+                    bool routed = false;
+                    if (Autoplay::ensureRouteField(ap().bossRoute, m_level.grid, bossPos, floorStamp)) {
+                        const Vec3 rd = Autoplay::routeDirection(ap().bossRoute, m_level.grid, pos);
+                        if (lengthSq(rd) > 1e-6f) { v.flowDir = rd; routed = true; }
                     }
+                    // Route field invalid or at-goal with the boss offset from its cell: the straight
+                    // bearing closes the last open stretch, but ONLY with a clear line (through a wall
+                    // it jams — the measured "navigate to the boss even behind a wall" freeze).
+                    if (!routed && ap().bossLOS) v.flowDir = normalize(toBoss);
                 }
             }
         }
@@ -2253,6 +2350,10 @@ Autoplay::BotView Engine::buildBotView() {
         t.feetY       = e.position.y - e.halfExtents.y;
         t.isFlying    = (e.flags & ENT_FLYING) != 0;   // hovers by design: exempt from the story gate
         t.isLootGoblin = (e.flags & ENT_LOOT_GOBLIN) != 0;   // flees with loot: rush it above all else
+        // Boss-floor sustain priority (see BotTarget::isHealer): HEALER shamans + SUMMONER
+        // necromancers — the roles that heal the pack back up / resurrect it. Role is a bitmask, so
+        // a boss that IS a necromancer reads as both, and the healer-first rule simply targets it.
+        t.isHealer = (e.enemyRole & (EnemyRole::HEALER | EnemyRole::SUMMONER)) != 0;
         // Currently DAMAGE-IMMUNE — mirror Combat::applyDamage's early returns so the bot never wastes
         // shots (or, for a gargoyle, keeps it asleep by staring). A dormant AMBUSH gargoyle, an entombed
         // boss (Malachar's channel), the Engine while its wave adds live. minionShield is NOT here: it

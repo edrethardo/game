@@ -84,8 +84,10 @@ BotIntent decide(const BotView& v) {
     // yet (buildBotView), so the bot walks into the arena instead of idling at the sealed door.
     const s32 ti = pickTarget(v, d);
     if (ti >= 0 && (v.targets[(u32)ti].isBoss || v.targets[(u32)ti].isLootGoblin ||
+                    (v.targets[(u32)ti].isHealer && v.hasBoss && v.bossAlive) ||
                     v.targets[(u32)ti].dist <= engageCeiling(v, d)))
-        return decideCombat(v, d);   // boss + fleeing loot goblin are engaged from ANY range
+        return decideCombat(v, d);   // boss, loot goblin + boss-floor sustain: engaged from ANY range
+                                     // (pickTarget prioritizes the same three — the two MUST agree)
 
     // DESCEND: at an eligible door, ask to descend.
     DescendCtx dc; dc.doorActive = v.doorActive; dc.distToDoor = v.distToDoor;

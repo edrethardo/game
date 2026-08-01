@@ -43,6 +43,12 @@ struct BotTarget {
     // runs out — so the bot RUSHES it above everything else: nearest one wins the target outright and
     // is engaged/chased from any range, and the movement is a flat-out close (never a kite).
     bool isLootGoblin = false;
+    // SUSTAIN enemy: EnemyRole HEALER (shaman — tops up the pack's lowest-HP ally; a stacked pair is
+    // documented as un-out-damageable) or SUMMONER (necromancer — RESURRECTS corpses; a boss-roled one
+    // revives three at a time). On a floor with a live milestone boss these are what turn the fight
+    // into an endless grind, so the boss-floor target priority kills them FIRST (Aaron's call:
+    // "clear all healing enemies first and then focus the boss").
+    bool isHealer = false;
     // Currently DAMAGE-IMMUNE (Combat::applyDamage returns early): a dormant gargoyle, an entombed
     // boss, the shielded Engine. Firing at one is wasted — worse, aiming at a dormant gargoyle is what
     // keeps it asleep — so pickTarget never chooses an invulnerable enemy as the shot target (they
@@ -147,6 +153,10 @@ struct BotView {
     // so the right policy is simply "whenever it is off cooldown", not "when a good target exists".
     // The driver fills it from the slot's SkillId (SkillDef carries no summon flag).
     bool skillIsSummon[4] = {};
+    // Timed COUNTER skills (Wanderer Deflect): withheld from the on-cooldown dump and cast
+    // reactively — on an incoming melee swing or a tracked projectile about to land — exactly like
+    // the perfect-block tap. The counter IS the class fantasy (Aaron), so spending it blind wastes it.
+    bool skillIsCounter[4] = {};
     // Per-slot: is this a TELEPORT / GAP-CLOSE skill (SkillDef.distance > 0 — Holy Smite, Shadow Step/
     // Strike, Phase Dash)? The policy casts one to CLOSE the gap to a target beyond reach (it blinks
     // toward the facing), so a melee build teleports onto a far enemy instead of only walking.
