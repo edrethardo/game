@@ -7,6 +7,7 @@
 #include "game/weapon_dps.h"
 #include "game/combat.h"
 #include <algorithm>
+#include <clocale>   // setlocale — the CSV's decimal separator must not follow the machine's locale
 #include <cstdio>
 #include <cstring>
 
@@ -230,23 +231,55 @@ void computeRow(u8 difficulty, u8 rawFloor, u8 cell, u32 trials,
     if (out.enemy.dpsMedian > 0.0f) out.secondsToDie = out.ehp[1] / out.enemy.dpsMedian;
 }
 
-// RFC-4180 field escape: always double-quote, doubling any embedded quote. Needed because
-// boss names contain commas ("Ygara, the Broodqueen") which would otherwise split the row
-// into 34 fields and break any strict CSV parser. BossDef::name is char[48], so the worst
-// case (47 chars, all quotes) is 2 + 47*2 + 1 = 97 bytes — the fixed buffer always fits.
+// RFC-4180 field escape: always double-quote, doubling any embedded quote. BossDef::name is
+// char[48], so the worst case (47 chars, all quotes) is 2 + 47*2 + 1 = 97 bytes — the fixed
+// buffer always fits.
+//
+// It ALSO rewrites any comma in the label to a semicolon, which is deliberate and not merely
+// belt-and-braces. Quoting alone is correct CSV and the shipped consumer (tools/balance_chart.py,
+// csv.DictReader) reads it fine — but boss names really do contain commas ("Ygara, the
+// Broodqueen"), so 162 of the 1350 rows split into 34 fields under any ad-hoc `awk -F,` /
+// `line.split(',')`, silently shifting every column after the name. In a metrics file whose only
+// text column is a human LABEL, keeping the delimiter out of the data is worth more than preserving
+// the punctuation of a boss's title: every row now has exactly 33 fields for every parser, naive or
+// strict. (Measured 2026-08: this shift misread ttkBoss as hitsToDie and produced "70 hits to die".)
 static const char* csvQuote(const char* s, char (&buf)[100]) {
     u32 o = 0;
     buf[o++] = '"';
     for (const char* p = s; *p && o < sizeof buf - 3; p++) {   // -3: closing quote + nul + room to double
         if (*p == '"') buf[o++] = '"';
-        buf[o++] = *p;
+        buf[o++] = (*p == ',') ? ';' : *p;
     }
     buf[o++] = '"';
     buf[o] = '\0';
     return buf;
 }
 
+// A COMMA-separated file whose numbers are written by a comma-decimal locale is not a CSV — it is
+// noise. `fprintf("%.2f")` follows LC_NUMERIC, so on a de_DE/fr_FR/nl_NL machine every float in this
+// report came out as `8096,0`, which collides with the field separator: the 33 columns became ~50,
+// every column after the first float shifted, and consumers read the wrong values SILENTLY.
+// `tools/balance_chart.py` fares no better — `csv.DictReader` splits correctly but then `float()`
+// chokes on "8096,0" and the value is clamped to 0. This was measured on Aaron's machine in 2026-08:
+// a whole report read as garbage, and a deep-tier "hits-to-die" figure taken from such a file went
+// into CLAUDE.md as fact.
+//
+// So the writers pin LC_NUMERIC to "C" for the duration of the write and restore it after. The guard
+// lives in the writers, not at the call site, precisely so it cannot be forgotten by the NEXT caller
+// — an `LC_ALL=C` in front of the command would fix one invocation and leave the trap armed.
+struct CNumericLocale {
+    char saved[64];
+    CNumericLocale() {
+        // setlocale's return points at internal storage the next call may clobber — copy it first.
+        const char* cur = std::setlocale(LC_NUMERIC, nullptr);
+        std::snprintf(saved, sizeof saved, "%s", (cur && *cur) ? cur : "C");
+        std::setlocale(LC_NUMERIC, "C");
+    }
+    ~CNumericLocale() { std::setlocale(LC_NUMERIC, saved); }
+};
+
 void writeCsvHeader(FILE* fp) {
+    CNumericLocale cLocale;   // header carries no floats, but keep both writers symmetrical
     std::fprintf(fp,
         "difficulty,floor,effFloor,cell,row,col,"
         "wDps10,wDps50,wDps90,cDps10,cDps50,cDps90,tDps10,tDps50,tDps90,"
@@ -257,6 +290,7 @@ void writeCsvHeader(FILE* fp) {
 }
 
 void writeCsvRow(FILE* fp, const MetricsRow& r) {
+    CNumericLocale cLocale;   // every field below is a float — see the guard's comment
     char nameBuf[100];
     std::fprintf(fp,
         "%u,%u,%u,%u,%u,%u,"

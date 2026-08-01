@@ -398,3 +398,60 @@ TEST_CASE("balance report: full sweep CSV when BALANCE_REPORT is set") {
     std::fclose(fp);
     MESSAGE("balance report written: ", doctest::String(path), " (1350 rows + header)");
 }
+
+// --- the CSV must be parseable no matter what locale the machine runs -----------------------------
+// Regression pin for a bug that silently corrupted every report generated on a comma-decimal machine
+// (de_DE here): `fprintf("%.2f")` follows LC_NUMERIC, so floats were written as `8096,0` — a comma
+// inside a comma-separated file. The 33 columns became ~50, every column after the first float
+// shifted, and the numbers read out of it were nonsense that nothing flagged. Delete the
+// CNumericLocale guard in balance_lab.cpp and this test fails.
+TEST_CASE("balance CSV is locale-independent") {
+    // Save the ambient locale so the rest of the suite is unaffected whichever branch we take.
+    char ambient[64];
+    { const char* cur = std::setlocale(LC_NUMERIC, nullptr);
+      std::snprintf(ambient, sizeof ambient, "%s", (cur && *cur) ? cur : "C"); }
+
+    // Try to stand the test up under a locale that really does print a comma decimal. Which locales
+    // are generated varies by machine (CI usually has only C/en_US), so this is best-effort: if none
+    // is available the column-count assertions below still run, just without the hostile locale.
+    const char* kCommaLocales[] = {"de_DE.UTF-8", "de_DE", "fr_FR.UTF-8", "nl_NL.UTF-8", "es_ES.UTF-8"};
+    bool hostile = false;
+    for (const char* loc : kCommaLocales) {
+        if (!std::setlocale(LC_NUMERIC, loc)) continue;
+        char probe[16];
+        std::snprintf(probe, sizeof probe, "%.1f", 1.5);
+        if (std::strchr(probe, ',')) { hostile = true; break; }
+    }
+    if (!hostile) {
+        MESSAGE("no comma-decimal locale installed — parse pins still run, hostile-locale pin skipped");
+        std::setlocale(LC_NUMERIC, ambient);
+    }
+
+    // A BOSS row, and with the nastiest label the real table holds: "Ygara, the Broodqueen" has a
+    // comma in it. csvQuote rewrites it to a semicolon so the row is 33 fields for EVERY parser,
+    // not just a strict one — the shift this prevents is what once turned ttkBoss into a reported
+    // "70 hits to die".
+    BalanceLab::MetricsRow r;
+    r.difficulty = 2; r.rawFloor = 5; r.cell = 4;
+    r.ehp[1] = 8429.5f; r.enemy.hitMedian = 8096.25f; r.hitsToDie = 1.0412f;
+    r.boss.present = true;
+    r.boss.name    = "Ygara, the \"Brood\" Queen";   // BossCurve::name points into the def table
+
+    FILE* fp = std::tmpfile();
+    REQUIRE(fp != nullptr);
+    BalanceLab::writeCsvRow(fp, r);
+    std::rewind(fp);
+    char line[2048] = {};
+    REQUIRE(std::fgets(line, sizeof line, fp) != nullptr);
+    std::fclose(fp);
+
+    // Restore before asserting, so a failure can't leave the process in the hostile locale.
+    std::setlocale(LC_NUMERIC, ambient);
+
+    u32 fields = 1;
+    for (const char* p = line; *p; p++) if (*p == ',') fields++;
+    CHECK(fields == 33);                        // the header's column count, naive split included
+    CHECK(std::strchr(line, '.') != nullptr);   // decimals are dots, so strtod/float() can read them
+    CHECK(std::strstr(line, "Ygara; the") != nullptr);   // the label's comma became a semicolon
+    CHECK(std::strstr(line, "\"\"Brood\"\"") != nullptr); // ...and embedded quotes are still doubled
+}

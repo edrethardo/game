@@ -103,7 +103,27 @@ measuring, not by reasoning. Consequence: the raw function now steps DOWN at eff
 must NOT be asserted monotonic on its own — it is never used alone, and the test now pins the PRODUCT
 with the tier bump, walked in progression order (rises within a tier, steps UP into Nightmare, and
 keeps the deliberate ~0.52x Nightmare->Hell dip). **Still open:** Hell floor 5 at 0.99 hits-to-die
-predates this pass and is untouched by it.
+predates this pass and is untouched by it — but see the correction directly below before treating
+that number as a statement about the GAME.
+
+**"Hell one-shots you" was an OVERSTATEMENT — the 0.99 is a gear-MODEL artifact, corrected
+2026-08-01.** Aaron pushed back on it ("were the bots oneshot?") and the answer is no. The lab figure
+itself is real and reproduces exactly (Hell floor 5, Tanky/Magic: 0.99), but three things were being
+read into it that the data does not support. (1) **It is a three-floor DIP, not the tier.** Hell floor
+1 is 2.15 hits-to-die, the minimum is **0.81 at floor 4**, floor 7 is back to 1.45, and floors 40-50
+average **2.27**. (2) **The dip is the PLAYER model, not enemy scaling.** Across Hell floors 1-10 the
+enemy hit is nearly flat (7792 -> 8477, +9%) while the modeled player's EHP collapses 16737 -> 7769
+(-54%) and then recovers — because the lab equips from a **4-effective-floor window** (`WINDOW_FLOORS`)
+and `ItemGen` wraps the drop POOL every 50 levels, so at Hell floor 4 the whole window is wrapped-level
+1-4 starter base items. It models a player who arrived in Hell wearing nothing from Nightmare; a real
+player (and every soak bot) carries their Nightmare-50 gear across, which the lab cannot express. This
+is the known "Hell gear lottery" wearing a scarier hat. (3) **Empirically the bots are not one-shot:**
+across soak13's Hell deaths the median bot was at **64%** (rogue) / **37%** (wanderer) HP one second
+before dying, and only 30% / 7% of deaths came from above 90% — inside a full second holding up to 16
+attackers, which is many hits, not one. Consequence for tuning: the deep tiers DO have some damage
+headroom (Hell endgame ~2.3 hits-to-die, and the player's post-hit i-frame grace stretches that in real
+play); what they do not have is room for a blanket multiplier applied without measuring. Discount the
+entry-floor numbers as a model artifact rather than designing around them.
 
 **Balance lab.** `tests/balance/` holds a repeatable balance model (spec:
 `docs/superpowers/specs/2026-07-22-balance-lab-design.md`): typical-equipment player power
@@ -117,6 +137,18 @@ extractions exist FOR the lab — the sustained-DPS cycle (`game/weapon_dps.h`, 
 (`game/class_defs.cpp`), and `enemyTierForFloor` (`enemy_def.h`, shared with the spawner) —
 re-inlining any of them re-creates the scorer-drift bug the 2026-07-22 loot fixes cleaned up.
 Its first run caught a real gap (no non-legendary wand at levels 39-50 → Void Scepter).
+**The CSV is locale-hardened (2026-08-01) and its numbers can now be trusted on any machine.**
+`fprintf("%.2f")` follows `LC_NUMERIC`, so on a comma-decimal machine (de_DE here) every float was
+written as `8096,0` — a comma inside a comma-separated file. The 33 columns became ~50, every column
+after the first float shifted, and `balance_chart.py` clamped the unparseable values to 0. Nothing
+warned; a deep-tier figure read off such a file went into this document as fact. Both CSV writers now
+pin `LC_NUMERIC` to "C" for the write and restore it after (the guard lives in the WRITER, not the
+call site, so `LC_ALL=C ./dungeon_tests` fixing one invocation can't leave the trap armed for the
+next). `csvQuote` additionally rewrites commas inside the boss-name label to semicolons: quoting alone
+is valid CSV and `csv.DictReader` handles it, but "Ygara, the Broodqueen" split 162 of 1350 rows into
+34 fields under any `awk -F,`, which once misread `ttkBoss` as `hitsToDie` and produced "70 hits to
+die". Every row is now exactly 33 fields for every parser. Pinned by "balance CSV is
+locale-independent" in `test_balance_lab.cpp` (verified by sabotage: removing the guard fails it).
 Phase 2 (pending): chosen target bands become REQUIREs in `test_balance_lab.cpp` so CI fails
 when a content/constant change knocks a floor out of band.
 
