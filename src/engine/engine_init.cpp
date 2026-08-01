@@ -27,6 +27,7 @@
 #include "world/level_loader.h"
 #include "world/collision.h"
 #include "world/combat_query.h"
+#include "game/free_play.h"   // DIFFICULTY_COUNT — bounds the unlock byte read from disk
 #include "game/player.h"
 #include "game/combat.h"
 #include "game/enemy_ai.h"
@@ -198,7 +199,7 @@ void Engine::init() {
         if (f) {
             (void)std::fread(&m_highestUnlocked, 1, 1, f);
             std::fclose(f);
-            if (m_highestUnlocked > 2) m_highestUnlocked = 0; // sanitize bad data
+            if (m_highestUnlocked >= FreePlay::DIFFICULTY_COUNT) m_highestUnlocked = 0; // sanitize bad data
         }
     }
 

@@ -125,6 +125,55 @@ headroom (Hell endgame ~2.3 hits-to-die, and the player's post-hit i-frame grace
 play); what they do not have is room for a blanket multiplier applied without measuring. Discount the
 entry-floor numbers as a model artifact rather than designing around them.
 
+**INFERNO — the 4th difficulty tier, and MYTHIC, the rarity above legendary (2026-08-02).** Aaron:
+"implement Inferno and the higher than legendary Tier". Both ride existing byte fields, so no struct
+grew anywhere.
+**The tier** is a pure scaling step on the existing ladder: Hell floor 50 now PROMOTES to Inferno
+(effective floors 151-200) instead of rolling the credits, and only Inferno 50 ends the run.
+`FreePlay::DIFFICULTY_COUNT` is 4 and `FINAL_DIFFICULTY` names the last rung, because the ladder
+bound, the save-load clamp, the unlock-file sanitize, the `--difficulty` range and the balance sweep
+all keyed off a literal `2` — five silent caps, of which the save clamp was the dangerous one (an
+Inferno save loaded as NORMAL, keeping its gear and losing 150 effective floors). Tier names are
+single-sourced in `FreePlay::difficultyName`: there were two separate `const char* diffNames[3]`
+literals, and a 4th tier would have indexed both off the end. **`saveCleared` deliberately still
+tests `difficulty >= 2`** — every hero who beat Hell before Inferno existed is stored as difficulty 2
+/ floor 51+, and that predicate is what grants them the town and Free-Play; raising it would have
+retroactively un-cleared all of them. The Source shard gate moved `== 2` -> `>= 2` for the same
+reason (an equality gate would stop the secret boss's key dropping in the one tier players hunt it in).
+**The numbers were MEASURED, not assumed.** The analytic solve (a x2.54 damage step over Hell,
+mirroring Hell's step over Nightmare) gave 13.93 and the lab measured it at **1.49 hits-to-die** across
+the endgame — hotter than agreed, because player power does not grow between tiers by the same factor
+the enemy curve does. Re-solved by ratio to **11.53**, which measures **1.80** over floors 40-50
+(Hell 2.29, Nightmare 3.04, Normal 6.94). The HP bump is **0.935** — below 1.0, which looks alarming
+and is the same shape as Hell's 1.875 being half of Nightmare's 3.75: the compounding floor term
+carries more of each successive tier, so the flat lever shrinks while the total still rises (HP-over-
+damage 1.90 at Hell-50 -> 2.53 at Inferno-50, i.e. spongier faster than lethal). Aaron's standing
+call — "1.8 is fine since the player has the grace period" — is the target the tier is solved to; the
+post-hit i-frame window is what makes ~1.8 a fight rather than a coin flip.
+**MYTHIC** is `Rarity::MYTHIC`, appended ABOVE legendary (value 4) — appended, never inserted, because
+the ordinal is the serialized value and a middle insert would silently reinterpret every existing save
+and in-flight packet. It drops **only in Inferno**, and is **carved OUT of the legendary slice**
+(`MYTHIC_SHARE_OF_LEGENDARY` = 25%) rather than added beside it, so the top-of-table payout rate is
+unchanged and every lower tier's rates are byte-identical. A mythic IS one of the named uniques rolled
+harder: it draws from the **legendary def pool** (no def authors `maxRarity: mythic`, so a literal
+window test would find nothing, degrade the tier, and the rarity would never drop while looking
+implemented), guarantees the full affix count instead of rolling 3-4, and rolls affixes and base stats
+above the legendary ceiling (`MYTHIC_AFFIX_POWER` 1.25, `MYTHIC_BASE_POWER` 1.15). That "one extra
+power" shape was chosen over a 5th affix slot precisely to avoid growing `ItemInstance` — a power step,
+not a layout change. Its colour is **Diablo 2's unique tan (#C7B377)**, Aaron's call; deliberately a
+dustier hue beside legendary's bright gold.
+**`isLegendaryOrBetter()` is the contract that keeps them equal.** ~25 sites open-coded
+`== Rarity::LEGENDARY` — granted skills (weapon/armor/ring/offhand/gloves/boots/helmet), never
+despawning, eviction immunity, the minimap marker, the doubled tooltip border, the material swap, the
+Auto-Loot pickup bonus, `isDefinitiveBest` — and any one missed would have made a mythic strictly WORSE
+than a legendary. 27 call sites now go through the helper; adding a tier above the top means auditing
+exactly its callers. `BuildScore`'s tiebreak (`2.0f * (f32)rarity`) picks up the step for free.
+**Versions:** `PROTOCOL_VERSION` 25 -> **26** and `SAVE_VERSION` 4 -> **5**, both for VALUE ranges on
+unchanged layouts. The save bump is the load-bearing one: without it an older binary would open an
+Inferno hero, clamp them to Normal, and write that back on the next autosave — a silent, unrecoverable
+demotion. v4 stays readable and shares the direct-read path (keying that path on `== SAVE_VERSION`
+alone is a trap when a bump adds no fields: every v4 save would have failed to load).
+
 **Balance lab.** `tests/balance/` holds a repeatable balance model (spec:
 `docs/superpowers/specs/2026-07-22-balance-lab-design.md`): typical-equipment player power
 (Monte-Carlo through the real `ItemGen`/`BuildScore`/`Inventory` code) vs enemy/boss curves

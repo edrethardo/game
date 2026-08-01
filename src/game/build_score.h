@@ -292,7 +292,7 @@ inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell,
     // Cannon's heavy offense weight makes a skill-granting shield beat a plain high-defense one
     // (Aaron: skill shields "as glass cannon better than higher defense"), while a Tanky build still
     // values the piece for its base armor + any defensive grant.
-    if (item.rarity == Rarity::LEGENDARY) {
+    if (isLegendaryOrBetter(item.rarity)) {
         off  += def.legendarySkillOffense;
         def_ += def.legendarySkillDefense;
     }
@@ -318,7 +318,7 @@ inline f32 score(const ItemInstance& item, const ItemDef& def, u8 cell,
 // honest (Swift Boots is worth its real base HP + phase_dash legendary-skill value); the "always"
 // lives in the decisions that pick one item over another within a slot.
 inline bool isDefinitiveBest(const ItemDef& def, Rarity rarity) {
-    return rarity == Rarity::LEGENDARY && def.slot == ItemSlot::BOOTS &&
+    return isLegendaryOrBetter(rarity) && def.slot == ItemSlot::BOOTS &&
            def.legendarySkillId == SkillId::PHASE_DASH;
 }
 

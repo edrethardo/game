@@ -24,6 +24,7 @@
 #include "world/level_loader.h"
 #include "world/collision.h"
 #include "world/combat_query.h"
+#include "game/free_play.h"   // difficultyName / DIFFICULTY_COUNT — single-sourced tiers
 #include "game/player.h"
 #include "game/combat.h"
 #include "game/enemy_ai.h"
@@ -338,7 +339,6 @@ void Engine::renderMenu() {
             FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tw) * 0.5f, listTop - 3.2f * rowH,
                                  tip, {0.45f, 0.45f, 0.55f}, 1);
         } else {
-            static const char* diffNames[3] = {"Normal", "Nightmare", "Hell"};
             for (u32 i = 0; i < shown; i++) {
                 const u32 idx = scrollOff + i;
                 char nm[64]; int mc = 0, mm = 0;
@@ -352,7 +352,9 @@ void Engine::renderMenu() {
                 Steam::lobbyListData(static_cast<int>(idx), "difficulty", dbuf, sizeof(dbuf));
                 int floorNo = fbuf[0] ? std::atoi(fbuf) : 0;
                 int diffNo  = dbuf[0] ? std::atoi(dbuf) : 0;
-                if (diffNo < 0 || diffNo > 2) diffNo = 0;
+                // A remote host publishes this as a decimal string, so it is untrusted input:
+                // bound it to the tiers THIS build knows before it indexes anything.
+                if (diffNo < 0 || diffNo >= static_cast<int>(FreePlay::DIFFICULTY_COUNT)) diffNo = 0;
 
                 const bool full = (mc >= mm);
                 const bool sel  = (idx == m_steamBrowserSel);
@@ -392,11 +394,14 @@ void Engine::renderMenu() {
                 FontSystem::drawText(sw, sh, colFloor, ty, fstr, tc, 1);
 
                 // Tint difficulty so a Hell run is legible at a glance. Arena rows skip it (no difficulty).
+                // Inferno reads hotter than Hell (deeper red); Normal keeps the row colour.
                 Vec3 dc = full ? tc
+                        : (diffNo == 3 ? Vec3{1.0f, 0.25f, 0.20f}
                         : (diffNo == 2 ? Vec3{1.0f, 0.45f, 0.35f}
-                        : (diffNo == 1 ? Vec3{1.0f, 0.80f, 0.40f} : tc));
+                        : (diffNo == 1 ? Vec3{1.0f, 0.80f, 0.40f} : tc)));
                 if (!isArena)
-                    FontSystem::drawText(sw, sh, colDiff, ty, diffNames[diffNo], dc, 1);
+                    FontSystem::drawText(sw, sh, colDiff, ty,
+                                         FreePlay::difficultyName(static_cast<u8>(diffNo)), dc, 1);
 
                 char pstr[16];
                 std::snprintf(pstr, sizeof(pstr), "%d/%d", mc, mm);
@@ -991,8 +996,6 @@ void Engine::renderMenu() {
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tW) * 0.5f, sh * 0.68f, title,
                              {0.3f, 1.0f, 0.5f}, 3);
 
-        static const char* diffNames[3] = {"Normal", "Nightmare", "Hell"};
-
         // Row 0 — difficulty (y = sh*0.50), Row 1 — floor (y = sh*0.50 - 46px). Matches the mouse
         // hit-test in engine_menu.cpp's sub-state-14 handler — keep both in sync.
         for (u32 row = 0; row < 2; row++) {
@@ -1002,7 +1005,8 @@ void Engine::renderMenu() {
             HUD::drawMenuOption(sw, sh, y, 360.0f * uiScale, 35.0f * uiScale, col, sel);
             char buf[48];
             if (row == 0)
-                std::snprintf(buf, sizeof(buf), "Difficulty:  < %s >", diffNames[m_menu.freePlayDifficulty]);
+                std::snprintf(buf, sizeof(buf), "Difficulty:  < %s >",
+                              FreePlay::difficultyName(m_menu.freePlayDifficulty));
             else
                 std::snprintf(buf, sizeof(buf), "Floor:  < %u >", static_cast<u32>(m_menu.freePlayFloor));
             Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.6f, 0.6f, 0.6f};

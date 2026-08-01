@@ -1474,7 +1474,7 @@ void Engine::updateAutoplay(f32 dt) {
         if (mayThrow && ap().reloadThrow <= 0.0f && rangedT) {
             const ItemInstance& eq =
                 m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
-            if (!isItemEmpty(eq) && eq.rarity == Rarity::LEGENDARY &&
+            if (!isItemEmpty(eq) && isLegendaryOrBetter(eq.rarity) &&
                 m_itemDefs[eq.defId].legendarySkillId == SkillId::THROWAWAY) {
                 const WeaponState& ws = m_players[activeNetSlot()].weaponState;
                 const WeaponDef wd = Inventory::getWeaponFromItem(m_inventories[m_localPlayerIndex],

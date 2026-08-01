@@ -62,22 +62,35 @@ Rarity ItemGen::rollRarity(u8 enemyLevel) {
 
     // Clamp to sane ranges
     if (commonPct < 0.0f) commonPct = 0.0f;
-    u32 diffTier = (enemyLevel > 1) ? (enemyLevel - 1) / 50u : 0u;   // 0=Normal, 1=Nightmare, 2=Hell
-    if (diffTier > 2) diffTier = 2;                                  // Hell caps the ceiling
-    f32 legendaryCap = 3.0f + 1.5f * static_cast<f32>(diffTier);     // 3% / 4.5% / 6%
+    u32 diffTier = (enemyLevel > 1) ? (enemyLevel - 1) / 50u : 0u;   // 0=Normal … 3=Inferno
+    if (diffTier > 3) diffTier = 3;                                  // Inferno caps the ceiling
+    f32 legendaryCap = 3.0f + 1.5f * static_cast<f32>(diffTier);     // 3 / 4.5 / 6 / 7.5%
     if (legendaryPct > legendaryCap) legendaryPct = legendaryCap;
 
+    // MYTHIC is INFERNO-ONLY (2026-08-02) — the tier is the whole point of the rarity, and gating it
+    // on the difficulty rather than the item level is what makes it unobtainable by grinding a lower
+    // tier forever. It is carved OUT of the legendary slice, not added on top: the legendary ceiling
+    // above is a deliberate cap on how often the top of the loot table pays out, and stacking a new
+    // tier beside it would quietly raise that total. So in Inferno a share of what would have been a
+    // legendary upgrades to mythic, and every other tier's rates are byte-for-byte unchanged.
+    f32 mythicPct = 0.0f;
+    if (diffTier >= 3) {
+        mythicPct    = legendaryPct * MYTHIC_SHARE_OF_LEGENDARY;
+        legendaryPct -= mythicPct;
+    }
+
     // Remaining budget split evenly between magic and rare to keep sum = 100
-    f32 remaining = 100.0f - commonPct - legendaryPct;
+    f32 remaining = 100.0f - commonPct - legendaryPct - mythicPct;
     if (remaining < 0.0f) remaining = 0.0f;
     magicPct = remaining * (28.0f / 38.0f);
     rarePct  = remaining * (10.0f / 38.0f);
 
     f32 roll = randF01() * 100.0f;
 
-    if (roll < legendaryPct)                          return Rarity::LEGENDARY;
-    if (roll < legendaryPct + rarePct)                return Rarity::RARE;
-    if (roll < legendaryPct + rarePct + magicPct)     return Rarity::MAGIC;
+    if (roll < mythicPct)                                return Rarity::MYTHIC;
+    if (roll < mythicPct + legendaryPct)                 return Rarity::LEGENDARY;
+    if (roll < mythicPct + legendaryPct + rarePct)       return Rarity::RARE;
+    if (roll < mythicPct + legendaryPct + rarePct + magicPct) return Rarity::MAGIC;
     return Rarity::COMMON;
 }
 
@@ -95,6 +108,9 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
         // roll BELOW a good rare. The old 2-3 band meant an orange could carry fewer affixes
         // than a yellow, which is exactly the "just a legendary-colored normal item" feel.
         case Rarity::LEGENDARY: minAffixes = 3; maxAffixes = 4; break;
+        // Mythic never rolls the short end of the legendary band — a tier above legendary that
+        // could land with FEWER affixes than one would read as a bad legendary wearing a new colour.
+        case Rarity::MYTHIC:    minAffixes = MAX_AFFIXES_PER_ITEM; maxAffixes = MAX_AFFIXES_PER_ITEM; break;
         default: break;
     }
 
@@ -131,6 +147,10 @@ void ItemGen::rollAffixes(ItemInstance& item, u8 itemLevel, ItemSlot slot,
     bool usedTypes[static_cast<u32>(AffixType::COUNT)] = {};
 
     f32 linearScale = 1.0f + 0.06f * static_cast<f32>(itemLevel);
+    // Mythic rolls ABOVE the legendary range rather than merely at the top of it — rarity has
+    // never scaled affix VALUES before (it only chose how many), so this is the tier's actual
+    // "one extra power" and the reason a mythic beats a max-rolled legendary of the same def.
+    if (item.rarity == Rarity::MYTHIC) linearScale *= ItemGen::MYTHIC_AFFIX_POWER;
 
     for (u8 a = 0; a < affixCount && item.affixCount < MAX_AFFIXES_PER_ITEM; a++) {
         // Shuffle-pick a random candidate that has an unused type
@@ -185,9 +205,16 @@ ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
     //           unrollables like pet consumables excluded from even this last resort)
     Rarity tier = rolled;
     for (;;) {
+        // A MYTHIC draws from the LEGENDARY pool. Every def in items.json authors `maxRarity`
+        // "legendary" at most, so a literal window test would find no candidate at MYTHIC, degrade
+        // the tier one step, and the rarity could never drop at all — while looking like it worked.
+        // Treating a legendary-capped def as mythic-eligible is also the design: a mythic IS one of
+        // the named uniques, rolled harder, so it keeps its identity and its granted skill instead of
+        // needing 53 duplicate defs. (`minRarity <= MYTHIC` already holds for those defs.)
+        const Rarity poolTier = (tier == Rarity::MYTHIC) ? Rarity::LEGENDARY : tier;
         for (u32 pass = 0; pass < 3 && validCount == 0; pass++) {
             for (u32 i = 0; i < defCount; i++) {
-                if (defs[i].minRarity > tier || defs[i].maxRarity < tier) continue;
+                if (defs[i].minRarity > poolTier || defs[i].maxRarity < poolTier) continue;
                 if (pass == 0 && !(wrappedLevel >= defs[i].minLevel &&
                                    wrappedLevel <= defs[i].maxLevel)) continue;
                 if (pass == 1 && wrappedLevel < defs[i].minLevel) continue;
@@ -234,6 +261,9 @@ ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
 
     // Scale base stats — gentle curve so early-floor items aren't overpowered
     f32 levelMult = 1.0f + 0.08f * static_cast<f32>(enemyLevel);
+    // Mythic base stats sit above the legendary curve too, so the tier is stronger on the item's
+    // OWN numbers (weapon damage, armor) and not only on its affix rolls.
+    if (item.rarity == Rarity::MYTHIC) levelMult *= ItemGen::MYTHIC_BASE_POWER;
     item.damage      = def.baseDamage  * levelMult * rollVariance();
     item.bonusHealth = def.baseHealth  * levelMult * rollVariance();
 
@@ -241,7 +271,7 @@ ItemInstance ItemGen::rollItem(u8 enemyLevel, const ItemDef* defs, u32 defCount,
     rollAffixes(item, enemyLevel, def.slot, affixDefs, affixDefCount, def.weaponType);
 
     // Legendary wands/staffs always get CDR + max energy bonuses
-    if (item.rarity == Rarity::LEGENDARY && def.weaponSubtype == WeaponSubtype::WAND) {
+    if (isLegendaryOrBetter(item.rarity) && def.weaponSubtype == WeaponSubtype::WAND) {
         f32 levelScale = 1.0f + 0.06f * static_cast<f32>(enemyLevel);
         // Inject CDR if not already present
         bool hasCdr = false;

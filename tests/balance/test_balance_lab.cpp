@@ -406,7 +406,12 @@ TEST_CASE("balance report: full sweep CSV when BALANCE_REPORT is set") {
             }
     std::fclose(fp);
     BalanceLab::setCsvDialect(BalanceLab::CsvDialect::INTERNATIONAL);   // don't leak into later cases
-    MESSAGE("balance report written: ", doctest::String(path), " (1350 rows + header, ",
+    // Row count is COMPUTED, not spelled: it is DIFFICULTY_COUNT x 50 x 9, and the hardcoded
+    // "1350" went stale the moment Inferno made it 1800.
+    char rowNote[64];
+    std::snprintf(rowNote, sizeof rowNote, "%u rows + header, ",
+                  static_cast<u32>(FreePlay::DIFFICULTY_COUNT) * 50u * 9u);
+    MESSAGE("balance report written: ", doctest::String(path), " (", doctest::String(rowNote),
             doctest::String(german ? "German ;/, dialect" : "international ,/. dialect"), ")");
 }
 

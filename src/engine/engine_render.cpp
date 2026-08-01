@@ -27,6 +27,7 @@
 #include "world/level_loader.h"
 #include "world/collision.h"
 #include "world/combat_query.h"
+#include "game/free_play.h"   // difficultyName — the single-sourced tier labels
 #include "game/player.h"
 #include "game/combat.h"
 #include "game/enemy_ai.h"
@@ -110,9 +111,11 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
 
         // Difficulty prefix + floor number — large gold
         char floorStr[48];
-        const char* diffPrefix = "";
-        if (m_difficulty == 1) diffPrefix = "Nightmare - ";
-        else if (m_difficulty == 2) diffPrefix = "Hell - ";
+        // Normal shows no prefix (it is the baseline); every other tier names itself via the
+        // single-sourced table, so a new tier can never show up as an unlabelled floor number.
+        char diffPrefix[24] = "";
+        if (m_difficulty > 0)
+            std::snprintf(diffPrefix, sizeof(diffPrefix), "%s - ", FreePlay::difficultyName(m_difficulty));
         std::snprintf(floorStr, sizeof(floorStr), "%sFloor %u", diffPrefix, m_level.currentFloor);
         f32 floorW = FontSystem::textWidth(floorStr, 4);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - floorW) * 0.5f, sh * 0.6f,

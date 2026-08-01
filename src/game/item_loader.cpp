@@ -45,6 +45,7 @@ static Rarity rarityFromString(const std::string& s) {
     if (s == "magic"     || s == "MAGIC")     return Rarity::MAGIC;
     if (s == "rare"      || s == "RARE")      return Rarity::RARE;
     if (s == "legendary" || s == "LEGENDARY") return Rarity::LEGENDARY;
+    if (s == "mythic"    || s == "MYTHIC")    return Rarity::MYTHIC;
     return Rarity::COMMON;
 }
 

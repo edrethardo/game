@@ -144,3 +144,102 @@ TEST_CASE("items.json: unique marking is complete and consistent") {
     // The pool is real content, not an accident of parsing.
     CHECK(uniques >= 40);
 }
+
+// --- MYTHIC: the Inferno-only tier above legendary (2026-08-02) ---------------------------------
+// enemyLevel is the EFFECTIVE floor (raw + difficulty*50), so tier = (level-1)/50: 1-50 Normal,
+// 51-100 Nightmare, 101-150 Hell, 151-200 Inferno.
+TEST_CASE("mythic drops only in Inferno") {
+    static ItemDef defs[MAX_ITEM_DEFS]; static AffixDef affixes[MAX_AFFIX_DEFS];
+    u32 dc = 0, ac = 0;
+    REQUIRE(ItemLoader::loadItemDefs (DUNGEON_REPO_ROOT "/assets/config/items.json",   defs,    dc));
+    REQUIRE(ItemLoader::loadAffixDefs(DUNGEON_REPO_ROOT "/assets/config/affixes.json", affixes, ac));
+
+    // Below Inferno the tier must never appear, however many rolls we take.
+    for (u8 lvl : {u8(1), u8(25), u8(50), u8(100), u8(150)}) {
+        ItemGen::init(0xBEEF ^ lvl);
+        for (u32 i = 0; i < 4000; i++)
+            REQUIRE(ItemGen::rollRarity(lvl) != Rarity::MYTHIC);
+    }
+
+    // In Inferno it appears, and at roughly the carved share of the legendary slice rather than
+    // as a new bucket bolted on: legendary+mythic together must still respect the 7.5% ceiling.
+    ItemGen::init(0xBEEF);
+    u32 mythic = 0, legendary = 0;
+    const u32 kRolls = 200000;
+    for (u32 i = 0; i < kRolls; i++) {
+        const Rarity r = ItemGen::rollRarity(200);
+        if (r == Rarity::MYTHIC) mythic++;
+        else if (r == Rarity::LEGENDARY) legendary++;
+    }
+    const f32 mythicPct = 100.0f * static_cast<f32>(mythic) / static_cast<f32>(kRolls);
+    const f32 topPct    = 100.0f * static_cast<f32>(mythic + legendary) / static_cast<f32>(kRolls);
+    CHECK(mythic > 0);
+    CHECK(mythicPct == doctest::Approx(7.5f * ItemGen::MYTHIC_SHARE_OF_LEGENDARY).epsilon(0.15));
+    CHECK(topPct   == doctest::Approx(7.5f).epsilon(0.10));   // the ceiling did NOT rise
+}
+
+TEST_CASE("a mythic is a real unique, rolled harder") {
+    static ItemDef defs[MAX_ITEM_DEFS]; static AffixDef affixes[MAX_AFFIX_DEFS];
+    u32 dc = 0, ac = 0;
+    REQUIRE(ItemLoader::loadItemDefs (DUNGEON_REPO_ROOT "/assets/config/items.json",   defs,    dc));
+    REQUIRE(ItemLoader::loadAffixDefs(DUNGEON_REPO_ROOT "/assets/config/affixes.json", affixes, ac));
+
+    ItemGen::init(4242);
+    u32 seen = 0;
+    for (u32 i = 0; i < 400 && seen < 40; i++) {
+        const ItemInstance it = ItemGen::rollItem(200, defs, dc, affixes, ac, Rarity::MYTHIC);
+        if (it.rarity != Rarity::MYTHIC) continue;   // guaranteed by the floor, but be explicit
+        seen++;
+        const ItemDef& d = defs[it.defId];
+        // It must come from the LEGENDARY pool — no def authors maxRarity "mythic", so a literal
+        // window test would have found nothing, degraded the tier, and the rarity would never drop.
+        CHECK(d.maxRarity == Rarity::LEGENDARY);
+        CHECK(it.affixCount == MAX_AFFIXES_PER_ITEM);   // always the full complement
+    }
+    CHECK(seen > 0);
+}
+
+TEST_CASE("mythic out-rolls the same legendary def") {
+    static ItemDef defs[MAX_ITEM_DEFS]; static AffixDef affixes[MAX_AFFIX_DEFS];
+    u32 dc = 0, ac = 0;
+    REQUIRE(ItemLoader::loadItemDefs (DUNGEON_REPO_ROOT "/assets/config/items.json",   defs,    dc));
+    REQUIRE(ItemLoader::loadAffixDefs(DUNGEON_REPO_ROOT "/assets/config/affixes.json", affixes, ac));
+
+    // Same def, same level, same RNG stream: only the rarity differs. Averaged over many rolls so
+    // rollVariance (a 1.0-1.1 bell) can't decide the comparison.
+    const auto meanDamage = [&](Rarity floorTier) {
+        ItemGen::init(99);
+        f32 sum = 0.0f; u32 n = 0;
+        for (u32 i = 0; i < 300; i++) {
+            const ItemInstance it = ItemGen::rollItem(200, defs, dc, affixes, ac, floorTier);
+            if (defs[it.defId].slot != ItemSlot::WEAPON) continue;
+            sum += it.damage; n++;
+        }
+        return (n > 0) ? sum / static_cast<f32>(n) : 0.0f;
+    };
+    const f32 legMean = meanDamage(Rarity::LEGENDARY);
+    const f32 mytMean = meanDamage(Rarity::MYTHIC);
+    REQUIRE(legMean > 0.0f);
+    REQUIRE(mytMean > 0.0f);
+    CHECK(mytMean > legMean);   // the base-power step is real, not cosmetic
+}
+
+TEST_CASE("every legendary behaviour extends to mythic") {
+    // The helper is the whole contract: ~25 sites used to open-code `== Rarity::LEGENDARY`, and a
+    // missed one would have made a mythic strictly WORSE than a legendary (no granted skill, or
+    // despawning off the floor). Anything that must treat the top tiers alike calls this.
+    CHECK(isLegendaryOrBetter(Rarity::LEGENDARY));
+    CHECK(isLegendaryOrBetter(Rarity::MYTHIC));
+    CHECK_FALSE(isLegendaryOrBetter(Rarity::RARE));
+    CHECK_FALSE(isLegendaryOrBetter(Rarity::MAGIC));
+    CHECK_FALSE(isLegendaryOrBetter(Rarity::COMMON));
+    // Power order is load-bearing (ItemGen compares tiers, BuildScore casts to float).
+    CHECK(static_cast<u8>(Rarity::MYTHIC) > static_cast<u8>(Rarity::LEGENDARY));
+    CHECK(static_cast<u8>(Rarity::COUNT)  == static_cast<u8>(Rarity::MYTHIC) + 1);
+    // Diablo 2's unique tan, distinct from legendary gold.
+    const Vec3 m = rarityColor(Rarity::MYTHIC), l = rarityColor(Rarity::LEGENDARY);
+    CHECK(m.x == doctest::Approx(0.78f));
+    CHECK(m.y == doctest::Approx(0.70f));
+    CHECK(m.z == doctest::Approx(0.47f));
+    CHECK((m.x != l.x || m.y != l.y || m.z != l.z));
+}

@@ -357,7 +357,7 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
     // Equipment skills (F = boots, G = helmet)
     if (in.extFlags & INPUT_EX_BOOT_SKILL) {
         const ItemInstance& boots = m_inventories[i].equipped[static_cast<u32>(ItemSlot::BOOTS)];
-        if (!isItemEmpty(boots) && boots.rarity == Rarity::LEGENDARY) {
+        if (!isItemEmpty(boots) && isLegendaryOrBetter(boots.rarity)) {
             SkillId bootSkill = m_itemDefs[boots.defId].legendarySkillId;
             if (bootSkill != SkillId::NONE) {
                 // R9: use the persistent per-slot SkillState so tryActivate's cooldown
@@ -401,7 +401,7 @@ void Engine::processRemoteActivation(u8 slot, const NetInput& in, f32 /*dt*/) {
     }
     if (in.extFlags & INPUT_EX_HELM_SKILL) {
         const ItemInstance& helm = m_inventories[i].equipped[static_cast<u32>(ItemSlot::HELMET)];
-        if (!isItemEmpty(helm) && helm.rarity == Rarity::LEGENDARY) {
+        if (!isItemEmpty(helm) && isLegendaryOrBetter(helm.rarity)) {
             SkillId helmSkill = m_itemDefs[helm.defId].legendarySkillId;
             if (helmSkill != SkillId::NONE) {
                 // R9: persistent SkillState so tryActivate's cooldown gate engages.
@@ -759,16 +759,16 @@ void Engine::serverNetPost(f32 dt) {
         if (!np.active || np.isDead) continue;
 
         const ItemInstance& wpnItem = m_inventories[pi].equipped[static_cast<u32>(ItemSlot::WEAPON)];
-        np.weaponProc = (!isItemEmpty(wpnItem) && wpnItem.rarity == Rarity::LEGENDARY)
+        np.weaponProc = (!isItemEmpty(wpnItem) && isLegendaryOrBetter(wpnItem.rarity))
             ? m_itemDefs[wpnItem.defId].legendarySkillId : SkillId::NONE;
         const ItemInstance& armorItem = m_inventories[pi].equipped[static_cast<u32>(ItemSlot::ARMOR)];
-        np.armorAura = (!isItemEmpty(armorItem) && armorItem.rarity == Rarity::LEGENDARY)
+        np.armorAura = (!isItemEmpty(armorItem) && isLegendaryOrBetter(armorItem.rarity))
             ? m_itemDefs[armorItem.defId].legendarySkillId : SkillId::NONE;
         const ItemInstance& ringItem = m_inventories[pi].equipped[static_cast<u32>(ItemSlot::RING)];
-        np.ringPassive = (!isItemEmpty(ringItem) && ringItem.rarity == Rarity::LEGENDARY)
+        np.ringPassive = (!isItemEmpty(ringItem) && isLegendaryOrBetter(ringItem.rarity))
             ? m_itemDefs[ringItem.defId].legendarySkillId : SkillId::NONE;
         const ItemInstance& offItem = m_inventories[pi].equipped[static_cast<u32>(ItemSlot::OFFHAND)];
-        np.offhandSkill = static_cast<u8>((!isItemEmpty(offItem) && offItem.rarity == Rarity::LEGENDARY)
+        np.offhandSkill = static_cast<u8>((!isItemEmpty(offItem) && isLegendaryOrBetter(offItem.rarity))
             ? m_itemDefs[offItem.defId].legendarySkillId : SkillId::NONE);
 
         np.damageReduction = (np.playerClass == PlayerClass::WARRIOR) ? 0.3f : 0.0f;

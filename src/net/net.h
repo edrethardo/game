@@ -92,7 +92,15 @@ static constexpr u32 TICKS_PER_SNAP    = NET_TICK_RATE / SNAPSHOT_RATE; // 1
 // projectile (weapon damage, fixed 1.5 s CDR-immune cooldown, brief tenacity-scaled slow on hit).
 // Additive on the wire (reuses a free bit + the existing projectile snapshot), but a v24 peer
 // wouldn't send/handle the throw edge, so gate it apart with a clean reject.
-static constexpr u32 PROTOCOL_VERSION  = 25; // v25: melee weapon throw (INPUT_EX_THROW edge).
+static constexpr u32 PROTOCOL_VERSION  = 26; // v26: Inferno tier + MYTHIC rarity (new VALUES on
+                                             // existing u8 fields — SnapWorldItem::rarity and the
+                                             // difficulty byte in SV_JOIN_ACCEPT/SV_LEVEL_SEED. No
+                                             // struct grew, so the layout is untouched; the bump is
+                                             // because the values are semantically NEW on the wire —
+                                             // a v25 peer would render a mythic as default white and
+                                             // clamp difficulty 3 to Normal, i.e. silently play a
+                                             // different game rather than fail. The version gate
+                                             // turns that into a clean reject.
                                              // v24: MAX_ENTITIES 128 -> 192 for the four-story
                                              // FOUR_STORY "Descent" floor. WorldSnapshot carries
                                              // SnapEntity[MAX_ENTITIES] and the per-slot unchanged

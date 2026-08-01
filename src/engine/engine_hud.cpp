@@ -525,7 +525,7 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
         for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
             const WorldItem& wi = m_worldItems.items[i];
             if (!wi.active) continue;
-            if (wi.item.rarity != Rarity::LEGENDARY) continue;
+            if (!isLegendaryOrBetter(wi.item.rarity)) continue;
 
             u32 lgx, lgz;
             if (!LevelGridSystem::worldToGrid(m_level.grid, wi.position, lgx, lgz)) continue;

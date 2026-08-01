@@ -291,6 +291,25 @@ namespace GameConst {
             // increase on HP, where the invariant moves the safe way.
             //   Nightmare: 174.6 (held exactly) / 40.60 = 4.30
             //   Hell:      442.8 (held exactly) / 60.60 = 7.31
+            // INFERNO (2026-08-02) — the 4th tier, solved on the same "hold a total, divide out the
+            // slope" method as the two above. Its step over Hell mirrors Hell's step over Nightmare:
+            // the tier-end damage TOTAL goes 174.6 (NM-50) -> 442.8 (Hell-50), a x2.54 step, so
+            // Inferno-50 targets 442.8 x 2.54 = 1123. The slope factor at Inferno's effective floors
+            // (eff 151-200) tops out at 1 + 199*0.40 = 80.60, giving 1123 / 80.60 = 13.93.
+            //
+            // Unlike the 2026-07-30 pass, this tier IS allowed a real damage step, on evidence rather
+            // than feel: the "Hell already one-shots you" reading that froze the damage axis was
+            // corrected on 2026-08-01 (it was a gear-window artifact of the lab — see CLAUDE.md), and
+            // the measured Hell endgame sits at ~2.3 hits-to-die, not ~1. Aaron's call: "1.8 is fine
+            // since the player has the grace period" — the post-hit i-frame window means ~1.8
+            // hits-to-die is a fight you can react inside, not a coin flip.
+            // MEASURED AND RE-SOLVED (2026-08-02). The analytic 13.93 (a x2.54 step, mirroring Hell's
+            // step over Nightmare) measured at 1.49 hits-to-die across Inferno's endgame — hotter
+            // than the 1.8 the tier was agreed at, because the player-power curve does NOT grow by
+            // the same factor between tiers that the enemy curve does. Scaled by 1.49/1.80 = 0.828:
+            // 13.93 x 0.828 = 11.53, which measures 1.79 over floors 40-50. The step over Hell is
+            // therefore x2.10, not x2.54 — the number the LAB gives, not the one the pattern implied.
+            case 3:  return 11.53f; // Inferno   — solved against the measured 1.8 hits-to-die target
             case 1:  return 4.30f;  // Nightmare — re-solved to HOLD its damage exactly (was 7.05)
             case 2:  return 7.31f;  // Hell      — re-solved to HOLD its damage exactly (was 12.045)
             default: return 1.55f;  // Normal    — unchanged; the steeper slope carries Normal's raise
@@ -337,6 +356,18 @@ namespace GameConst {
             // which also walks the HP-over-damage ratio further AWAY from the one-shot boundary
             // instead of toward it. Nightmare takes +20% on top of the early-tier lift the steeper
             // FLOOR_STAT_MULT already gives its floors 1-42.
+            // INFERNO (2026-08-02), solved so the tier-end HP TOTAL steps over Hell exactly as Hell
+            // steps over Nightmare. Totals are floorHealthMult(eff) x this bump: NM-50 (eff 100) =
+            // 66.3 x 3.75 = 248.7, Hell-50 (eff 150) = 448.6 x 1.875 = 841 — a x3.38 step. Inferno-50
+            // (eff 200) has a floor term of 3039 already (the 1.039 compounding over 50 more floors),
+            // so holding that same step means 841 x 3.38 / 3039 = 0.935.
+            //
+            // A bump BELOW 1.0 looks alarming and is not: it is the same shape as Hell's 1.875 being
+            // half of Nightmare's 3.75. The compounding floor term carries more of each successive
+            // tier's ramp, so the flat per-tier lever shrinks while the TOTAL still rises steeply.
+            // What matters is the invariant, and it moves the safe way: HP-over-damage goes 1.90 at
+            // Hell-50 to 2.53 at Inferno-50, i.e. enemies get spongier faster than they get lethal.
+            case 3:  return 0.935f; // Inferno   — x3.38 HP step over Hell (see above)
             case 1:  return 3.75f;  // Nightmare — 3.0 x 1.25, matching Hell's +25%
             case 2:  return 1.875f; // Hell      — 1.5 x 1.25, the safe axis
             default: return 1.0f;   // Normal    — unchanged; the steeper slope carries Normal's raise

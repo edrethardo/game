@@ -138,19 +138,19 @@ void Engine::tickPassiveEquipment() {
     // --- Weapon on-hit proc (legendary weapon passive) ---
     {
         const ItemInstance& wpn = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::WEAPON)];
-        m_weaponProc = (!isItemEmpty(wpn) && wpn.rarity == Rarity::LEGENDARY)
+        m_weaponProc = (!isItemEmpty(wpn) && isLegendaryOrBetter(wpn.rarity))
             ? m_itemDefs[wpn.defId].legendarySkillId : SkillId::NONE;
     }
     // Armor passive aura
     {
         const ItemInstance& armor = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::ARMOR)];
-        m_armorAura = (!isItemEmpty(armor) && armor.rarity == Rarity::LEGENDARY)
+        m_armorAura = (!isItemEmpty(armor) && isLegendaryOrBetter(armor.rarity))
             ? m_itemDefs[armor.defId].legendarySkillId : SkillId::NONE;
     }
     // Ring passive effect
     {
         const ItemInstance& ring = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::RING)];
-        m_ringPassive = (!isItemEmpty(ring) && ring.rarity == Rarity::LEGENDARY)
+        m_ringPassive = (!isItemEmpty(ring) && isLegendaryOrBetter(ring.rarity))
             ? m_itemDefs[ring.defId].legendarySkillId : SkillId::NONE;
         m_localPlayer.ringPassive = static_cast<u8>(m_ringPassive);
     }
@@ -159,13 +159,13 @@ void Engine::tickPassiveEquipment() {
     // the local player here; remote views get it via serverNetPost + seedRemoteView.
     {
         const ItemInstance& off = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::OFFHAND)];
-        m_localPlayer.offhandSkill = static_cast<u8>((!isItemEmpty(off) && off.rarity == Rarity::LEGENDARY)
+        m_localPlayer.offhandSkill = static_cast<u8>((!isItemEmpty(off) && isLegendaryOrBetter(off.rarity))
             ? m_itemDefs[off.defId].legendarySkillId : SkillId::NONE);
     }
     // Gloves on-hit passive (Frenzy)
     {
         const ItemInstance& gl = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::GLOVES)];
-        m_glovesPassive = (!isItemEmpty(gl) && gl.rarity == Rarity::LEGENDARY)
+        m_glovesPassive = (!isItemEmpty(gl) && isLegendaryOrBetter(gl.rarity))
             ? m_itemDefs[gl.defId].legendarySkillId : SkillId::NONE;
     }
     // Defensive-pack affix cache (armor/regen/thorns). Summed on demand from equipped affixes —
@@ -288,14 +288,14 @@ void Engine::handleEquipmentSkillActivation(f32 dt, Vec3 eyePos) {
     // Boots legendary → F key
     {
         const ItemInstance& boots = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::BOOTS)];
-        SkillId bootSkill = (!isItemEmpty(boots) && boots.rarity == Rarity::LEGENDARY)
+        SkillId bootSkill = (!isItemEmpty(boots) && isLegendaryOrBetter(boots.rarity))
             ? m_itemDefs[boots.defId].legendarySkillId : SkillId::NONE;
         m_bootSkillStates[m_localPlayerIndex].activeSkill = bootSkill;
     }
     // Helmet legendary → G key
     {
         const ItemInstance& helm = m_inventories[m_localPlayerIndex].equipped[static_cast<u32>(ItemSlot::HELMET)];
-        SkillId helmSkill = (!isItemEmpty(helm) && helm.rarity == Rarity::LEGENDARY)
+        SkillId helmSkill = (!isItemEmpty(helm) && isLegendaryOrBetter(helm.rarity))
             ? m_itemDefs[helm.defId].legendarySkillId : SkillId::NONE;
         m_helmetSkillStates[m_localPlayerIndex].activeSkill = helmSkill;
     }

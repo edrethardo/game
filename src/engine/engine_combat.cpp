@@ -1427,7 +1427,7 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     // local path's m_glovesPassive gate).
     if (np.frenzyStacks > 0 && np.frenzyTimer > 0.0f) {
         const ItemInstance& gl = m_inventories[np.slotIndex].equipped[static_cast<u32>(ItemSlot::GLOVES)];
-        if (!isItemEmpty(gl) && gl.rarity == Rarity::LEGENDARY &&
+        if (!isItemEmpty(gl) && isLegendaryOrBetter(gl.rarity) &&
             m_itemDefs[gl.defId].legendarySkillId == SkillId::FRENZY) {
             wpn.cooldown /= (1.0f + FRENZY_ATKSPD_PER_STACK * np.frenzyStacks);
         }
@@ -1806,7 +1806,7 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
     // feed this same fire path's attack-speed divide next shot.
     if (result.hitEntity) {
         const ItemInstance& gl = m_inventories[np.slotIndex].equipped[static_cast<u32>(ItemSlot::GLOVES)];
-        if (!isItemEmpty(gl) && gl.rarity == Rarity::LEGENDARY &&
+        if (!isItemEmpty(gl) && isLegendaryOrBetter(gl.rarity) &&
             m_itemDefs[gl.defId].legendarySkillId == SkillId::FRENZY) {
             if (np.frenzyStacks < FRENZY_MAX_STACKS) np.frenzyStacks++;
             np.frenzyTimer = FRENZY_DURATION_SEC;

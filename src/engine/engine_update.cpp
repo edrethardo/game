@@ -2336,7 +2336,7 @@ void Engine::resolveInteractTargets(InteractState& st) {
             // prompt reads this same st.itemIdx, the one shown. `petSummon` is rarity-independent, so
             // it covers the Mini Loot Goblin and every enemy-summon pet whatever the drop rolled.
             if (m_itemDefs[w.item.defId].petSummon)      score += 1.0f;   // pets beat legendaries
-            else if (w.item.rarity == Rarity::LEGENDARY) score += 0.5f;   // legendaries beat normals
+            else if (isLegendaryOrBetter(w.item.rarity)) score += 0.5f;   // legendaries beat normals
             if (score > bestItem) { bestItem = score; st.itemIdx = static_cast<s32>(i); }
         }
     }
@@ -3045,7 +3045,10 @@ bool Engine::triggerFloorDescent() {
     // but it's intercepted at the door in updateFloorDoor() before this point so no phantom
     // next-floor save is written — this full-game branch is never reached in a demo build.)
     if (m_level.currentFloor > 50) {
-        if (m_difficulty < 2) {
+        // The ladder runs to FINAL_DIFFICULTY (Inferno since 2026-08-02); only its floor 50 ends the
+        // run. Bounded by the constant rather than a literal 2 so adding a tier cannot leave the
+        // promotion silently capped one rung short of the tier that exists.
+        if (m_difficulty < FreePlay::FINAL_DIFFICULTY) {
             // Advance to next difficulty — reset to floor 1, keep gear
             m_difficulty++;
             m_highestUnlocked = m_difficulty;
@@ -3059,10 +3062,9 @@ bool Engine::triggerFloorDescent() {
             m_transition.timer = 3.0f;
             m_gameState = GameState::FLOOR_TRANSITION;
             AudioSystem::play(SfxId::LEVEL_UP);
-            LOG_INFO("Advancing to %s difficulty",
-                     m_difficulty == 1 ? "Nightmare" : "Hell");
+            LOG_INFO("Advancing to %s difficulty", FreePlay::difficultyName(m_difficulty));
         } else {
-            // Hell complete — the run's standard ending. Rolls credits on every machine (the
+            // Final tier complete — the run's standard ending. Rolls credits on every machine (the
             // old direct VICTORY flip was host-local and hung co-op clients, same bug class as
             // the Engine kill) and falls through to the VICTORY screen after.
             beginCreditsSequence(false);
@@ -3256,7 +3258,7 @@ bool Engine::updateSourcePortal() {
         // session. The difficulty term is belt-and-suspenders — shards only DROP in Hell
         // (engine_death.cpp shard gate), so a full set can't exist below it; this makes the
         // intent explicit at the consumer too.
-        if (m_level.currentFloor == 50 && m_difficulty == 2 &&
+        if (m_level.currentFloor == 50 && m_difficulty >= 2 &&
             s_sourceShards == 0x03FFu && !floorBossAlive()) {
             // A few metres off the (now-open) exit portal — far enough that their 2 m pickup zones
             // don't overlap, so the player chooses between descending and entering The Source. The
@@ -3310,7 +3312,7 @@ bool Engine::updateTownPortal() {
         startGame(GameStart::CONTINUE);
         return true;
     }
-    m_menu.freePlayDifficulty = (m_difficulty > 2) ? 2 : m_difficulty;
+    m_menu.freePlayDifficulty = FreePlay::clampDifficulty(m_difficulty);
     m_menu.freePlayFloor      = 1;
     m_menu.freePlayFromTown   = true;
     m_menu.subState           = 14;   // Free-Play level select

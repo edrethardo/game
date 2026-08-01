@@ -563,7 +563,10 @@ bool Engine::handleBossLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
         // effective level recovers to raw floor 50, which would otherwise re-drop a floor-50
         // shard inside The Source. Like globes, the shard is auto-pickup and not broadcast —
         // both host and client pick it from their own world-item view (see updatePlayerPickup).
-        if (!GameConst::kDemoBuild && m_difficulty == 2 && !pool.entities[idx].isEngine) {
+        // >= Hell, not == Hell: Inferno (2026-08-02) sits ABOVE the tier the shards were written for,
+        // and an equality gate would have silently stopped the secret boss's key from dropping in
+        // the one tier where a player is most likely to be hunting it.
+        if (!GameConst::kDemoBuild && m_difficulty >= 2 && !pool.entities[idx].isEngine) {
             u8 rawFloor = static_cast<u8>(((bossEntLvl - 1) % 50) + 1); // 5→5 … 50→50, 55→5 …
             if (rawFloor >= 5 && rawFloor <= 50 && rawFloor % 5 == 0) {
                 u8 bit = static_cast<u8>(rawFloor / 5 - 1);             // floor 5→bit0 … 50→bit9

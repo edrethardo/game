@@ -50,6 +50,7 @@ static const char* rarityName(Rarity r) {
         case Rarity::MAGIC:     return "Magic";
         case Rarity::RARE:      return "Rare";
         case Rarity::LEGENDARY: return "Legendary";
+        case Rarity::MYTHIC:    return "Mythic";
         default:                return "";
     }
 }
@@ -950,7 +951,7 @@ f32 HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
         }
 
         // Legendary skill — only shown on legendary-rarity items
-        if (def.legendarySkillId != SkillId::NONE && item.rarity == Rarity::LEGENDARY) {
+        if (def.legendarySkillId != SkillId::NONE && isLegendaryOrBetter(item.rarity)) {
             gap(1.0f);                    // extra spacing before legendary section
             rule({0.6f, 0.5f, 0.15f});    // gold separator
             gap(1.0f);                    // extra line before skill text
@@ -1034,7 +1035,7 @@ f32 HUD::drawItemTooltip(u32 sw, u32 sh, f32 tipX, f32 tipY,
     // Border in rarity color (double border for legendaries)
     Vec3 borderColor = {rColor.x * 0.6f, rColor.y * 0.6f, rColor.z * 0.6f};
     pushQuad(tipX, tipY, tipX + frameW, tipY + frameH, borderColor);
-    if (item.rarity == Rarity::LEGENDARY) {
+    if (isLegendaryOrBetter(item.rarity)) {
         pushQuad(tipX + 1, tipY + 1, tipX + frameW - 1, tipY + frameH - 1, borderColor);
     }
 

@@ -7,6 +7,7 @@
 
 #include "core/log.h"
 #include "game/game_constants.h"   // GameConst::FINAL_FLOOR — demo caps --floor at 20
+#include "game/free_play.h"        // DIFFICULTY_COUNT — the tier bound --difficulty accepts
 
 #include <cstring>
 #include <cstdlib>
@@ -60,7 +61,7 @@ void logUsage() {
     LOG_INFO("  --new <class>          fresh run (warrior, ranger, sorcerer, rogue, paladin,");
     LOG_INFO("                         combat_engineer, marksman, tinkerer, wanderer)");
     LOG_INFO("  --floor <n>            starting floor for --new (default 1)");
-    LOG_INFO("  --difficulty <0-2>     difficulty for --new");
+    LOG_INFO("  --difficulty <0-3>     difficulty for --new (0=Normal 1=Nightmare 2=Hell 3=Inferno)");
     LOG_INFO("  --port <n>  --lan      host/join port; --lan skips UPnP");
     LOG_INFO("  --fullscreen           real fullscreen on the external widescreen monitor");
     LOG_INFO("  --screenshot-interval <s>  auto-save a 1080p screenshot every <s> seconds in-game");
@@ -126,8 +127,9 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             opt.floor = (u32)n;
         } else if (ieq(a, "--difficulty")) {
             const char* v = nextVal(i); if (!v) break;
-            long n; if (!parseInt(v, n) || n < 0 || n > 2) {
-                LOG_WARN("--difficulty expects 0-2 (got '%s')", v); opt.valid = false; break;
+            long n; if (!parseInt(v, n) || n < 0 || n >= (long)FreePlay::DIFFICULTY_COUNT) {
+                LOG_WARN("--difficulty expects 0-%u (got '%s')",
+                         FreePlay::DIFFICULTY_COUNT - 1, v); opt.valid = false; break;
             }
             opt.difficulty = (u8)n;
         } else if (ieq(a, "--port")) {

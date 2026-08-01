@@ -204,7 +204,7 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                             baseTint.z * (1.0f - hueStrength) + color.z * hueStrength, 1.0f};
                 }
             }
-            if (wi.item.rarity == Rarity::LEGENDARY) {
+            if (isLegendaryOrBetter(wi.item.rarity)) {
                 static const u8 legIds[] = {
                     MaterialSystem::getIdByName("legendary_weapon"),
                     MaterialSystem::getIdByName("legendary_shield"),
@@ -288,6 +288,9 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
                 case Rarity::MAGIC:     discColor = {0.2f, 0.9f, 0.2f, 0.28f}; break;
                 case Rarity::RARE:      discColor = {0.2f, 0.4f, 1.0f, 0.28f}; break;
                 case Rarity::LEGENDARY: discColor = {1.0f, 0.8f, 0.2f, 0.35f}; discSize = renderScale * 1.2f; break;
+                // The D2 unique tan of rarityColor, at the legendary disc's size and a touch
+                // brighter — a mythic on the ground must never read as LESS notable than a gold one.
+                case Rarity::MYTHIC:    discColor = {0.78f, 0.70f, 0.47f, 0.42f}; discSize = renderScale * 1.3f; break;
                 default: break;
             }
             Vec3 bRight = m_camera.right;
@@ -731,7 +734,7 @@ void Engine::submitPlayerEquipment(const Vec3& pos, f32 yaw, f32 scale, u8 anim,
         if (!armorSlotBox(s, reg, bodyH, center, half)) continue; // invalid landmark → skip
         const Material* mat = MaterialSystem::get(def.materialId);
         Vec4 tint = mat ? mat->tint : Vec4{1, 1, 1, 1};
-        if (it.rarity == Rarity::LEGENDARY) tint = {tint.x * 1.3f, tint.y * 1.15f, tint.z * 0.7f, tint.w};
+        if (isLegendaryOrBetter(it.rarity)) tint = {tint.x * 1.3f, tint.y * 1.15f, tint.z * 0.7f, tint.w};
         Mat4 mm = fitMeshToBox(mesh, center, half, pos, yaw, scale);
         Renderer::submit(m_basicShader, mat ? mat->texture : defaultTex,
                          m_meshDefs[mesh].mesh, mm, worldBox, tint);
@@ -981,7 +984,7 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
             Vec3 rColor = rarityColor(wi.item.rarity);
             // Build display text — legendaries append the skill name in brackets
             char hintBuf[96];
-            if (wi.item.rarity == Rarity::LEGENDARY &&
+            if (isLegendaryOrBetter(wi.item.rarity) &&
                 bestDef->legendarySkillId != SkillId::NONE) {
                 const char* skillName = nullptr;
                 for (u32 si = 0; si < m_skillDefCount; si++) {

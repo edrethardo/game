@@ -70,13 +70,24 @@ extern bool s_engineSlain;    // secret superboss — Engine defeated this sessi
 // Version 2 = adds m_difficulty byte to header. Still READABLE (see LegacyPlayerInventoryV2
 //             below) — loaded legacy characters migrate to v4 on their next save.
 // Version 1 saves are incompatible.
-static constexpr u32 SAVE_VERSION           = 4;
+// Version 5 = the INFERNO tier (difficulty byte may now be 3) and the MYTHIC rarity
+//             (ItemInstance::rarity may now be 4). The LAYOUT IS IDENTICAL to v4 — no field grew,
+//             no field moved, and the static_asserts below are unchanged — so v4 needs no mirror
+//             struct, only admission to the readable set.
+//             The bump exists to stop an OLDER binary opening one of these saves: it would clamp
+//             difficulty 3 to Normal (engine_persist's load clamp), then write that back on the next
+//             autosave, permanently demoting an Inferno hero by 150 effective floors and keeping its
+//             gear. Silent, unrecoverable, and indistinguishable from a bug in the run. A version the
+//             old build refuses turns that into an honest "incompatible save".
+static constexpr u32 SAVE_VERSION           = 5;
+static constexpr u32 SAVE_VERSION_LEGACY_V4 = 4;   // same layout — read as-is, migrates on next save
 static constexpr u32 SAVE_VERSION_LEGACY_V3 = 3;
 static constexpr u32 SAVE_VERSION_LEGACY_V2 = 2;
 
 // True for any version this build can read (the current one or a supported legacy one).
 static bool saveVersionReadable(u32 ver) {
-    return ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V3 || ver == SAVE_VERSION_LEGACY_V2;
+    return ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V4 ||
+           ver == SAVE_VERSION_LEGACY_V3 || ver == SAVE_VERSION_LEGACY_V2;
 }
 
 // --- Legacy v2 on-disk mirror of PlayerInventory -----------------------------------------
@@ -120,7 +131,10 @@ static_assert(sizeof(QuickbarState)           == 36,   "QuickbarState layout dri
 // v2 reads the legacy mirror and maps it (GLOVES starts empty; bonus caches are rebuilt by
 // applySavedCharToLane → recalculateStats, so only items/backpack need copying).
 static bool readPlayerInventory(FILE* f, PlayerInventory& out, u32 ver) {
-    if (ver == SAVE_VERSION)
+    // v5 and v4 share one layout (v5 only widened the difficulty and rarity VALUE ranges), so both
+    // read the struct directly. Keying this on `== SAVE_VERSION` alone is a trap when a bump adds no
+    // fields: every v4 save would fall past the legacy branches below and fail to load outright.
+    if (ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V4)
         return std::fread(&out, sizeof(PlayerInventory), 1, f) == 1;
     if (ver == SAVE_VERSION_LEGACY_V3) {
         // v3: identical up to the v4 tail — items copy 1:1, autoMode/buildCell keep their
@@ -552,7 +566,9 @@ bool Engine::loadGame(u8 slot) {
     m_level.savedSeed  = seed;
     m_level.levelSeed  = seed; // restore the run seed so startGame regenerates the saved dungeon
     m_transition.totalPlayTime = totalTime;
-    m_difficulty = (difficulty <= 2) ? difficulty : 0;
+    // Bound by the tier COUNT, not a literal: with a literal 2 an Inferno save (difficulty 3)
+    // loaded silently as NORMAL — the hero kept its gear and lost 150 effective floors of scaling.
+    m_difficulty = (difficulty < FreePlay::DIFFICULTY_COUNT) ? difficulty : 0;
 
     // Secret superboss key is session-only and never serialized — a loaded run starts with no
     // shards collected (in-fiction: the curse resets you). See ~/.claude/plans (the-dungeon-engine).

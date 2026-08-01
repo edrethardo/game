@@ -45,7 +45,7 @@ void WorldItemSystem::update(WorldItemPool& pool, f32 dt,
         // Chests are furniture, not loot: they must wait unopened however long the player
         // takes to reach the room (and a despawning "chest" beside a permanent mimic would
         // be a free mimic detector).
-        if (wi.item.rarity != Rarity::LEGENDARY && !isShrine(wi.item) && !isSourceShard(wi.item)
+        if (!isLegendaryOrBetter(wi.item.rarity) && !isShrine(wi.item) && !isSourceShard(wi.item)
             && !isChest(wi.item) && !isStash(wi.item) && !isPet) {
             wi.lifetime -= dt;
         }
@@ -116,7 +116,7 @@ bool WorldItemSystem::spawnEssential(WorldItemPool& pool, const ItemInstance& it
         WorldItem& wi = pool.items[i];
         if (!wi.active) continue;
         if (isSentinelItem(wi.item)) continue;              // never evict a key, shrine or globe
-        if (wi.item.rarity == Rarity::LEGENDARY) continue;  // legendaries never despawn; don't start
+        if (isLegendaryOrBetter(wi.item.rarity)) continue;  // legendaries never despawn; don't start
         if (defs && wi.item.defId < defCount && defs[wi.item.defId].petSummon)
             continue;                                       // a 1-in-10000 companion outranks a key's slot claim
         if (wi.lifetime < lowestLifetime) { lowestLifetime = wi.lifetime; victim = static_cast<s32>(i); }

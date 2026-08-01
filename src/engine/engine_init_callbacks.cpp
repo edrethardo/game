@@ -266,7 +266,7 @@ void Engine::initCallbacks() {
             // local-lane / remote-NetPlayer routing as the heal above (deferred hit, so the
             // melee/hitscan grant in engine_combat never sees projectile impacts).
             const ItemInstance& gl = pin.equipped[static_cast<u32>(ItemSlot::GLOVES)];
-            if (!isItemEmpty(gl) && gl.rarity == Rarity::LEGENDARY &&
+            if (!isItemEmpty(gl) && isLegendaryOrBetter(gl.rarity) &&
                 s_engine->m_itemDefs[gl.defId].legendarySkillId == SkillId::FRENZY) {
                 if (localLane) {
                     Player& pl = s_engine->m_localPlayers[ownerSlot];

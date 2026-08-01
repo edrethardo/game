@@ -21,13 +21,26 @@ static constexpr u32 MAX_WORLD_ITEMS     = 64;
 
 // ---- Rarity tiers ----
 
+// Power order is LOAD-BEARING: ItemGen compares tiers (`rolled < rarityFloor`, the min/maxRarity
+// window, the degrade step), BuildScore's tiebreak casts the enum straight to a float, and the
+// serialized value is the enum ordinal. So a new tier is APPENDED above the old top — inserting one
+// in the middle renumbers everything above it and silently reinterprets every existing save and every
+// in-flight packet (an old legendary would load as the new mid tier).
+// The comment colours below were stale for years; they name what `rarityColor` actually returns.
 enum struct Rarity : u8 {
-    COMMON,      // grey
-    MAGIC,       // blue
-    RARE,        // yellow
-    LEGENDARY,   // orange
+    COMMON,      // white
+    MAGIC,       // green
+    RARE,        // blue
+    LEGENDARY,   // gold
+    MYTHIC,      // Diablo-2 unique tan — Inferno-only, see ItemGen::rollRarity
     COUNT
 };
+
+// "Legendary or better". Every legendary behaviour — granted skills, never despawning, the minimap
+// marker, the doubled tooltip border, the material swap — must extend to MYTHIC, and before this
+// helper existed all ~25 of those sites were open-coded `== Rarity::LEGENDARY` with no way to find
+// them as a set. Adding a tier above the top means auditing exactly the callers of this function.
+inline bool isLegendaryOrBetter(Rarity r) { return r >= Rarity::LEGENDARY; }
 
 // ---- Equipment slots ----
 
@@ -429,6 +442,10 @@ inline Vec3 rarityColor(Rarity r) {
         case Rarity::MAGIC:     return {0.2f, 0.9f, 0.3f};   // green
         case Rarity::RARE:      return {0.3f, 0.5f, 1.0f};   // blue
         case Rarity::LEGENDARY: return {1.0f, 0.82f, 0.2f};  // gold
+        // Diablo 2's unique tan (#C7B377), Aaron's call. Deliberately NOT another saturated hue:
+        // beside legendary's bright gold it reads as the older, dustier treasure, which is exactly
+        // how D2 distinguished a unique from everything else on the ground.
+        case Rarity::MYTHIC:    return {0.78f, 0.70f, 0.47f};
         default:                return {1.0f, 1.0f, 1.0f};
     }
 }
@@ -670,6 +687,17 @@ namespace ItemLoader {
 }
 
 namespace ItemGen {
+    // --- MYTHIC (Inferno-only, 2026-08-02) ---------------------------------------------------
+    // A mythic is the SAME unique a legendary would have been, rolled harder: it draws from the
+    // legendary def pool (so it always has a real identity and its granted skill), guarantees the
+    // full affix count instead of rolling 3-4, and rolls those affixes and its base stats above the
+    // legendary ceiling. That is the "one extra power" shape rather than a wider item — deliberately
+    // so, because adding a 5th affix slot would grow ItemInstance and force a SAVE_VERSION bump plus
+    // a legacy mirror for a tier that is meant to be a power step, not a layout change.
+    constexpr f32 MYTHIC_SHARE_OF_LEGENDARY = 0.25f;  // a quarter of Inferno's legendary slice
+    constexpr f32 MYTHIC_AFFIX_POWER        = 1.25f;  // affix rolls, over the legendary range
+    constexpr f32 MYTHIC_BASE_POWER         = 1.15f;  // base damage/armor
+
     void init(u32 seed);
     // Rolls rarity FIRST, then picks a def whose [minRarity, maxRarity] window contains that
     // tier (weighted by dropWeight within the level band) — so the legendary tier draws only
