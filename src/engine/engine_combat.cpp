@@ -922,6 +922,21 @@ void Engine::handleWeaponFire(f32 dt) {
         if (m_weaponProc == SkillId::PHASE_REND)     procChance = 25;
 
         if (procRoll < procChance) {
+            // FIRST FIRE of each proc type in this process. Deliberately once-per-type, not
+            // per-fire: a proc lands on 20-30% of hits, so logging every one would drown a soak.
+            // It exists because the failure this guards against is SILENT — the Phase Saber and
+            // Shadow Stiletto rolled their proc, entered the switch, matched no case and did
+            // nothing, for as long as the game has shipped. A structural test can prove a case
+            // EXISTS; only this proves the rail actually reaches it in play.
+            {
+                static u64 s_procFired = 0;
+                const u64 bit = 1ull << (static_cast<u32>(m_weaponProc) & 63u);
+                if (!(s_procFired & bit)) {
+                    s_procFired |= bit;
+                    LOG_INFO("[PROC] first fire: weapon skill id %u",
+                             static_cast<u32>(m_weaponProc));
+                }
+            }
             Vec3 procPos = result.hitPosition;
             const SkillDef* sd = SkillSystem::findSkillDef(m_skillDefs, m_skillDefCount, m_weaponProc);
             // ARC_FIRE uses weapon stats directly, no SkillDef needed
