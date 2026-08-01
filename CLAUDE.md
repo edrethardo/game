@@ -174,6 +174,37 @@ Inferno hero, clamp them to Normal, and write that back on the next autosave —
 demotion. v4 stays readable and shares the direct-read path (keying that path on `== SAVE_VERSION`
 alone is a trap when a bump adds no fields: every v4 save would have failed to load).
 
+**DEAD LEGENDARIES: two weapons granted a skill their slot could not fire (found + fixed
+2026-08-02).** Aaron, on seeing a Mythic Shadow Stiletto drop: "the name of the shadow stilettos
+skill and what it does don't match". They did not — because it did NOTHING. A weapon's
+`legendarySkill` fires as an **on-hit PROC**, and the proc rail is a `switch` over a FIXED set of
+`SkillId`s; the **Phase Saber** (defId 3) and **Shadow Stiletto** (defId 6) both carried
+`phase_dash`, which has no case on that rail. Each rolled its 20%, found the SkillDef (phase_dash IS
+in skills.json), entered the switch and fell straight through `default:`. Both are `minRarity
+legendary`, so the dead rail was the ONLY one they ever engaged — and the tooltip plus the equip
+skill-bar advertised "Teleports forward through enemies" the whole time. An unhandled enum in a
+switch is legal C++: silent at compile time and at load.
+**The weapon rail is THREE switches, not one** — melee/hitscan (`engine_combat.cpp`), projectile
+(`engine_init_callbacks.cpp`), and a co-op REMOTE twin (`engine_combat.cpp`, for a guest's hits) —
+and they support DIFFERENT sets. `arc_fire` is melee-only; `shadow_ricochet` was projectile-only.
+So "implemented" is never a property of a skill, always of a (skill, rail) pair, and a fix that
+touches one rail leaves the same item dead one seat over in co-op.
+**The fix is two real proc effects** (Aaron: "Phase dash would be awful on a weapon. Make it better,
+have 2 weapon proc effects"). **Shadow Stiletto -> `shadow_ricochet`** (30% on hit: two shadow bolts
+seek OTHER nearby enemies and can re-proc, so a stiletto rewards fighting inside a group) — the
+effect already existed on the projectile rail and is now on the melee one too. **Phase Saber -> the
+new `PHASE_REND`** (25% on hit: the edge phases onward and rends a wall-stopped 6 m corridor BEYOND
+the target) — Phase Dash's corridor damage with the teleport REMOVED, deliberately: a proc fires
+mid-swing on a random hit, and yanking the player 6 m forward whenever a die came up is exactly what
+made the skill awful on a weapon. Both are added to the melee rail AND the remote twin.
+**Pinned so it cannot recur:** "every legendary's granted skill is live on its slot's rail" in
+`test_legendary_pool.cpp` encodes each rail's real capability set and walks all 51 granting items —
+verified by sabotage (restoring `phase_dash` on the Phase Saber fails it BY NAME). When a rail learns
+a skill, extend the table there. Latent gaps the audit also surfaced, currently unreachable but real:
+the remote twin sets a VOID_ZONE proc chance it has no case for, and no item pairs `arc_fire` with a
+projectile weapon or `shadow_ricochet` with a melee one — the guard now covers all of these. Also
+found: `SECOND_WIND` has a complete ring implementation that NO item grants.
+
 **Balance lab.** `tests/balance/` holds a repeatable balance model (spec:
 `docs/superpowers/specs/2026-07-22-balance-lab-design.md`): typical-equipment player power
 (Monte-Carlo through the real `ItemGen`/`BuildScore`/`Inventory` code) vs enemy/boss curves

@@ -243,3 +243,79 @@ TEST_CASE("every legendary behaviour extends to mythic") {
     CHECK(m.z == doctest::Approx(0.47f));
     CHECK((m.x != l.x || m.y != l.y || m.z != l.z));
 }
+
+// --- no legendary may grant a skill its SLOT cannot fire (2026-08-02) ----------------------------
+// Two items shipped with `phase_dash` on a WEAPON: the weapon rail is an on-hit PROC whose switch
+// has no PHASE_DASH case, so the Phase Saber and Shadow Stiletto rolled their proc, looked up the
+// skill, fell through `default:` and did NOTHING — while the tooltip and the equip bar advertised
+// "Teleports forward through enemies". Nothing caught it because the rails are switch statements:
+// an unhandled SkillId is legal C++, silent at compile time and at load.
+//
+// This pin encodes each rail's ACTUAL capability set. When a rail learns a new skill, add it here;
+// when an item is authored with a skill its slot can't fire, this fails instead of shipping.
+namespace {
+
+// Weapons dispatch by weaponType: melee/hitscan use the engine_combat.cpp proc switch, projectile
+// uses the engine_init_callbacks.cpp one. They do NOT support the same set — that asymmetry is
+// itself a trap (arc_fire is melee-only, shadow_ricochet was projectile-only until this pass).
+bool weaponProcHandles(WeaponType wt, SkillId id) {
+    const bool projectile = (wt == WeaponType::PROJECTILE);
+    switch (id) {
+        case SkillId::FROZEN_ORB:
+        case SkillId::CHAIN_LIGHTNING:
+        case SkillId::METEOR_STRIKE:
+        case SkillId::BLOOD_NOVA:
+        case SkillId::VOID_ZONE:
+        case SkillId::SHADOW_RICOCHET:
+        case SkillId::PHASE_REND:      return true;              // both rails
+        case SkillId::ARC_FIRE:        return !projectile;       // melee/hitscan only
+        case SkillId::THROWAWAY:       return true;              // out-of-band (reload throw)
+        default:                       return false;
+    }
+}
+
+bool railHandles(ItemSlot slot, WeaponType wt, SkillId id) {
+    switch (slot) {
+        case ItemSlot::WEAPON: return weaponProcHandles(wt, id);
+        case ItemSlot::ARMOR:
+            return id == SkillId::BLOOD_NOVA || id == SkillId::STATIC_CHARGE ||
+                   id == SkillId::HEMOPHAGE  || id == SkillId::METEOR_STRIKE ||
+                   id == SkillId::FROZEN_ORB || id == SkillId::CHAIN_LIGHTNING ||
+                   id == SkillId::PHASE_DASH;
+        case ItemSlot::RING:
+            return id == SkillId::BERSERKER   || id == SkillId::LIFE_STEAL ||
+                   id == SkillId::THORNS      || id == SkillId::GRAVITY_PULL ||
+                   id == SkillId::SECOND_WIND || id == SkillId::DIVINE_JUDGMENT ||
+                   id == SkillId::SOUL_HARVEST|| id == SkillId::PHASE_STRIKE ||
+                   id == SkillId::VOID_KILL;
+        case ItemSlot::GLOVES:  return id == SkillId::FRENZY;
+        // The offhand switch has a `default:` that falls through to a generic freeze bash, so no
+        // offhand skill is ever fully inert — every id is "handled" there by construction.
+        case ItemSlot::OFFHAND: return true;
+        // Boots (F) and helmet (G) go through SkillSystem::tryActivate.
+        case ItemSlot::BOOTS:
+        case ItemSlot::HELMET:
+            return id == SkillId::PHASE_DASH || id == SkillId::BREAK_FREE ||
+                   id == SkillId::CHAIN_LIGHTNING || id == SkillId::METEOR_STRIKE;
+        default: return false;
+    }
+}
+
+} // namespace
+
+TEST_CASE("every legendary's granted skill is live on its slot's rail") {
+    static ItemDef defs[MAX_ITEM_DEFS];
+    u32 dc = 0;
+    REQUIRE(ItemLoader::loadItemDefs(DUNGEON_REPO_ROOT "/assets/config/items.json", defs, dc));
+
+    u32 checked = 0;
+    for (u32 i = 0; i < dc; i++) {
+        const ItemDef& d = defs[i];
+        if (d.legendarySkillId == SkillId::NONE) continue;
+        checked++;
+        CHECK_MESSAGE(railHandles(d.slot, d.weaponType, d.legendarySkillId),
+                      "DEAD LEGENDARY: '", doctest::String(d.name),
+                      "' (defId ", i, ") grants a skill its slot cannot fire");
+    }
+    CHECK(checked > 40);   // the audit found 51 — guard against the loop silently matching nothing
+}

@@ -135,6 +135,10 @@ static void getSkillIconColors(u8 skillId, Vec3 cols[5]) {
             cols[1] = {0.3f, 0.8f, 0.5f}; cols[2] = {0.15f, 0.5f, 0.3f};
             cols[3] = {0.2f, 0.6f, 0.4f}; cols[4] = {0.6f, 1.0f, 0.7f};
             break;
+        case SkillId::PHASE_REND:   // phase violet, matching the corridor flash the proc spawns
+            cols[1] = {0.65f, 0.45f, 1.0f}; cols[2] = {0.35f, 0.2f, 0.6f};
+            cols[3] = {0.45f, 0.3f, 0.8f};  cols[4] = {0.85f, 0.75f, 1.0f};
+            break;
         case SkillId::ARC_FIRE:
             cols[1] = {1.0f, 0.5f, 0.1f}; cols[2] = {0.9f, 0.3f, 0.05f};
             cols[3] = {0.7f, 0.2f, 0.05f}; cols[4] = {1.0f, 0.85f, 0.2f};
@@ -225,6 +229,7 @@ static const u8* getSkillIcon(u8 skillId) {
         case SkillId::METEOR_STRIKE:       return &kIcon32_MeteorStrike[0][0];
         case SkillId::BLOOD_NOVA:          return &kIcon32_BloodNova[0][0];
         case SkillId::PHASE_DASH:          return &kIcon32_PhaseDash[0][0];
+        case SkillId::PHASE_REND:          return &kIcon32_PhaseRend[0][0];
         case SkillId::ARC_FIRE:            return &kIcon32_ArcFire[0][0];
         case SkillId::FRENZY:              return &kIcon32_Frenzy[0][0];
         // Combat Engineer

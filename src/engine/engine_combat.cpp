@@ -918,6 +918,8 @@ void Engine::handleWeaponFire(f32 dt) {
         if (m_weaponProc == SkillId::BLOOD_NOVA)     procChance = 20;
         if (m_weaponProc == SkillId::VOID_ZONE)      procChance = 5;
         if (m_weaponProc == SkillId::ARC_FIRE)       procChance = 20;
+        if (m_weaponProc == SkillId::SHADOW_RICOCHET) procChance = 30;  // skills.json says "30% on hit"
+        if (m_weaponProc == SkillId::PHASE_REND)     procChance = 25;
 
         if (procRoll < procChance) {
             Vec3 procPos = result.hitPosition;
@@ -1001,6 +1003,64 @@ void Engine::handleWeaponFire(f32 dt) {
                             if (!m_fx.novaFX[ni].active) {
                                 m_fx.novaFX[ni] = {procPos, sd->radius, 0.8f, true, {0.3f, 0.1f, 0.5f}};
                                 break;
+                            }
+                        }
+                    } break;
+                    case SkillId::SHADOW_RICOCHET: {
+                        // Shadow Stiletto. The blade's shadow splits off and hunts: two bolts seek
+                        // OTHER nearby enemies, so a stiletto rewards fighting inside a group rather
+                        // than duelling. Mirrors the projectile rail's implementation
+                        // (engine_init_callbacks.cpp) — that rail had this effect and the melee one
+                        // did not, which is why a melee shadow weapon had nothing it could carry.
+                        // The bolts are ordinary player projectiles, so they can re-proc on hit and
+                        // decay naturally instead of needing a chain counter.
+                        EntityHandle nearby[8];
+                        f32 nearDists[8];
+                        const u32 found = CombatQuery::queryConeSorted(
+                            m_entities, procPos, {0,-1,0}, -1.0f, sd->radius > 0.0f ? sd->radius : 12.0f,
+                            nearby, nearDists, 8);
+                        u32 spawned = 0;
+                        for (u32 h = 0; h < found && spawned < 2; h++) {
+                            Entity* ne = handleGet(m_entities, nearby[h]);
+                            if (!ne || (ne->flags & ENT_DEAD) || (ne->flags & ENT_FRIENDLY)) continue;
+                            Vec3 toEnemy = ne->position - procPos;
+                            const f32 dist = length(toEnemy);
+                            if (dist < 0.5f) continue;   // that's the body we just hit
+                            const Vec3 dir = toEnemy * (1.0f / dist);
+                            const u16 idx = ProjectileSystem::spawn(m_projectiles, procPos, dir,
+                                20.0f, sd->damage * 0.6f, 0.1f, 2.0f, true);
+                            if (idx != 0xFFFF) m_projectiles.projectiles[idx].projFlags = PROJ_VOID;
+                            spawned++;
+                        }
+                    } break;
+                    case SkillId::PHASE_REND: {
+                        // Phase Saber. The swing does not stop at the body: the edge phases through
+                        // space and the rend continues in a CORRIDOR beyond the target. This is Phase
+                        // Dash's corridor damage with the teleport removed — deliberately, because a
+                        // proc fires mid-swing on a random hit, and yanking the player 6 m forward
+                        // whenever a die came up is exactly what made phase_dash awful on a weapon.
+                        // The saber keeps the phase fantasy; the player keeps their footing.
+                        Vec3 dir = {-sinf(m_localPlayer.yaw), 0.0f, -cosf(m_localPlayer.yaw)};
+                        const f32 reach = (sd->distance > 0.0f) ? sd->distance : 6.0f;
+                        // Stop at geometry so the rend can't reach through a wall.
+                        const Vec3 origin = procPos + Vec3{0.0f, 0.5f, 0.0f};
+                        const RayHit wall = Raycast::cast(m_level.grid, origin, dir, reach);
+                        const f32 len = wall.hit ? (wall.distance - 0.2f) : reach;
+                        if (len > 0.5f) {
+                            EntityHandle hits[MAX_ENTITIES];
+                            f32 dists[MAX_ENTITIES];
+                            const u32 hitCount = CombatQuery::queryConeSorted(
+                                m_entities, origin, dir, cosf(radians(25.0f)), len,
+                                hits, dists, MAX_ENTITIES);
+                            for (u32 h = 0; h < hitCount; h++)
+                                Combat::applyDamage(m_entities, hits[h], sd->damage);
+                            // Visual: reuse the nova flash, sized to the corridor, in phase violet.
+                            for (u32 ni = 0; ni < MAX_NOVA_FX; ni++) {
+                                if (!m_fx.novaFX[ni].active) {
+                                    m_fx.novaFX[ni] = {origin + dir * (len * 0.5f), len * 0.5f, 0.35f,
+                                                       true, {0.65f, 0.45f, 1.0f}};
+                                    break;
+                                }
                             }
                         }
                     } break;
@@ -1823,6 +1883,8 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
         if (np.weaponProc == SkillId::BLOOD_NOVA)       procChance = 20;
         if (np.weaponProc == SkillId::VOID_ZONE)        procChance = 5;
         if (np.weaponProc == SkillId::ARC_FIRE)         procChance = 20;
+        if (np.weaponProc == SkillId::SHADOW_RICOCHET)  procChance = 30;
+        if (np.weaponProc == SkillId::PHASE_REND)       procChance = 25;
 
         if (procRoll < procChance) {
             Vec3 procPos = result.hitPosition;
@@ -1861,6 +1923,42 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
                         // one meteor from the client's message plus a second from this independent
                         // roll — so the server defers to the firing client entirely. (The roll just
                         // above still governs this remote's OTHER procs, which aren't predicted.)
+                    } break;
+                    case SkillId::SHADOW_RICOCHET: {
+                        // Guest twin of the local case above — see there for the design.
+                        EntityHandle nearby[8]; f32 nearDists[8];
+                        const u32 found = CombatQuery::queryConeSorted(
+                            m_entities, procPos, {0,-1,0}, -1.0f, sd->radius > 0.0f ? sd->radius : 12.0f,
+                            nearby, nearDists, 8);
+                        u32 spawned = 0;
+                        for (u32 h = 0; h < found && spawned < 2; h++) {
+                            Entity* ne = handleGet(m_entities, nearby[h]);
+                            if (!ne || (ne->flags & ENT_DEAD) || (ne->flags & ENT_FRIENDLY)) continue;
+                            Vec3 toEnemy = ne->position - procPos;
+                            const f32 dist = length(toEnemy);
+                            if (dist < 0.5f) continue;
+                            const u16 pidx = ProjectileSystem::spawn(m_projectiles, procPos,
+                                toEnemy * (1.0f / dist), 20.0f, sd->damage * 0.6f, 0.1f, 2.0f, true);
+                            if (pidx != 0xFFFF) m_projectiles.projectiles[pidx].projFlags = PROJ_VOID;
+                            spawned++;
+                        }
+                    } break;
+                    case SkillId::PHASE_REND: {
+                        // Guest twin. `forward` is the remote player's aim, already in scope here.
+                        Vec3 dir = {forward.x, 0.0f, forward.z};
+                        if (lengthSq(dir) < 0.001f) dir = {0.0f, 0.0f, -1.0f}; else dir = normalize(dir);
+                        const f32 reach = (sd->distance > 0.0f) ? sd->distance : 6.0f;
+                        const Vec3 origin = procPos + Vec3{0.0f, 0.5f, 0.0f};
+                        const RayHit wall = Raycast::cast(m_level.grid, origin, dir, reach);
+                        const f32 len = wall.hit ? (wall.distance - 0.2f) : reach;
+                        if (len > 0.5f) {
+                            EntityHandle hits[MAX_ENTITIES]; f32 dists[MAX_ENTITIES];
+                            const u32 hitCount = CombatQuery::queryConeSorted(
+                                m_entities, origin, dir, cosf(radians(25.0f)), len,
+                                hits, dists, MAX_ENTITIES);
+                            for (u32 h = 0; h < hitCount; h++)
+                                Combat::applyDamage(m_entities, hits[h], sd->damage);
+                        }
                     } break;
                     case SkillId::BLOOD_NOVA: {
                         EntityHandle hits[MAX_ENTITIES];

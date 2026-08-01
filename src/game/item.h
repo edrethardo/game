@@ -193,6 +193,7 @@ enum struct SkillId : u8 {
     THROWAWAY,      // throw weapon as projectile on reload
     VOID_ZONE,      // on-hit: dark zone dealing flat + 60% missing HP
     SHADOW_RICOCHET, // on-hit: 2 shadow bolts seek nearby enemies (can re-proc)
+    PHASE_REND,     // on-hit: spectral rend tears a corridor BEYOND the target (no teleport)
 
     // Ring passives (always-on while equipped)
     LIFE_STEAL,     // heal 5% of damage dealt

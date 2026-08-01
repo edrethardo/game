@@ -66,7 +66,7 @@
       "minLevel": 6,
       "maxLevel": 10,
       "maxRarity": "legendary",
-      "legendarySkill": "phase_dash",
+      "legendarySkill": "phase_rend",
       "dropWeight": 0.5,
       "minRarity": "legendary"
     },
@@ -117,7 +117,7 @@
       "minLevel": 6,
       "maxLevel": 10,
       "maxRarity": "legendary",
-      "legendarySkill": "phase_dash",
+      "legendarySkill": "shadow_ricochet",
       "dropWeight": 0.6,
       "minRarity": "legendary"
     },
@@ -2857,7 +2857,8 @@
       "mesh": "steadfast_greaves",
       "material": "boots_plate",
       "baseHealth": 30.0,
-      "minLevel": 20, "maxLevel": 50,
+      "minLevel": 20,
+      "maxLevel": 50,
       "maxRarity": "legendary",
       "legendarySkill": "break_free",
       "dropWeight": 0.4,

@@ -493,6 +493,21 @@ def icon_blood_nova():
         set_px(ic, x, y, 4)
     return ic
 
+def icon_phase_rend():
+    """A blade-slash that splits into a phased echo — the rend continuing past the target."""
+    ic = new_icon()
+    # Primary slash: a steep diagonal edge.
+    draw_line(ic, 6, 26, 26, 6, 1, 2)
+    draw_line(ic, 7, 27, 27, 7, 4, 1)
+    # The phased echo, offset and dimmer — the part that carries on beyond the body.
+    draw_line(ic, 3, 20, 20, 3, 3, 1)
+    draw_line(ic, 12, 29, 29, 12, 3, 1)
+    # Corridor ticks along the rend, marking the line it tears through.
+    draw_line(ic, 16, 20, 20, 16, 2)
+    draw_line(ic, 10, 14, 14, 10, 2)
+    return ic
+
+
 def icon_phase_dash():
     """Diagonal arrow with speed lines."""
     ic = new_icon()
@@ -864,6 +879,7 @@ def main():
         ("MeteorStrike",     icon_meteor_strike()),
         ("BloodNova",        icon_blood_nova()),
         ("PhaseDash",        icon_phase_dash()),
+        ("PhaseRend",        icon_phase_rend()),
         ("ArcFire",          icon_arc_fire()),
         # Glove passive
         ("Frenzy",           icon_frenzy()),

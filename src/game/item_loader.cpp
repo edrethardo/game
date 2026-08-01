@@ -139,6 +139,7 @@ SkillId skillIdFromString(const std::string& s) {
     if (s == "throwaway")       return SkillId::THROWAWAY;
     if (s == "void_zone")       return SkillId::VOID_ZONE;
     if (s == "shadow_ricochet") return SkillId::SHADOW_RICOCHET;
+    if (s == "phase_rend") return SkillId::PHASE_REND;
     if (s == "life_steal")      return SkillId::LIFE_STEAL;
     if (s == "thorns")          return SkillId::THORNS;
     if (s == "berserker")       return SkillId::BERSERKER;
