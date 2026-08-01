@@ -93,6 +93,13 @@ bool WorldItemSystem::spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 
         wi.ownerSlot     = ownerSlot;
         wi.active        = true;
         pool.activeCount++;
+        // MYTHIC is rare by construction (a quarter of Inferno's legendary slice, ~1.9% of drops,
+        // and nothing at all below Inferno), so logging every one is quiet — and it is the only way
+        // a soak can answer "did the new tier actually pay out?". The AutoEquip line alone cannot:
+        // a mythic shares its DEF, and therefore its name, with the legendary it upgraded from.
+        if (item.rarity == Rarity::MYTHIC)
+            LOG_INFO("[MYTHIC] drop: defId=%u itemLevel=%u affixes=%u",
+                     (u32)item.defId, (u32)item.itemLevel, (u32)item.affixCount);
         return true;
     }
 

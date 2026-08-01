@@ -44,16 +44,6 @@ static const char* affixTypeName(AffixType type) {
     }
 }
 
-static const char* rarityName(Rarity r) {
-    switch (r) {
-        case Rarity::COMMON:    return "Common";
-        case Rarity::MAGIC:     return "Magic";
-        case Rarity::RARE:      return "Rare";
-        case Rarity::LEGENDARY: return "Legendary";
-        case Rarity::MYTHIC:    return "Mythic";
-        default:                return "";
-    }
-}
 
 static const char* slotName(ItemSlot slot) {
     switch (slot) {

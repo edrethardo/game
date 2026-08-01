@@ -85,7 +85,7 @@ bool Engine::autoEquipIfUpgrade(u8 lane, u8 bpIdx) {
     sendInventorySync(lane, activeNetSlot());              // no-op unless CLIENT
     // The game just dressed the player — say so. Silent gear changes read as items vanishing.
     addChatMessage("", def.name, Vec3{0.5f, 0.9f, 0.5f});
-    LOG_INFO("AutoEquip[%u]: %s", lane, def.name);
+    LOG_INFO("AutoEquip[%u]: %s [%s]", lane, def.name, rarityName(cand.rarity));
     return true;
 }
 

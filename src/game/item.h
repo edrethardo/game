@@ -436,6 +436,21 @@ inline bool isSentinelItem(const ItemInstance& item) {
 
 // ---- Rarity color lookup ----
 
+// The tier's display name. Lives beside rarityColor so the two can't drift; it was a file-static in
+// hud_inventory.cpp, which meant anything outside the tooltip (a log line, telemetry) had no way to
+// name a rarity and simply printed the item's name instead — see the AutoEquip line, which could not
+// distinguish a MYTHIC from the LEGENDARY it shares a def with.
+inline const char* rarityName(Rarity r) {
+    switch (r) {
+        case Rarity::COMMON:    return "Common";
+        case Rarity::MAGIC:     return "Magic";
+        case Rarity::RARE:      return "Rare";
+        case Rarity::LEGENDARY: return "Legendary";
+        case Rarity::MYTHIC:    return "Mythic";
+        default:                return "";
+    }
+}
+
 inline Vec3 rarityColor(Rarity r) {
     switch (r) {
         case Rarity::COMMON:    return {0.9f, 0.9f, 0.9f};   // white
