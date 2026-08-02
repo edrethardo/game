@@ -1998,7 +1998,10 @@ private:
     void updateAutoLoot(f32 dt);
     void autoEquipBackpack(u8 lane);
     bool autoEquipIfUpgrade(u8 lane, u8 bpIdx);
-    bool autoEvictWorst(u8 lane);
+    // Make room in a full bag for `incomingScore` (BuildScore::maxCellScore of the item we are
+    // about to pick up). Returns false — and evicts NOTHING — unless the swap is a strict upgrade.
+    // Pass a huge score for an unconditional evict.
+    bool autoEvictWorst(u8 lane, f32 incomingScore);
     // Slow-cadence housekeeping: discard gear no build wants, nudge toward a stronger build.
     void autoLootHousekeeping(u8 lane);
     f32  m_autoPruneTimer[MAX_LOCAL_PLAYERS]      = {};

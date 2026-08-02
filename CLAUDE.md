@@ -205,6 +205,25 @@ the remote twin sets a VOID_ZONE proc chance it has no case for, and no item pai
 projectile weapon or `shadow_ricochet` with a melee one — the guard now covers all of these. Also
 found: `SECOND_WIND` has a complete ring implementation that NO item grants.
 
+**THE FULL BAG THRASHED FOREVER (found + fixed 2026-08-02).** `autoEvictWorst` made room by
+evicting the bag's worst item for WHATEVER was being picked up — with no comparison between the two —
+and it drops the victim 1.2 m in front of the player, well inside the 2.5 m auto-loot vacuum. With a
+permanently full bag that closes a loop: evict X, take Y, next pass sees X on the ground,
+`worthPickingUp` still says yes, evict something, take X, forever. Measured in the soak as the SAME
+item (a mythic Void Talons, ilvl 188) spawning **699 times in 26 minutes**, one every ~2.2 s — the bot
+spending its loot pass swapping two items back and forth instead of playing. It had been invisible
+because nothing logged a drop; the new `[MYTHIC]` line made one churning item self-report, and the
+raw count (1218 lines for **20 distinct items**) is what exposed it.
+**The exchange must be a strict UPGRADE**: `autoEvictWorst(lane, incomingScore)` evicts nothing
+unless the incoming item beats the victim's rank, so every accepted swap raises the bag's total and a
+bag can only improve finitely often — the loop terminates by construction. When it is not an upgrade
+the pickup is declined and the item stays on the ground, which is the documented intent anyway
+("worse and near-duplicate loot stays on the ground"). The victim's rank keeps its +1e6
+best-in-slot protection while the incoming score is a plain `maxCellScore`, so a protected piece is
+effectively never traded for loose loot — losing the only item that can field a build is worse than
+walking past a drop. NOTE the nuance against the older "never pauses" rule: the bot still never
+stalls, but a full bag now SKIPS an item that is not better than what it would displace.
+
 **Balance lab.** `tests/balance/` holds a repeatable balance model (spec:
 `docs/superpowers/specs/2026-07-22-balance-lab-design.md`): typical-equipment player power
 (Monte-Carlo through the real `ItemGen`/`BuildScore`/`Inventory` code) vs enemy/boss curves

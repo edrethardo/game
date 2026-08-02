@@ -115,7 +115,26 @@ void Engine::autoEquipBackpack(u8 lane) {
 // --- bag eviction -------------------------------------------------------------------------------
 // Drop the lowest-scoring backpack item to make room (never pets, never quickbar-assigned gear —
 // the same exemptions "drop all" honours). Returns true when a slot was freed.
-bool Engine::autoEvictWorst(u8 lane) {
+// EVICTION MUST BE A STRICT UPGRADE, or the bag thrashes forever.
+//
+// This used to evict the worst item to make room for WHATEVER was being picked up, with no
+// comparison between the two — and the victim is dropped 1.2 m in front of the player, well inside
+// the 2.5 m auto-loot vacuum. So with a permanently full bag the loop closed on itself: evict X,
+// take Y, next pass sees X on the ground, `worthPickingUp` still says yes, evict something, take X,
+// ... Measured in the 2026-08-02 soak as the SAME item (a mythic Void Talons, ilvl 188) spawning
+// **699 times in 26 minutes**, one every ~2.2 s — the bot spending its loot pass swapping two items
+// back and forth instead of playing. It was invisible until the new [MYTHIC] drop log made one
+// churning item self-report.
+//
+// Comparing against the incoming score fixes it by construction: each accepted swap strictly raises
+// the bag's total, and a bag can only improve finitely often, so the loop terminates. When the
+// incoming item is NOT better, we evict nothing and the caller declines the pickup — which is also
+// the documented intent ("worse and near-duplicate loot stays on the ground").
+//
+// Note the victim's `rank` carries the +1e6 best-in-slot protection while `incomingScore` is a plain
+// maxCellScore, so a protected piece is effectively never traded away for loose loot. That asymmetry
+// is deliberate: losing the only item that can field a build is far worse than walking past a drop.
+bool Engine::autoEvictWorst(u8 lane, f32 incomingScore) {
     PlayerInventory& inv = m_inventories[lane];
     s32 worst = -1;
     f32 worstScore = 1e30f;
@@ -145,6 +164,7 @@ bool Engine::autoEvictWorst(u8 lane) {
         if (rank < worstScore) { worstScore = rank; worst = bi; }
     }
     if (worst < 0) return false;                           // nothing evictable — bag stays full
+    if (!(incomingScore > worstScore)) return false;       // not an upgrade: keep the bag, skip the pickup
 
     ItemInstance dropped = Inventory::dropFromBackpack(inv, static_cast<u8>(worst));
     if (isItemEmpty(dropped)) return false;
@@ -255,14 +275,16 @@ void Engine::updateAutoLoot(f32 dt) {
     // CLIENT: request it through the server-validated path, exactly like a manual grab (the
     // request predicts the pickup and rolls back on reject). One request per tick keeps a burst of
     // drops from flooding the wire; the next tick grabs the next item.
+    const f32 candScore = BuildScore::maxCellScore(m_worldItems.items[best].item,
+                                                  m_itemDefs[m_worldItems.items[best].item.defId]);
     if (m_netRole == NetRole::CLIENT) {
-        if (inv.backpackCount >= MAX_INVENTORY_ITEMS && !autoEvictWorst(lane)) return;
+        if (inv.backpackCount >= MAX_INVENTORY_ITEMS && !autoEvictWorst(lane, candScore)) return;
         sendPickupRequest(best);
         return;
     }
 
     // SP/HOST: full bag self-manages first (Aaron's call: evict the worst, never pause).
-    if (inv.backpackCount >= MAX_INVENTORY_ITEMS && !autoEvictWorst(lane)) return;
+    if (inv.backpackCount >= MAX_INVENTORY_ITEMS && !autoEvictWorst(lane, candScore)) return;
 
     WorldItem& wi = m_worldItems.items[best];
     ItemInstance picked = wi.item;
