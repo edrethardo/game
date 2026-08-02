@@ -319,3 +319,32 @@ TEST_CASE("every legendary's granted skill is live on its slot's rail") {
     }
     CHECK(checked > 40);   // the audit found 51 — guard against the loop silently matching nothing
 }
+
+// A def authored `minRarity: legendary` must NEVER be produced below that tier: such an item is a
+// named unique with no granted skill (isLegendaryOrBetter is false), i.e. a dud wearing a famous
+// name. Prompted by a soak line reading "AutoEquip[0]: Vampiric Blade [Magic]".
+TEST_CASE("a legendary-only def never rolls below legendary") {
+    static ItemDef defs[MAX_ITEM_DEFS]; static AffixDef affixes[MAX_AFFIX_DEFS];
+    u32 dc = 0, ac = 0;
+    REQUIRE(ItemLoader::loadItemDefs (DUNGEON_REPO_ROOT "/assets/config/items.json",   defs,    dc));
+    REQUIRE(ItemLoader::loadAffixDefs(DUNGEON_REPO_ROOT "/assets/config/affixes.json", affixes, ac));
+
+    ItemGen::init(1234);
+    u32 violations = 0, checked = 0;
+    for (u8 lvl = 1; lvl <= 60; lvl++) {
+        for (u32 i = 0; i < 400; i++) {
+            const ItemInstance it = ItemGen::rollItem(lvl, defs, dc, affixes, ac);
+            if (it.defId == 0xFFFF || it.defId >= dc) continue;
+            checked++;
+            if (defs[it.defId].minRarity == Rarity::LEGENDARY &&
+                !isLegendaryOrBetter(it.rarity)) {
+                if (violations == 0)
+                    MESSAGE("first violation: ", doctest::String(defs[it.defId].name),
+                            " rolled at rarity ", (u32)it.rarity);
+                violations++;
+            }
+        }
+    }
+    CHECK(checked > 1000);
+    CHECK(violations == 0);
+}
