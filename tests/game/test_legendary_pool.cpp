@@ -258,20 +258,64 @@ namespace {
 // Weapons dispatch by weaponType: melee/hitscan use the engine_combat.cpp proc switch, projectile
 // uses the engine_init_callbacks.cpp one. They do NOT support the same set — that asymmetry is
 // itself a trap (arc_fire is melee-only, shadow_ricochet was projectile-only until this pass).
-bool weaponProcHandles(WeaponType wt, SkillId id) {
-    const bool projectile = (wt == WeaponType::PROJECTILE);
+// Weapons dispatch over THREE switches, not two — and the first version of this table modelled only
+// two, which is how it certified VOID_ZONE as handled while the co-op remote twin had no case for it.
+// A guard that is wrong in the safe-looking direction is worse than no guard, so each rail is
+// enumerated separately and a melee/hitscan skill must satisfy BOTH of its rails:
+//   * LOCAL melee/hitscan — engine_combat.cpp, the firing player's own hits
+//   * REMOTE twin        — engine_combat.cpp, a GUEST's hits resolved on the host
+//   * PROJECTILE         — engine_init_callbacks.cpp, the shared projectile-hit callback, which runs
+//                          for every projectile regardless of owner, so it needs no guest twin
+bool localMeleeHitscanHandles(SkillId id) {
     switch (id) {
         case SkillId::FROZEN_ORB:
         case SkillId::CHAIN_LIGHTNING:
         case SkillId::METEOR_STRIKE:
         case SkillId::BLOOD_NOVA:
         case SkillId::VOID_ZONE:
+        case SkillId::ARC_FIRE:
         case SkillId::SHADOW_RICOCHET:
-        case SkillId::PHASE_REND:      return true;              // both rails
-        case SkillId::ARC_FIRE:        return !projectile;       // melee/hitscan only
-        case SkillId::THROWAWAY:       return true;              // out-of-band (reload throw)
-        default:                       return false;
+        case SkillId::PHASE_REND:
+            return true;
+        default:
+            return false;
     }
+}
+bool remoteTwinHandles(SkillId id) {
+    switch (id) {
+        case SkillId::FROZEN_ORB:
+        case SkillId::CHAIN_LIGHTNING:
+        case SkillId::METEOR_STRIKE:
+        case SkillId::BLOOD_NOVA:
+        case SkillId::ARC_FIRE:
+        case SkillId::SHADOW_RICOCHET:
+        case SkillId::PHASE_REND:
+        case SkillId::VOID_ZONE:      // added 2026-08-02 with the guest twin's own case
+            return true;
+        default:
+            return false;
+    }
+}
+bool projectileProcHandles(SkillId id) {
+    switch (id) {
+        case SkillId::VOID_ZONE:
+        case SkillId::FROZEN_ORB:
+        case SkillId::CHAIN_LIGHTNING:
+        case SkillId::BLOOD_NOVA:
+        case SkillId::METEOR_STRIKE:
+        case SkillId::SHADOW_RICOCHET:
+        case SkillId::PHASE_REND:
+            return true;
+        default:
+            return false;   // NB: no ARC_FIRE on this rail
+    }
+}
+
+bool weaponProcHandles(WeaponType wt, SkillId id) {
+    if (id == SkillId::THROWAWAY) return true;     // out-of-band (reload throw), not a proc switch
+    if (wt == WeaponType::PROJECTILE) return projectileProcHandles(id);
+    // Melee/hitscan must work for the host AND for a guest, or the item is dead one seat over.
+    return localMeleeHitscanHandles(id) && remoteTwinHandles(id);
 }
 
 bool railHandles(ItemSlot slot, WeaponType wt, SkillId id) {

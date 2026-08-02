@@ -1939,6 +1939,22 @@ void Engine::handleWeaponFireForPlayer(NetPlayer& np, f32 dt) {
                         // roll — so the server defers to the firing client entirely. (The roll just
                         // above still governs this remote's OTHER procs, which aren't predicted.)
                     } break;
+                    case SkillId::VOID_ZONE: {
+                        // Guest twin. The LOCAL case reads m_lastCombatHit — the HOST player's last
+                        // hit — which is the wrong target entirely here, so this uses the remote
+                        // attack's own first hit handle instead. Its absence was a latent hole: void
+                        // weapons are all `projectile` today and route through the shared projectile
+                        // callback, so nothing was broken in practice — but a melee or hitscan void
+                        // weapon would have worked for the host and done nothing for every guest.
+                        if (result.entitiesHit > 0) {
+                            Entity* ve = handleGet(m_entities, result.hitHandles[0]);
+                            if (ve && !(ve->flags & ENT_DEAD)) {
+                                const f32 missingHp = ve->maxHealth - ve->health;
+                                Combat::applyDamage(m_entities, result.hitHandles[0],
+                                                    sd->damage + missingHp * 0.6f);
+                            }
+                        }
+                    } break;
                     case SkillId::SHADOW_RICOCHET: {
                         // Guest twin of the local case above — see there for the design.
                         EntityHandle nearby[8]; f32 nearDists[8];

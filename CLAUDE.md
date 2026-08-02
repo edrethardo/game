@@ -200,10 +200,17 @@ made the skill awful on a weapon. Both are added to the melee rail AND the remot
 **Pinned so it cannot recur:** "every legendary's granted skill is live on its slot's rail" in
 `test_legendary_pool.cpp` encodes each rail's real capability set and walks all 51 granting items —
 verified by sabotage (restoring `phase_dash` on the Phase Saber fails it BY NAME). When a rail learns
-a skill, extend the table there. Latent gaps the audit also surfaced, currently unreachable but real:
-the remote twin sets a VOID_ZONE proc chance it has no case for, and no item pairs `arc_fire` with a
-projectile weapon or `shadow_ricochet` with a melee one — the guard now covers all of these. Also
-found: `SECOND_WIND` has a complete ring implementation that NO item grants.
+a skill, extend the table there. The remote twin's missing VOID_ZONE case was CLOSED 2026-08-02 (a guest's melee/hitscan void weapon
+would have done nothing), and the guard was corrected with it: its first version modelled only TWO
+rails and therefore certified VOID_ZONE as handled everywhere — a guard wrong in the safe-looking
+direction is worse than none. It now enumerates all three (local melee/hitscan, remote twin,
+projectile) and requires a melee/hitscan skill to satisfy BOTH of its rails; sabotage-verified
+against exactly the case it used to miss. Still open: `SECOND_WIND` has a complete ring
+implementation that NO item grants.
+**Both new procs are now verified IN PLAY**, not just structurally: SHADOW_RICOCHET fired in two
+soak instances, and PHASE_REND was confirmed by temporarily making the Warrior start with a
+legendary Phase Saber (reverted immediately) — `[PROC] first fire: weapon skill id 56` within
+seconds of the first swing.
 
 **THE FULL BAG THRASHED FOREVER (found + fixed 2026-08-02).** `autoEvictWorst` made room by
 evicting the bag's worst item for WHATEVER was being picked up — with no comparison between the two —
