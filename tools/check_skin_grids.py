@@ -27,6 +27,7 @@ Nothing here swallows exceptions, for that reason.
 """
 
 import os
+import struct
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -59,6 +60,48 @@ def mesh_extents(name):
             captured["y"][1] - captured["y"][0] + 1)
 
 
+def shipped_png_dims(png_name):
+    """(w, h) of the PNG the ENGINE actually loads, or None if it is not on disk."""
+    path = os.path.join(ROOT, "assets", "textures", png_name)
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as f:
+        header = f.read(24)
+    if len(header) < 24:
+        return None
+    return struct.unpack(">II", header[16:24])
+
+
+def check_shipped_matches_generator():
+    """The GENERATOR being right is not enough — the engine loads the committed PNG.
+
+    Most skins are not in build_assets.py's list at all, so their PNGs are never regenerated and the
+    generator is effectively dead code: edit it and the game does not change. That is how `butcher`
+    (the floor-5 boss) and `hellhound` came to ship textures that disagreed with their own
+    generators, `hellhound`'s being 15x7 against a 6x10 mesh — near enough transposed.
+
+    Divergence is reported as a WARNING rather than a failure: a stale PNG is not automatically
+    wrong, and mass-regenerating three dozen enemy skins unreviewed is its own risk. But it must not
+    be silent.
+    """
+    stale = []
+    for name, (png, fn) in sorted(gen_skin.SKIN_TYPES.items()):
+        dims = shipped_png_dims(png)
+        if dims is None:
+            continue
+        gw, gh, _ = fn()
+        if (gw, gh) != dims:
+            stale.append((name, (gw, gh), dims))
+
+    if stale:
+        print(f"\n  WARNING: {len(stale)} shipped PNG(s) disagree with their generator —")
+        print( "           the engine loads the PNG, so editing the generator changes nothing:")
+        for name, gen, png in stale:
+            print(f"             {name:24s} generator {gen[0]}x{gen[1]:<3d} shipped {png[0]}x{png[1]}")
+        print( "           Add them to build_assets.py's `skins` list to bring the two back in step.")
+    return len(stale)
+
+
 def main():
     checked, bad = 0, []
     for name in sorted(gen_skin.SKIN_TYPES):
@@ -83,6 +126,7 @@ def main():
         return 1
 
     print(f"  OK: all {checked} voxel meshes wear a skin sized to their real extents")
+    check_shipped_matches_generator()   # advisory; see the docstring for why it does not fail
     return 0
 
 

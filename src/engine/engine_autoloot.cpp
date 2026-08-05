@@ -224,18 +224,24 @@ void Engine::autoLootHousekeeping(u8 lane) {
     if (m_buildNotifyCooldown[lane] > 0.0f) return;
     f32 bestScore = 0.0f;
     const u8 best = BuildScore::bestBuildCell(inv, m_itemDefs, m_itemDefCount, bestScore);
-    if (best == inv.buildCell || best == m_lastSuggestedBuild[lane]) return;
+    if (best == inv.buildCell) return;
     const WeaponType nudgePref = lanePreferredWeapon(m_playerClasses[lane]);
     const f32 current = BuildScore::gearScoreForCell(inv, m_itemDefs, m_itemDefCount,
                                                     inv.buildCell, nudgePref);
     if (bestScore <= current * BuildScore::BUILD_SUGGEST_FACTOR) return;
+    // Repeating the SAME suggestion is pointless, and — the real bug — so is alternating between
+    // two that leapfrog each other. Re-nudging therefore requires beating the score we last
+    // announced, not merely naming a different cell.
+    if (best == m_lastSuggestedBuild[lane] ||
+        bestScore <= m_lastSuggestedScore[lane] * BuildScore::BUILD_SUGGEST_FACTOR) return;
     char msg[96];
     std::snprintf(msg, sizeof(msg), "Better gear for %s %s — switch builds in the Inventory",
                   BuildScore::rowName(best), BuildScore::colName(best));
     addChatMessage("", msg, Vec3{1.0f, 0.85f, 0.3f});
     LOG_INFO("BuildSuggest[%u]: %s %s (%.0f vs %.0f)", lane,
              BuildScore::rowName(best), BuildScore::colName(best), bestScore, current);
-    m_lastSuggestedBuild[lane] = best;
+    m_lastSuggestedBuild[lane]  = best;
+    m_lastSuggestedScore[lane]  = bestScore;
     m_buildNotifyCooldown[lane] = BUILD_NOTIFY_COOLDOWN;
 }
 

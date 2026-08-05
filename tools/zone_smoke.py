@@ -30,6 +30,14 @@ checked.
     python3 tools/zone_smoke.py --seconds 4    # hold each zone longer
 
 Exits non-zero if any zone fails, so it can gate a release the way the test suite does.
+
+WHAT THIS CANNOT SEE. It holds each zone for a few SECONDS, so anything on a longer clock is
+invisible to it. That blind spot shipped a real bug: world items carry a 60 s lifetime, and every
+waypoint and act entrance was despawning a minute after the zone loaded — fast travel and the Den of
+Evil quietly unreachable — while this tool reported all fifteen zones healthy. Timer-shaped rules
+belong in a unit test that simulates the clock (see tests/game/test_world_item_pool.cpp, which ticks
+120 s per sentinel in milliseconds), not in a live smoke run. Raising --seconds past 60 would work
+too, but at 15 zones it costs a quarter of an hour to catch what a unit test catches instantly.
 """
 
 import argparse

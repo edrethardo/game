@@ -80,7 +80,12 @@ void Engine::renderEntities(u32 sw, u32 sh) {
     // 65 ms — long enough to ride out a sampling miss on a moving body, short enough that a genuinely
     // hidden enemy stops costing draw calls almost immediately.
     static constexpr u8 VIS_HOLD_FRAMES = 4;
-    static u8 s_entVisHold[MAX_ENTITIES] = {};
+    // PER LANE. renderEntities runs once for each local player with a DIFFERENT camera, so a single
+    // shared array let P1's line of sight keep an enemy drawn for P2. That direction is safe (extra
+    // draw calls, never a vanished enemy) but it silently halved the cull's value in split-screen —
+    // the measurements that justified it were all singleplayer.
+    static u8 s_entVisHold[MAX_LOCAL_PLAYERS][MAX_ENTITIES] = {};
+    u8* visHold = s_entVisHold[m_localPlayerIndex < MAX_LOCAL_PLAYERS ? m_localPlayerIndex : 0];
 
     // Per-slot memory of the burrow bit so the FRAME a widow surfaces gets a dirt eruption.
     // Keyed entirely on the replicated ENT_BURROWED flag, so host and guests burst identically;
@@ -111,9 +116,9 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         // cull differently and nothing desyncs.
         if (!m_visCullOff && !(e.flags & ENT_DEAD)) {
             if (Visibility::entityVisible(m_level.grid, m_camera.position, e.position, e.halfExtents))
-                s_entVisHold[i] = VIS_HOLD_FRAMES;
-            else if (s_entVisHold[i] > 0)
-                s_entVisHold[i]--;
+                visHold[i] = VIS_HOLD_FRAMES;
+            else if (visHold[i] > 0)
+                visHold[i]--;
             else
                 continue;                       // provably hidden, and has been for a while
         }

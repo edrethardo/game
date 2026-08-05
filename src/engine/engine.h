@@ -2094,6 +2094,12 @@ private:
     f32  m_autoPruneTimer[MAX_LOCAL_PLAYERS]      = {};
     f32  m_buildNotifyCooldown[MAX_LOCAL_PLAYERS] = {};
     u8   m_lastSuggestedBuild[MAX_LOCAL_PLAYERS]  = {0xFF, 0xFF};
+    // The SCORE at which that suggestion was last made. Remembering only the CELL let two builds
+    // leapfrog each other forever: each was "different from the last", so the guard passed every
+    // time and the player got an endless stream of "switch builds" (measured on a Rogue as Glass
+    // Cannon Melee -> Glass Cannon Ranged -> Tanky Melee, repeating). A re-nudge must now also be
+    // meaningfully BETTER than the one already given, which alternation never is.
+    f32  m_lastSuggestedScore[MAX_LOCAL_PLAYERS] = {};
     void sendPickupPacket(u32 uid);
     // Server: validate and apply a client's CL_PICKUP_ITEM request (proximity + ownership),
     // moving the item into that player's inventory and freeing the world slot.
