@@ -117,3 +117,47 @@ TEST_CASE("a sentinel's slot is never taken") {
     CHECK(shard);
     CHECK(waypoint);
 }
+
+// --- World fixtures must outlive their 60 s loot timer -------------------------------------------
+//
+// A waypoint, a POI mouth, a shrine, a chest, the stash and the Source shard are FIXTURES you walk
+// to, not loot lying on the floor. They spawn with the same 60 s lifetime as a dropped item, so the
+// despawn pass has to exempt them explicitly — and that hand-maintained list has been wrong three
+// times. Shrines and Source shards were each added after they evaporated in play; the overworld's
+// waypoints and ZONE GATES were still missing, so every waypoint and every act entrance vanished a
+// minute after the zone loaded. Fast travel silently died, and the Den of Evil became unreachable.
+//
+// A 6-second smoke test cannot see this. The rule is now "every sentinel except the globe", so a
+// new sentinel is safe by default; these pin both halves of that.
+
+TEST_CASE("fixtures never despawn, globes and loot still do") {
+    static WorldItemPool pool;
+    pool = WorldItemPool{};
+
+    struct Case { u16 defId; const char* what; bool expires; };
+    const Case cases[] = {
+        { WAYPOINT_ID,     "waypoint",     false },
+        { ZONE_GATE_ID,    "zone gate",    false },
+        { SHRINE_POWER_ID, "shrine",       false },
+        { CHEST_ID,        "chest",        false },
+        { STASH_ID,        "stash",        false },
+        { GLOBE_HEALTH_ID, "health globe", true  },
+        { SOURCE_SHARD_ID, "source shard", false },
+        { 1,               "ordinary loot", true  },
+    };
+
+    for (const Case& c : cases) {
+        pool = WorldItemPool{};
+        ItemInstance it{};
+        it.defId  = c.defId;
+        it.rarity = Rarity::COMMON;          // nothing here may rely on rarity to survive
+        it.uid    = 1;
+        REQUIRE(WorldItemSystem::spawn(pool, it, Vec3{0, 0, 0}));
+
+        // Two full lifetimes of simulated time, a second at a go.
+        for (u32 i = 0; i < 120; i++) WorldItemSystem::update(pool, 1.0f, nullptr, 0);
+
+        CAPTURE(c.what);
+        CHECK(pool.items[0].active == !c.expires);
+    }
+}

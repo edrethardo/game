@@ -45,8 +45,16 @@ void WorldItemSystem::update(WorldItemPool& pool, f32 dt,
         // Chests are furniture, not loot: they must wait unopened however long the player
         // takes to reach the room (and a despawning "chest" beside a permanent mimic would
         // be a free mimic detector).
-        if (!isLegendaryOrBetter(wi.item.rarity) && !isShrine(wi.item) && !isSourceShard(wi.item)
-            && !isChest(wi.item) && !isStash(wi.item) && !isPet) {
+        // WORLD FIXTURES never expire. Expressed as "every sentinel EXCEPT the globe" rather than
+        // as a hand-listed set, because the hand-listed set has now been wrong three times: shrines
+        // and Source shards were each added retroactively after they evaporated in play, and the
+        // overworld's WAYPOINTS and ZONE GATES were still missing — so every waypoint and every POI
+        // mouth in both acts vanished 60 s after the zone loaded, quietly killing fast travel and
+        // making the Den of Evil and the Act 2 descent unreachable to anyone who did not sprint
+        // there. A sentinel added tomorrow is now exempt BY DEFAULT, which is the safe direction.
+        // The health globe is the one sentinel that is genuinely consumable loot and must expire.
+        const bool fixture = isSentinelItem(wi.item) && !isGlobe(wi.item);
+        if (!isLegendaryOrBetter(wi.item.rarity) && !fixture && !isPet) {
             wi.lifetime -= dt;
         }
         wi.bobTimer       += dt;

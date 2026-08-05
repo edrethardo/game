@@ -422,6 +422,21 @@ drops the TAIL of the table and those enemies render as fallback CUBES — the s
 turned six limb meshes into cubes and gave every spider mandibles.
 **Dev doors:** `--zone <52-96>`. Layout iteration without booting the game: `tools/level_preview.py`.
 
+**SECOND REVIEW PASS: EVERY WAYPOINT AND ACT ENTRANCE DESPAWNED AFTER 60 SECONDS (2026-08-05).**
+The worst bug of either review, and invisible to every test that existed. World items spawn with a
+60 s `lifetime`, and `WorldItemSystem::update` exempts fixtures from decay via a HAND-LISTED set —
+legendaries, shrines, Source shards, chests, stash, pets. The overworld's **WAYPOINT_ID and
+ZONE_GATE_ID were never added to it**, so a minute after entering any zone every waypoint and every
+POI mouth simply evaporated: fast travel dead, the Den of Evil and the Act 2 descent unreachable to
+anyone who did not sprint straight there. `isSentinelItem` DID cover them (so the world-item eviction
+rule spared them correctly), which is what made the gap so easy to miss — the two lists disagreed.
+Nothing caught it because `zone_smoke.py` holds a zone for six seconds.
+Fixed by deriving the rule instead of listing it: **a fixture is any sentinel EXCEPT the globe** (the
+one sentinel that is genuinely consumable loot). A sentinel added tomorrow is therefore exempt BY
+DEFAULT, which is the safe direction — the hand-listed set had already been wrong three times, with
+shrines and Source shards each added retroactively after they evaporated in play. Pinned by a test
+that simulates 120 s per sentinel type; sabotage (restoring the hand-listed rule) fails it by name.
+
 **ADVERSARIAL REVIEW OF THE OVERWORLD WORK (2026-08-05) — three real defects, all the same shape.**
 Aaron asked for a review of the uncommitted work; attacking it found one severe bug and two leaks,
 and every one of them was a value that lived in two places instead of being derived from one.
