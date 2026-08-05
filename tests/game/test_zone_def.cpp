@@ -270,3 +270,52 @@ TEST_CASE("a zone boss and its SLAY quest name the same enemy") {
             CHECK(std::strcmp(q->target, z.boss) == 0);
     }
 }
+
+// Every link in the graph, walked both ways ------------------------------------------------------
+//
+// The spot-check above covers one pair. This walks the WHOLE table, because the overworld's bugs
+// have all been in the arrival path — the ping-pong (arrival landing on the trigger threshold) and
+// the out-of-bounds respawn (arrival landing past the cleared ground) were both "you got to the
+// next zone, but where you were put down was wrong". Data-level cover for that is cheap; the live
+// walk-test is not.
+TEST_CASE("every edge link resolves to the opposite side, from both ends") {
+    using namespace Zone;
+    u32 checked = 0;
+    for (u32 i = 0; i < COUNT; i++) {
+        const ZoneDef& z = ZONES[i];
+        for (u8 d = 0; d < static_cast<u8>(Dir::COUNT); d++) {
+            const u8 dest = z.neighbour[d];
+            if (dest == NO_LINK || dest == TOWN_FLOOR) continue;
+            CAPTURE(z.name); CAPTURE(dest);
+
+            // Walking out of `z` through edge d must put us on the OPPOSITE edge of `dest`.
+            Dir arrive = Dir::COUNT;
+            REQUIRE(arrivalEdge(z.floor, dest, arrive));
+            CHECK(arrive == opposite(static_cast<Dir>(d)));
+
+            // …and the neighbour must name us back through that same edge, or one direction of the
+            // border is a one-way door.
+            const ZoneDef* back = find(dest);
+            REQUIRE(back != nullptr);
+            CHECK(back->neighbour[static_cast<u8>(arrive)] == z.floor);
+            checked++;
+        }
+    }
+    CHECK(checked >= 12);   // the act chains; a table that stopped linking would pass vacuously
+}
+
+// A POI gate and its return gate must name each other. A one-way den is a room you cannot leave.
+TEST_CASE("every POI gate has a matching return gate") {
+    using namespace Zone;
+    u32 pairs = 0;
+    for (u32 i = 0; i < COUNT; i++) {
+        const ZoneDef& z = ZONES[i];
+        if (z.poiFloor == NO_LINK) continue;
+        CAPTURE(z.name); CAPTURE(z.poiFloor);
+        const ZoneDef* inner = find(z.poiFloor);
+        REQUIRE(inner != nullptr);
+        CHECK(inner->returnFloor == z.floor);
+        pairs++;
+    }
+    CHECK(pairs >= 3);      // the two Act 1 dens and Bank Station
+}

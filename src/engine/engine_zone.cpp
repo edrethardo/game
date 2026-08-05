@@ -353,6 +353,7 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
         wp.uid       = m_worldItems.nextUid++;
         const Vec3 pos = { size * WAYPOINT_FRAC_X, 0.0f, size * WAYPOINT_FRAC_Z };
         WorldItemSystem::spawn(m_worldItems, wp, pos, &m_level.grid, 0xFF);
+        LOG_INFO("Zone fixture: WAYPOINT at (%.1f, %.1f)", (double)pos.x, (double)pos.z);
     }
 
     // A POI mouth leads IN; an interior's gate leads back OUT. Both are the same object with a
@@ -364,6 +365,8 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
         gate.uid       = m_worldItems.nextUid++;
         const Vec3 pos = { size * POI_FRAC_X, 0.0f, size * POI_FRAC_Z };
         WorldItemSystem::spawn(m_worldItems, gate, pos, &m_level.grid, 0xFF);
+        LOG_INFO("Zone fixture: POI GATE -> floor %u at (%.1f, %.1f)",
+                 (u32)def.poiFloor, (double)pos.x, (double)pos.z);
     }
     if (def.returnFloor != Zone::NO_LINK) {
         ItemInstance gate{};
@@ -371,6 +374,7 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
         gate.itemLevel = def.returnFloor;
         gate.uid       = m_worldItems.nextUid++;
         WorldItemSystem::spawn(m_worldItems, gate, center, &m_level.grid, 0xFF);
+        LOG_INFO("Zone fixture: RETURN GATE -> floor %u", (u32)def.returnFloor);
     }
 }
 

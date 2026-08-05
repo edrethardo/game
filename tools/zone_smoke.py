@@ -68,6 +68,9 @@ def parse_zones():
         floor = int(block.group(1))
         body = block.group(2)
         name = re.search(r'/\*name\*/\s*"([^"]*)"', body)
+        waypoint = re.search(r"/\*hasWaypoint\*/\s*(true|false)", body)
+        poi = re.search(r"/\*poiFloor\*/\s*(\d+)", body)
+        ret = re.search(r"/\*returnFloor\*/\s*(\d+)", body)
         boss = re.search(r'/\*boss\*/\s*"([^"]*)"', body)
         peaceful = re.search(r"/\*peaceful\*/\s*(true|false)", body)
         zones.append({
@@ -75,6 +78,9 @@ def parse_zones():
             "name": name.group(1) if name else "?",
             "boss": boss.group(1) if boss else "",
             "peaceful": bool(peaceful and peaceful.group(1) == "true"),
+            "waypoint": bool(waypoint and waypoint.group(1) == "true"),
+            "poi": int(poi.group(1)) if poi else 0,
+            "ret": int(ret.group(1)) if ret else 0,
         })
     return sorted(zones, key=lambda z: z["floor"])
 
@@ -139,21 +145,41 @@ def check(zone, quests, boss_hp, log):
     # Boss: present exactly when the table says so, and carrying the HP enemies.json authors.
     # "spawned at all" is not enough — a boss scaled by the dungeon's floor multipliers would be
     # a different fight entirely, and that is invisible without the number.
-    spawned = re.findall(r"Zone boss spawned: (.+?) \((\d+) HP\)", log)
+    # Tolerant on purpose: the line grew a ", base N xM" tail when zone bosses started going
+    # through the difficulty curve, and a regex anchored on the closing paren silently reported
+    # "boss never spawned" for all four acts' bosses. A checker must not be brittle about the
+    # cosmetic part of the line it reads.
+    spawned = re.findall(r"Zone boss spawned: (.+?) \((\d+) HP(?:, base (\d+))?", log)
     if zone["boss"]:
         if not spawned:
             bad.append(f"boss '{zone['boss']}' never spawned")
         elif len(spawned) > 1:
             bad.append(f"boss spawned {len(spawned)}x (should be unique)")
         else:
-            got_name, got_hp = spawned[0][0], int(spawned[0][1])
+            got_name = spawned[0][0]
+            # The logged HP is now SCALED; the "base" field carries the authored value. Compare the
+            # base — comparing the scaled number to enemies.json would fail by ~3000x and say
+            # nothing useful, and the ratio is what the balance test already pins.
+            got_base = int(spawned[0][2]) if spawned[0][2] else int(spawned[0][1])
             if got_name != zone["boss"]:
                 bad.append(f"spawned '{got_name}', table says '{zone['boss']}'")
             want = int(boss_hp.get(zone["boss"], -1))
-            if want >= 0 and got_hp != want:
-                bad.append(f"boss HP {got_hp} != authored {want} (floor scaling leaked in?)")
+            if want >= 0 and got_base != want:
+                bad.append(f"boss base HP {got_base} != enemies.json {want}")
     elif spawned:
         bad.append(f"unexpected boss {spawned[0][0]} in a zone with none")
+
+    # FIXTURES. A waypoint that never spawned is fast travel that silently does not exist, and a
+    # missing POI gate is an act entrance you cannot walk through — both are content that simply is
+    # not there, with nothing on screen to say so. Checked against the table rather than by eye.
+    if zone["waypoint"] and "Zone fixture: WAYPOINT" not in log:
+        bad.append("hasWaypoint is set but no waypoint spawned")
+    if not zone["waypoint"] and "Zone fixture: WAYPOINT" in log:
+        bad.append("a waypoint spawned in a zone the table says has none")
+    if zone["poi"] and f"POI GATE -> floor {zone['poi']}" not in log:
+        bad.append(f"POI gate to floor {zone['poi']} never spawned")
+    if zone["ret"] and f"RETURN GATE -> floor {zone['ret']}" not in log:
+        bad.append(f"return gate to floor {zone['ret']} never spawned")
 
     # Quest. A REACH quest completes the moment you arrive (that IS its trigger); the other two
     # are offered on entry and completed by play, which a 6-second boot cannot reach.
@@ -237,6 +263,12 @@ def main():
             extra.append("quest")
         if z["peaceful"]:
             extra.append("peaceful")
+        if z["waypoint"]:
+            extra.append("waypoint")
+        if z["poi"]:
+            extra.append(f"->{z['poi']}")
+        if z["ret"]:
+            extra.append(f"back{z['ret']}")
         draws = re.findall(r"Draw: (\d+)", log)
         if draws:
             extra.append(f"draw {max(int(d) for d in draws)}")
