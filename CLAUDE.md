@@ -231,6 +231,445 @@ effectively never traded for loose loot — losing the only item that can field 
 walking past a drop. NOTE the nuance against the older "never pauses" rule: the bot still never
 stalls, but a full bag now SKIPS an item that is not better than what it would displace.
 
+**Level previewer (`tools/level_preview.py`, 2026-08-03).** Dumps any generated layout as ASCII
+without launching the game — `tools/level_preview.py wilderness --seeds 1-6 --side-by-side`. It shells
+out to an env-gated case in the test binary (`LEVEL_PREVIEW=<style>:<seed>:<size>`, the BALANCE_REPORT
+pattern) which runs the REAL `LevelGen::generate`, so there is no second implementation to drift. The
+glyphs answer the questions you actually have while authoring a layout: `' '` is open sky vs `'.'`
+roofed (the one property an outdoor zone must get right and which is otherwise invisible), `'='` is a
+walk-under slab, `'^'` a jump pad, `'?'` a cell that is neither solid nor floor — a generator bug —
+and `0-9/a-z` mark ROOM CENTRES, since every placement consumer (enemies, shrines, chests, lights,
+bosses) works from those and "the anchor landed inside a rock" has shipped twice
+(VERTICAL_HALL's cover pillar, FOUR_STORY's maze walls). Before it, judging a layout meant booting the
+game and walking around, which is slow, unrepeatable, and useless for comparing seeds.
+
+**THE OVERWORLD — Act 1, "The Blood Buffer to Whitechapel" (2026-08-03).** The town is no longer a
+cul-de-sac: its north gate opens onto a connected outdoor world, a Diablo 2 Act 1 homage that ends at
+a boarded Underground station where the Rogue Monastery would be — the door to a later Hellgate
+London arc. **Post-INFERNO content** (`FreePlay::overworldUnlocked`, a SEPARATE predicate from
+`saveCleared` on purpose: raising `saveCleared`'s "Hell or deeper" threshold would silently strip the
+town and Free-Play from every pre-Inferno hero).
+**A zone is a level on a SENTINEL FLOOR (52-96)** — that one decision is the architecture. The floor
+byte is already the world's identity on the wire (`SV_LEVEL_SEED`) and in the save header, so an
+open world of connected areas costs **no protocol change, no save change for zone identity, and zero
+geometry traffic**: a client rebuilds a zone from the same six bytes (floor, difficulty, seed) it
+already uses for a dungeon floor. Floors 1-50 are the dungeon, 51 the cleared marker, 97/98/99
+arena/town/Source; 52-96 were simply free.
+**Why connected zones and not one big world** — three fixed buffers make the alternative unshippable,
+and none of them announce themselves: the minimap's `s_visited`/`s_pixelData` are 64x64 statics that
+**truncate silently**, the spatial grid projectile collision uses spans only +/-128 m (entities
+outside it become **unhittable**), and the cavern generator hard-bails to BSP above 64x64. On top of
+that the largest dungeon level already runs 455-480 of the 500 draw-call budget. Measured: a zone
+runs **48-80 draw calls** at a locked 60 FPS, so the shape has real headroom.
+**Terrain is SEEDED, landmarks are NOT** (`LayoutStyle::WILDERNESS` + `engine_zone.cpp` anchors).
+The generator is the inverse of every other style — the interior starts OPEN and it ADDS rock clumps,
+because that is what outdoor terrain is, and because an empty plain is the worst case for a
+frustum-only renderer with nothing to occlude. Edge gates, waypoints and POI mouths are stamped after
+the carve on cleared pads, so a landmark can never generate walled in (the bug VERTICAL_HALL and
+FOUR_STORY each shipped). `WILDERNESS` is deliberately absent from the dungeon weight table, pinned
+in both directions by `test_level_gen.cpp`.
+**`enterWorld()` (engine_world.cpp) collapses the four-times-copy-pasted entry ritual** — pools,
+flags, host-slot seed, placement + lane persist, seating, net wiring, seed broadcast. Every omission
+of one of those steps has shipped as a bug, and **`enterTown` was missing the host `NetPlayer` seed**
+(masked only because the menu happens to call `startGame` first); a fifth entry point would have
+multiplied the trap.
+**Waypoints** are `WAYPOINT_ID` world items — the sentinel trick buys spawning, replication and
+server-side validation for free. They are the ONE sentinel that is **not consumed on use**. Discovery
+is **per character**, a `u64` bit per `ZONES[]` row, appended to the per-player save block
+(**SAVE_VERSION 6**; a v5 save reads 0 = "found none", which is right — those heroes predate the
+overworld). The travel list reuses the town portal's menu-over-a-live-world flow (substate **25** —
+23/24 are the Auto-Loot choosers, a collision that would have hijacked character creation).
+**Autoplay STOPS here** (Aaron: the bot's remit ends at Inferno): entering a zone ends the run with
+the orderly logged exit, rather than leaving a bot idling in content it cannot express.
+**EACH ACT DRAWS ITS OWN BESTIARY** (`EnemyDef::act`, `"act": 1|2`; 0 = the dungeon). The acts spawn
+**tier 5** exactly like the deepest dungeon floors, so before this tag the two pools were the SAME
+pool: TristRAM fielded Void Heralds and Act 2's tube-dwellers, and a Zombie Process could turn up on
+Hell floor 45. Filtered in `collectTierDefs` beside `unique` — the one choke every random roster goes
+through — and the `act` parameter is **required, never defaulted**, because a default of 0 is exactly
+how the dungeon would silently start drawing overworld monsters again the day a call site forgets it.
+Pinned in `test_ai_preference.cpp`: each act must keep a rollable pool of its own (an act with an
+empty pool spawns an EMPTY ZONE, which reads as a broken level and nothing else would catch it), and
+the dungeon must keep its deep tier after the acts were carved out of it.
+**Two new EnemyRoles, and the role mask is now `u16`** — the original eight filled every bit of the
+byte. `role` is not on the snapshot wire (a guest learns behaviour by watching), so the widening is
+local: no protocol bump. **ROUT** (D2's Fallen) breaks and runs below a third health, then rallies
+after 3 s and fights to the death — ONE break per lifetime, because a pack that can rout repeatedly
+re-triggers on every hit and the fight becomes a chase with no combat in it. It reuses `AIState::FLEE`
+rather than RETREAT, and that is the whole reason it needs a role: RETREAT auto-exits to CHASE
+whenever a player is inside detectionRange, so an enemy routing FROM the player would turn and charge.
+**SPLITTER** dies into two copies of the enemy its `spawnEnemy` names — the SAME field the breeder
+path reads, with the opposite lifetime (a breeder spawns repeatedly while alive, a splitter once at
+death), so `tickBreeders` skips splitters explicitly or a Merge Conflict sheds halves while you fight
+it. The recursion terminates in one step by construction (the half is a different, non-splitting def)
+rather than by a depth counter JSON could mis-set, and a test pins that plus "the half exists" and
+"the half is in the same act" — an unresolved name would just make the gimmick silently not happen.
+**ROUT cost Entity a dedicated `routTimer`, and that is the lesson.** The first version used
+`kiteTimer` on the reasoning that a fleeing enemy is not being kited — but it is ALSO the summoner's
+curse cooldown AND the CHASE anti-kite accumulator, both rewritten every tick, so the rout fired and
+then never rallied. Measured live, not reasoned about. `sizeof(Entity)` 536 -> **544**; it is a POOL
+struct, never serialized, so growing it costs static memory and nothing on the wire.
+**`enemyType` is now authored, not only inferred.** `inferEnemyType` is a mesh-NAME match table whose
+default is SKELETON — a humanoid limb rig. That is right for the original roster (torsos the rig
+completes) and wrong for every voxel model that already contains its own legs and wings, which is the
+entire overworld bestiary: unread, the Escalator Hound grows a second set of arms and the Rubber Duck
+sprouts legs. All 18 overworld defs author `"enemyType": "generic"` (no rig at all); an absent field
+still falls back to inference, so no existing def changed.
+**A skin's grid is the mesh's REAL filled voxel extent, not the nominal 7x16.** `add_voxel_model`
+derives `tex_w`/`tex_h` from the `filled` set itself (`u = (gx-min_gx+0.5)/grid_w`), so a skin sized
+to the nominal grid is STRETCHED across the model and every carefully placed band lands somewhere
+else. The ten new skins were sized against measured extents (they range 4x4 to 9x16) — measure the
+generator, do not trust the docstring.
+**The bestiary winks, it does not copy.** Four originals whose joke is that the dungeon is software:
+**Zombie Process** (never reaped, one eye still lit), **The Garbage Collector** (a robed reclaimer
+that re-allocates your kills — `["summoner","healer"]`, composed from shipped roles so it costs no
+new code), **Bit Rat** (bit rot: its spine ridge is visibly missing every third voxel and its texture
+degrades to magenta/cyan toward the tail), **Legacy Archer** (deprecated, still firing). Zones spawn
+**tier 5** — post-Inferno heroes would find tier-1 wildlife to be scenery — and a `peaceful` zone
+(TristRAM) spawns none, which is what makes it read as a refuge. Every enemy needs a matching
+`Mini <name>` pet def or `test_pet_item.cpp` fails: the jackpot can roll any enemy.
+**ZONE BOSSES are placed BY NAME, and a named boss must opt OUT of the random roster.**
+`ZoneDef::boss` names one enemies.json entry that `spawnZoneContents` spawns at the zone CENTRE with
+`isBoss` set (health bar, nameplate, loot guarantee) — deliberately not through `spawnFloorBoss`,
+which keys off bosses.json BY FLOOR and expands a room into an arena, neither of which a zone has.
+Four exist: **The Garbage Collector** (55, 1800 HP — D2's Blood Raven), **Griswald, the Unfinished
+Build** (57, 4200 HP — Act 1's finale, in the ruins of the village he used to serve), **The Perpetual
+Commuter** (64, 2600 HP) and **Signal Failure** (66, 5200 HP — the arc's last fight). The floor/
+difficulty scaling every dungeon spawn pays is deliberately NOT re-applied: the defs are authored at
+post-Inferno numbers already.
+An act boss is an ordinary enemies.json row (it needs a mesh, a skin, roles), so **nothing stopped
+its tier's spawn pool from ALSO rolling it** — and nothing did: a single TristRAM held **two**
+Griswalds, Act 2's final boss turned up in an Act 1 field as trash, and both would have appeared on
+deep DUNGEON floors too (they are tier 5). `EnemyDef::unique` (`"unique": true`) is the opt-out, and
+`collectTierDefs` is the single choke that honours it — every random roster in the game (trash
+spawns, VHALL balcony nests, Descent hole snipers, the zone spawner) goes through that one function,
+so the fix lands everywhere at once. The DATA is pinned as tightly as the mechanism
+(`test_ai_preference.cpp`): every zone boss must exist in enemies.json AND be `unique`, every
+`unique` def must be some zone's boss (an unplaced one is dead content that can never spawn at all),
+and every SLAY quest must name a zone boss — otherwise the objective has no guaranteed target and the
+act cannot be finished. TristRAM is **not** peaceful: D2's Tristram is a massacre you walk into, so
+the one place the parody could not afford to be safe isn't.
+**Waypoints follow D2's Act 1 placement, which is a design choice and not an oversight**: Cold
+Storage, the Field of Unmerged Branches, the Deadlock Woods and Whitechapel Terminal carry one —
+**the Blood Buffer and TristRAM deliberately do NOT**. D2's Blood Moor has none because the first
+walk out of town is the tutorial, and its Tristram has none because you arrive by portal and leave in
+a hurry. Both hold here for the same reasons.
+**QUESTS (`game/quest_def.h`)** are D2's Act 1 chain, beat for beat, renamed: *Free the Allocation*
+(clear the Den), *The Rebaser* (the graveyard keeps bringing its history back), *Restore the
+Toolchain*, ***The Search for Deckard Cache*** (the pun the act was built around, and now the act's
+CLIMAX — a SLAY on Griswald in the TristRAM ruins), and *Terminal Access* at the station, a REACH
+that is deliberately the EPILOGUE and not a second climax competing with the first. Both halves of
+that ending are pinned by test, because an act whose last beat is "arrive somewhere" has no payoff
+and an act with two finales has a muddled one. Deliberately NOT a quest engine — no dialogue, no journal UI, no prerequisite
+graph. Each quest is a place, one of three triggers the engine can already observe (CLEAR_ZONE /
+SLAY / REACH), and a per-character bit in the same v6 save tail as the waypoint mask (widened while
+v6 is still unreleased, which is free; adding a v7 later would mean a second conditional read in
+every reader forever). The SLAY hook sits at `handleDeathPreamble` — the ONE choke every enemy death
+funnels through — so no kill route (a proc, a pet, a thorns reflect) can miss an objective, and
+CLEAR_ZONE is POLLED rather than event-driven because "the last one just died" is a property of the
+pool, not of any single death. Offers and completions both LOG as well as printing to chat: a
+chat-only line is invisible to a soak, which is exactly how the credits park and the dead legendaries
+stayed hidden.
+**The town's NORTH GATE is always carved, for every hero** — the town is deterministic geometry that
+host and client each rebuild from the sentinel seed, so making the opening conditional on a save's
+unlock state would let two peers build DIFFERENT towns and desync the moment one walked where the
+other saw a wall. The Inferno check lives in the host-authoritative transition instead, with a
+throttled chat line so a locked gate explains itself rather than reading as a bug.
+**ACT 2 — "HELLGATE: LOCALHOST" (floors 60-66).** The Hellgate London parody, entered by the
+ESCALATOR at Whitechapel Terminal (its `poiFloor`, not a north edge — you descend into the
+Underground). London fell, the survivors live in the stations, and the tunnels belong to whatever came
+through the rift: *The Northbound Stack* -> **Null Terminus** (the hub: the last platform with the
+lights on, the act's only `peaceful` ground) -> *The Circle Line (Infinite Loop)* -> *Threadneedle
+Street (Unsafe)* -> *Bank Station (Overdrawn)* -> *Piccadilly Circus (Buffer Overflow)* -> **Hellgate:
+Localhost**. London's own names are half programming puns already — a terminus IS a terminal, the
+Circle Line IS a loop, Threadneedle Street is an address in the City — so the parody mostly just has
+to notice.
+**Zones now choose their TERRAIN** (`ZoneDef::terrain`, an intent enum mapped to a LayoutStyle in
+engine_zone.cpp) instead of inferring it: `TUNNEL` -> GAUNTLET, because a tube line genuinely IS a
+serpentine chain of platforms, and `STATION` -> HUB, a concourse with passages off it. Reusing the
+shipped generators keeps every layout invariant they are already tested for, rather than writing an
+"underground" generator from scratch. `ZoneDef::underground` decides whether the ceiling is STRIPPED
+(surface: sky + daylight clear colour) or KEPT — after a whole act of open country, the roof coming
+down is the tonal shift into Act 2, and it is what makes the tunnels claustrophobic rather than merely
+dark. Act 2 keeps ONE surface zone (Threadneedle Street) so the contrast still lands.
+**Act 2 quests** follow Hellgate's shape: *Signal Restored* (find the survivors), *Break the Loop*,
+*Insufficient Funds* (Bank), and ***Kill -9*** at the rift. `Quest::actComplete` is now ACT-SCOPED —
+a global "all quests done" check would have silently stopped announcing Act 1 the day Act 2's quests
+were added, which is the quiet kind of regression a growing chain invites.
+**Act 2 bestiary**, same wink-not-copy rule: **The Perpetual Commuter** (a demon in the ruin of a
+suit, fused to its briefcase, still walking the route), **Mind The Gap** (the thing that lives in the
+platform gap — an `ambush` enemy, so it is literally scenery until nobody is looking at it, and the
+Underground warning line is painted along its lip), and **Signal Failure** (a hovering broken signal
+mast, the act's rift boss, showing red AND green at once because that is what a signal failure is).
+Act 2's roster fills out with **Escalator Hound** (a `charger` whose spine is a run of comb-plate
+steps — it only ever runs one direction), **Turnstile Wraith** (a spectre fused to a ticket barrier,
+still trying to touch in; a `ranged_caster` whose hit SLOWS you, because being held at the barrier is
+the joke), **Fare Evader** (a `rout` imp caught mid-vault, which bolts the moment it is hurt) and
+**Rail Replacement** (the `shield_bearer` brute of rail and sleeper — the service that replaces the
+service). Act 1 likewise gains **Null Pointer** (D2's Fallen; the head is a hollow ring you can see
+the level through, and it `rout`s), **Hot Reloader** (the Fallen Shaman: a `summoner` that breeds
+Null Pointers straight back in), **Core Dump** (the Foul Crow, trailing the memory it spilled), and
+two ORIGINALS — **The Merge Conflict** (two mismatched half-bodies on a `<<<<<<<` seam, the palette
+literally a diff, which `splitter`s into two **Detached HEAD**s — a severed head that turns out to be
+a PINK UNICORN's, muzzle and horn and a six-band RAINBOW trailing where the neck should be, because
+the git joke lands harder when the head is absurd. Its rainbow is built one band PER GRID ROW on
+purpose: `add_voxel_model` maps the skin by (gx, gy), so a band sharing a row with anything else
+would bleed its colour across it) and **The Rubber Duck** (enormous,
+serene, an `aura` enemy, coloured exactly like the bath toy — you are supposed to explain your
+problem to it).
+**`MESH_DEF_CAPACITY` 112 -> 128**: the seven new enemy meshes pushed the registry past its cap, and
+the `static_assert` in `asset_manifest.h` is what caught it. Without that guard the loader silently
+drops the TAIL of the table and those enemies render as fallback CUBES — the same failure that once
+turned six limb meshes into cubes and gave every spider mandibles.
+**Dev doors:** `--zone <52-96>`. Layout iteration without booting the game: `tools/level_preview.py`.
+
+**ADVERSARIAL REVIEW OF THE OVERWORLD WORK (2026-08-05) — three real defects, all the same shape.**
+Aaron asked for a review of the uncommitted work; attacking it found one severe bug and two leaks,
+and every one of them was a value that lived in two places instead of being derived from one.
+**(1) ZONE BOSSES WOULD HAVE ONE-SHOT THE PLAYER.** Making them scale (above) was right, but it
+exposed that their authored DAMAGE was wrong by the game's own convention. The dungeon's bosses carry
+**3.7-37.4x trash HP but only 0.78-2.22x trash DAMAGE** — the late ones (Grim Reaper, The Dungeon
+Engine, Korvath) hit for LESS per swing than a mob, deliberately: a boss is an attrition fight and
+the game is balanced to ~1.8 hits-to-die from ordinary trash, so a hard-hitting boss is simply a
+one-shot. The zone bosses were authored at **2.36-4.03x**. Retuned into the dungeon's own band
+(damage 1.50-2.00x, HP 12-35x, Signal Failure kept below The Dungeon Engine's 37.4x ceiling) and
+pinned by a test that reads the RATIOS off the live rosters rather than hard-coding them; sabotage
+(restoring Signal Failure's 145 damage) fails it by name. It went unnoticed because the bosses had
+been spawning UNSCALED — harmless for the wrong reason.
+**(2) THE HELLFORGE SURCHARGE LEAKED INTO THE ACTS.** `m_level.lavaFloor` is cleared ONLY by
+startGame, and it feeds `hellforgeHpMult`/`hellforgeDamageMult` inside `spawnFloorEnemies` — the very
+path a zone spawns through. Reach the overworld after a molten dungeon floor and every zone enemy
+silently took +50% HP and +30% damage. INTERMITTENT by construction (it depends where you had just
+been), which is the worst kind. Measured: zone hpMult **3038 -> 4557** with the flag stale. Now
+cleared in `worldClearLevelFlags`, exactly like the town portal that leaked there a day earlier.
+**(3) LAYOUT STYLE was inherited too.** `m_level.layoutStyle` was never set by a zone, so a zone
+behaved like whatever dungeon floor preceded it — the AI grants CAVERN-style open floors a x1.5
+detection bubble, and the nav/autoplay paths branch on the stacked styles. `buildZoneLevel` now
+records the style it actually generated, and the shared clear resets it for town/arena/Source.
+**Two smaller hardenings from the same pass:** `atomicReplace` now REFUSES rather than truncates when
+a save path is too long (a truncated `.bak` name could have collided two slots' backups), and its
+comment no longer overstates the guarantee — nothing in the game reads `.bak`, so that recovery is
+manual, not automatic. And `queryNeighbors` asserts its buffer is `SGRID_QUERY_MAX`: overflow is
+appended LAST, so a caller passing a smaller array would truncate away precisely the entities the
+overflow list exists to rescue, silently restoring the unhittable-enemy bug.
+**The pattern worth keeping:** every defect in this pass was one fact stored twice — trigger band vs
+arrival inset, arrival position vs cleared ground, boss ratios vs authored numbers, world state vs
+the entry that owns it. The fixes that hold are the ones that DERIVE the second from the first.
+
+**RESPAWNING OUT OF BOUNDS IN A ZONE — a regression from the ping-pong fix (2026-08-05).** Moving
+the arrival point clear of the re-trigger band (2.5 -> `EDGE_ARRIVE_INSET` 5 m) pushed it PAST the
+ground the gate carve had cleared: `zoneOpenGate` opened the border cells and then cleared a single
+pad two cells in, so anything beyond that was whatever the generator put there. Measured across all
+15 zones: TristRAM's north gate and the Circle Line's west gate dropped the player INSIDE solid rock,
+and a body spawned in geometry is shoved out — through the border. The gate now carves a CORRIDOR
+from the opening inward to `EDGE_ARRIVE_INSET + 1` cell, derived from the same constant so moving the
+arrival can never again outrun the ground cleared for it. Verified over every reachable gate in all
+15 zones (edges with NO_LINK are skipped — no gate is carved and nobody can arrive through one):
+**0 solid arrivals**, down from 2.
+The shape of this is worth remembering: the first fix was correct AND introduced a second bug,
+because it changed a position without changing the geometry that position depends on. Two constants
+in different files described the same thing.
+**The HUD names the ZONE outdoors** rather than printing "Floor 57". The floor byte is a sentinel
+identifying which world this is, not a depth, so a floor number is meaningless to a player standing
+in TristRAM. The label buffer went 32 -> 64 bytes with it: the longest name ("The Den of Evil
+(Franchise Location #2)") is 39 characters and snprintf would have truncated it safely but visibly.
+
+**THE OVERWORLD PING-PONGED BETWEEN ZONES 52 TIMES A SECOND (found from Aaron's report, fixed
+2026-08-05).** "I get teleported around when walking and the enemies are doing that lightspeed thing
+around me, ignoring me." Two symptoms, ONE cause, and it is an off-by-epsilon:
+`EDGE_TRIGGER_BAND` is 2.5 m and the edge test is `p.z <= EDGE_TRIGGER_BAND`, while `zoneGatePos`
+placed an arriving player at a literal `2.5` — EXACTLY on the threshold. So arrival satisfied the
+trigger on its first tick and sent the player straight back out through the gate they had just come
+through, which by definition links back where they came from. Measured with a probe that marches the
+player north: **1290 transitions in 25 s** (52 full world rebuilds per second) against **2** with the
+fix. Both symptoms fall out of that one loop — the player is re-placed 52x/s (teleporting), and every
+rebuild RESPAWNS the enemy pool at fresh positions in a fresh IDLE state, which is exactly "moving
+lightspeed around me and ignoring me". It also explains assorted overworld weirdness that looked like
+separate bugs.
+Fixed in two layers, deliberately. The ARITHMETIC: arrival is now `EDGE_ARRIVE_INSET`
+(= 2 x EDGE_TRIGGER_BAND), derived from the band with a `static_assert` that it exceeds it, so the
+two can never drift apart again — the literal `2.5` duplicated in a second place is what broke it.
+The ROBUSTNESS: `m_zoneEdgeArmed` DISARMS transitions on every zone entry and re-arms only once the
+player stands clear of every border band. Geometry alone would be enough today; the latch is what
+survives a future gate position, a different grid size, or a knockback that leaves a player inside a
+band on arrival. This is the first bug in the overworld found by simply WALKING it — the surface that
+has been flagged as untested since the acts were built.
+
+**THE TOWN'S DUNGEON PORTAL FOLLOWED YOU INTO EVERY ZONE (found from Aaron's report, fixed
+2026-08-04).** "There is an entrance to the dungeon in every area." `m_level.townPortalActive` was
+set by `enterTown` and cleared ad-hoc in `startGame` and `enterArena` — but NOT in
+`worldClearLevelFlags()`, the shared step whose entire purpose is to turn every "which special world
+am I in" flag off. So the one entry that reached a world THROUGH that function and did not re-assert
+the flag — `enterZone` — inherited it: the town's to-dungeon portal stayed live, rendered and
+interactable, in all fifteen zones of both acts, and taking it would have launched a dungeon run
+from inside Act 1.
+This is the SECOND leak of exactly this shape; the function's own comment already cites the exit
+portal staying live in the town. That is the argument for the single clear rather than per-site
+ones: `enterTown` re-asserts the flag a few lines later, so putting it in the shared clear costs
+nothing and every future entry gets it off for free. Verified by a discriminating test rather than a
+convenient one — `--zone` runs `startGame` first, which already zeroes the flag, so the obvious
+check passes either way; forcing the flag TRUE immediately before `enterZone` (which is what
+arriving from the town does) shows 0 with the fix and 1 with it removed.
+
+**THE ROGUE TELEPORTED CONSTANTLY — a mobility skill was being used as a damage skill (fixed
+2026-08-04).** Aaron, watching a Rogue on VERTICAL_HALL: "he teleports and changes doctrine all the
+time." Two separate causes, and the first is a general rule the code already knew but applied to only
+one rail.
+**(1) The in-range skill dump had no mobility carve-out.** `decideCombat`'s "every class dumps
+biggest-first" loop excluded COUNTER skills and nothing else, so the highest castable slot won even
+when that slot was a blink. The Rogue carries **SHADOW_STEP — 15 m, 3 s cooldown — in slot 1**, so
+once Shadow Dance and Poison Cloud were cooling it became "biggest castable" every three seconds and
+threw the bot 15 m off the enemy it was mid-fight with, forever. The EQUIPMENT rail had withheld
+Phase Dash in range since it shipped, for exactly this reason ("blinking 6 m while already on top of
+an enemy overshoots past it") — class skills never got the same treatment.
+The rule is **DISTANCE, not category**: `BotView::skillGapDist[]` now carries `SkillDef.distance`
+beside `skillIsGapClose[]`, and a gap-close is withheld from the IN-RANGE dump only when its blink is
+longer than the weapon's reach. A Paladin's 3 m dash-smite is his filler and keeps firing at blade
+range; excluding gap-closes wholesale would have muted him instead. The out-of-reach gap-close branch
+is untouched — that is what the skill is FOR. Measured on the same 90 s VHALL window: kills **28 ->
+40**, deaths **7 -> 5**. Pinned by two tests and verified by sabotage (removing the guard makes the
+bot pick the 15 m blink and fails them by name).
+**(2) The better-build nudge is silent under autoplay.** "Better gear for X — switch builds in the
+Inventory" is advice to a human who is not at the controls: the bot re-gears itself but never changes
+build CELL, so it can never act on it. Worse, the re-arm guard remembers only the LAST suggestion, so
+two builds that leapfrog each other pass it every time — measured on the Rogue as Glass Cannon Melee
+-> Glass Cannon Ranged -> Tanky Melee, a permanent stream. Suppressed while the bot is in control
+(3 lines -> 0). The underlying oscillation still affects HUMAN players and is untouched: the guard
+wants to key on the notified SCORE, not just the cell.
+
+**SWITCH SAVES SILENTLY STOPPED OVERWRITING AFTER THE FIRST ONE (found from Aaron's report,
+fixed 2026-08-04).** "I exited with Save and Quit but it didn't overwrite the old save." Every
+character save is written to a temp file and promoted over the real slot by
+`Platform::atomicReplace`, and `saveCharacter` treats a false return as "keep the previous save" —
+so a failed promotion is INVISIBLE at runtime and only shows up when the player reloads.
+`atomicReplace` special-cased `_WIN32` (where `rename` will not clobber an existing file, hence
+`MoveFileEx`) and used plain POSIX `rename` everywhere else. **The Switch writes to a FAT32 SD card
+through libnx, which has the WINDOWS semantics, not POSIX**: renaming onto an existing file fails.
+So the FIRST save of a slot worked — no destination yet — and every save after it failed the replace
+and kept the old file. The bug is invisible to a single round trip, which is why it survived: you
+have to save the same slot TWICE to see it.
+Fixed with a FAT-safe fallback that runs only when the plain rename fails, so desktop keeps the
+genuinely atomic path: move the existing file ASIDE to `.bak`, move the temp into place, drop the
+`.bak` — at every instant either the destination or the backup exists. The obvious one-liner
+(`remove(dst)` then rename) was rejected because it has a window where the only copy of the save is
+gone. **`atomicReplace` moved to `platform/atomic_file.h`** (header-only, SDL-free) purely so it
+could be TESTED: it used to live in `user_paths.cpp`, which pulls in SDL for the pref-path lookup,
+and the test binary has no SDL — so the one primitive every save depends on had no test at all.
+`tests/platform/test_atomic_replace.cpp` pins overwrite, five repeated saves (the bug starts at the
+second), and that a failed promotion leaves the existing save intact; verified by SABOTAGE — making
+the header refuse to rename onto an existing file reproduces the Switch failure exactly and fails
+the tests by name.
+
+**OCCLUSION CULLING (`world/visibility.h`, 2026-08-04) — the fix that DID work.** The renderer culls
+by FRUSTUM only, which on a maze or a stacked hall rejects almost nothing: everything in front of you
+is "visible" even when a wall or a storey's floor is in the way. `Visibility` answers "might this be
+seen from the eye" with `Raycast::cast` — the SAME slab-aware grid DDA the melee LOS gate, the enemy
+AI and the bot already use, so there is no second notion of visibility to drift, and platform slabs
+are understood for free (a storey below you is correctly hidden by the floor between).
+Two consumers: `LevelMeshSystem::submitAll` (per SECTION, 9 sample points — its `grid`/`eye` args are
+optional, so town/arena keep the frustum-only path) and the entity render loop (per ENTITY, 5 points
+— centre, head, feet and a LATERAL pair taken perpendicular to the line of sight, which is what keeps
+a shoulder showing through a doorway from popping).
+**It is conservative by construction, because the failure mode inverts**: instead of drawing too much
+you make an enemy VANISH. Hence a `MIN_CULL_DISTANCE` (6 m) inside which nothing is ever culled, ANY
+sample passing means visible, degenerate inputs answer visible, and **4-frame hysteresis** in both
+consumers so a single unlucky sample on a moving body cannot blink it out. `tests/world/
+test_visibility.cpp` pins the safe direction specifically — shoulder-through-a-doorway, corner-of-a-
+box, close-range-behind-cover and degenerate inputs must ALL come back visible.
+**Measured, paired A/B from ONE binary (`VIS_CULL_OFF=1`), both arms run concurrently, ~60 samples:**
+VHALL draw calls median **332 -> 160**, p90 **607 -> 237**, max **777 -> 361**; FOUR_STORY median
+**416 -> 183**, p90 **621 -> 321**, max **702 -> 369**. Roughly halved everywhere, and the PEAK is
+back inside the 500 budget on both stacked styles (it was 55% over). FPS and the CPU profile are
+unchanged — the added rays are a grid DDA, the same thing the bot already runs 16 of per tick.
+**Still to confirm ON DEVICE**: every number here is desktop draw-call accounting. The Switch was not
+on the homebrew menu, so the handheld frame rate this was meant to fix has never been measured before
+OR after — and the docked number, which is what would tell CPU-submission-bound from GPU-bound, has
+never been taken at all (the Switch CPU runs at 1020 MHz in BOTH modes, so a handheld-only drop
+cannot be submission cost). **A depth pre-pass (the other half of the plan) is deliberately NOT in
+yet**: it doubles draw calls to kill overdraw, and the cull has already removed most of the hidden
+geometry that WAS the overdraw, so adding it blind risks repeating the Y-banding mistake. Measure the
+device first.
+
+**SWITCH HANDHELD RUNS THE STACKED FLOORS AT 30 FPS — profiled 2026-08-04, and the obvious fix
+MEASURED WORSE.** Aaron reported it and asked for a real fix rather than a band-aid. Profiling
+settles WHERE the frame goes, and it is not where it looked.
+**It is not the CPU, and it is not Autoplay.** Across VERTICAL_HALL / FOUR_STORY / a flat floor the
+sim costs `Update` 0.03-0.11 ms, `AI` 0.04-0.19 ms, `Projectiles` ~0.01 ms. Even at a Switch CPU's
+~8x disadvantage that is ~2 ms of a 33 ms budget, bot included. The enemy count hurts as DRAW CALLS,
+not as simulation.
+**It is draw calls, and the level's frustum cull rejects literally nothing.** Level submeshes
+submitted per second are PERFECTLY CONSTANT — 5220 on VHALL, 3300 on FOUR_STORY, identical every
+second no matter where the camera points (87 and 55 per frame). The cause is structural: a section
+is 16x16 cells in XZ but its AABB spans the WHOLE floor height, so on a stacked floor the camera is
+inside the box and the test can never fail. Totals reached **548 draw calls on FOUR_STORY and 532 on
+VHALL** against a 300-500 budget, while a flat floor sits at 130-160 — and handheld clocks the GPU
+~2.5x below docked, which is the shape of "docked fine, handheld half".
+**The Y-BANDED SECTION SPLIT WAS IMPLEMENTED, MEASURED, AND REVERTED — do not retry this shape.**
+The idea: band sections by storey pitch (3 m) so each AABB is tight in Y and the frustum can reject
+storeys the camera is not on; flat floors produce one band and are untouched. Paired A/B, ONE binary
+with a `BAND_OFF` env switch, both arms run CONCURRENTLY so GPU load is symmetric, ~52 samples each:
+VHALL median **273 -> 281**, p90 **409 -> 481**, max **586 -> 662**; FOUR_STORY median **247 -> 365**,
+p90 **484 -> 714**, max **620 -> 924**. Worse at every percentile, ~48% worse on the Descent. The
+reason is plain in hindsight: splitting a section multiplies its per-material submeshes by the band
+count (9 -> 36 sections on FOUR_STORY), while a 16x16 m footprint at 3 m band height is so flat that
+a 60-degree vertical frustum swallows every band within ~10 m — so the draw calls multiply and
+almost nothing is ever rejected. **Tighter bounds do not help when the camera can see all of them.**
+**Where the real fix has to come from, per the same measurements:** entity submits dominate —
+**165 draw calls per frame from 114 entities** on FOUR_STORY (vs 55 for the whole level), because a
+body plus each articulated limb is its own draw call. Batching/instancing entities that share a mesh
+and material, or tightening the existing limb LOD, targets the actual majority of the frame; level
+geometry cannot get under budget on its own. **Still unverified on the device**: the console was not
+on the homebrew menu, so every number here is desktop draw-call accounting, and it remains possible
+the handheld limiter is fill rate rather than draw-call count — which would point somewhere else
+again. Get a baseline from the device before the next attempt.
+
+**TWO SILENT-DROP BUGS, both found by soak14's warning stream (2026-08-04).** Neither was new; both
+had been quietly losing things for a long time, and both were logged at a level nobody reads.
+**(1) The spatial grid made enemies UNHITTABLE.** Projectile collision queries `SpatialGrid`
+instead of scanning the pool, so an entity the grid does not return cannot be shot. It lost them two
+ways: a cell that filled past `SGRID_PER_CELL` (16) discarded the remainder, and an entity outside
+the grid's +/-128 m span was skipped entirely. Measured: **5643 overflow events in 3 h across 7 of 9
+classes, up to 15 entities at once** — a tight pack was intermittently immune to every projectile in
+the game, reported only by a debug-build `LOG_WARN`. There was a SECOND truncation on the same path:
+the projectile candidate buffers were a hand-typed `u16 nearby[72]` under the comment "3x3 cells x 8
+per cell max" and stayed 72 when `SGRID_PER_CELL` was raised to 16, so a dense 3x3 block (144) was
+silently halved on every query. Fixed with an **overflow list** every query appends — cell cap and
+world span now affect PERF, never visibility — and `SGRID_QUERY_MAX` (derived, `9*SGRID_PER_CELL +
+MAX_ENTITIES`) sizes the buffers, so they cannot drift from the grid again. Pinned by
+`tests/world/test_spatial_grid.cpp` (pack a cell, stand outside the world, do both, kill half the
+pack) — all four fail on the old code by construction.
+**(2) The world-item pool discarded the NEW drop.** `MAX_WORLD_ITEMS` is 64 and legendaries/mythics
+NEVER despawn, so a deep floor accumulates them until every slot is taken — and from then on
+`spawn()` refused whatever arrived next, which is as likely to be a mythic as one of the sixty
+commons sitting there waiting out a 60 s timer. **1448 losses in 3 h**, entirely on deep floors (a
+class that never left Normal saw zero). Now a **STRICT UPGRADE** eviction, mirroring the backpack's
+`autoEvictWorst`: make room by dropping the cheapest thing present, but only when it is genuinely
+worse. Equal rarity is declined — equal is not better, and allowing it re-creates the churn shape
+that once respawned one item 699 times in 26 minutes. Sentinels (shard/shrine/chest/stash/waypoint/
+gate) and pet consumables are never evictable, which is why `spawn()` gained an optional def table;
+`spawnEssential` now shares the same `findEvictable` ranking instead of open-coding a second,
+lifetime-only one that would have taken the Source shard's slot first. **No wire change** —
+`MAX_WORLD_ITEMS` is in `SnapWorldItem`'s layout, so raising the cap would be a PROTOCOL bump and is
+a separate decision; the policy fix needs neither.
+
+**TOP-OF-TABLE PAYOUT HALVED (2026-08-04, Aaron's call).** Legendary base 2% -> **1%**, ramp
+0.5 -> **0.25%/level**, ceilings 3/4.5/6/7.5 -> **1.5/2.25/3/3.75%** per difficulty tier, and
+`MYTHIC_SHARE_OF_LEGENDARY` 25% -> **20%** so the top rarity falls by more than the halving alone
+(Inferno mythic 1.875% -> 0.75%). All four numbers are named constants in `item.h` and
+`ItemGen::legendaryCeiling(tier)` is shared by the roll AND by the test that pins it — the ceiling
+used to be the literal `7.5f` in both places, which is exactly how a rate change leaves a stale
+assertion passing for the wrong reason. This also relieves bug (2) above at the source: fewer
+never-despawning legendaries means the 64-slot pool saturates far more slowly.
+**It exposed a real content gap, which was PRE-EXISTING.** The balance lab's "every build cell
+fields a weapon" test started failing — but measured across 1200 windows the MAGIC column starves
+**5.7% of the time on the OLD rates and 6.7% on the new**, so the cut revealed a thin spot rather
+than creating one (the test's 5 fixed trials had simply never landed on one). Cause is structural,
+not a band gap: the Magic column is served by a SINGLE weapon subtype (`wand`, 6.3 total dropWeight)
+while Melee spans four subtypes (21) and Ranged nine (43) — so a drop window can contain no wand at
+all. Fixed by re-weighting the non-legendary wands **x3** (relative weights preserved — Arcane Staff
+was deliberately 0.7), which puts the Magic column at 18.9 against Melee's 21. Measured sweep:
+starvation **66 -> 12 -> 2 -> 0** per 1200 windows at dropWeight 1.0 / 1.6 / 2.2 / 3.0. The trade is
+that every class now sees more wands in the general loot stream, since drops are not class-filtered.
+
 **Balance lab.** `tests/balance/` holds a repeatable balance model (spec:
 `docs/superpowers/specs/2026-07-22-balance-lab-design.md`): typical-equipment player power
 (Monte-Carlo through the real `ItemGen`/`BuildScore`/`Inventory` code) vs enemy/boss curves

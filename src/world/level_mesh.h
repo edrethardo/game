@@ -9,6 +9,10 @@
 #include "world/level_grid.h"
 
 static constexpr u32 SECTION_SIZE = 16; // cells per section in X and Z
+// Upper bound on sections the occlusion cull keeps hysteresis state for. Sized above the engine's
+// MAX_LEVEL_SECTIONS rather than including engine.h — the mesher must not depend on the engine.
+// A section past this bound simply skips the cull and is always drawn, which is the safe direction.
+static constexpr u32 MAX_TRACKED_SECTIONS = 128;
 // One submesh per distinct material in a section. Bumped 8→12 to leave room for the extra
 // prop materials (iron/bone/wood) that scatter decorations bake into floor sections on top
 // of the floor/wall/ceiling materials already present. See LevelMeshSystem::addPropMesh.
@@ -47,8 +51,12 @@ namespace LevelMeshSystem {
 
     // Submit all sections to Renderer (frustum-culled via bounds).
     // Uses MaterialSystem to look up textures per submesh.
+    // `grid`/`eye` enable the OCCLUSION cull: a section neither of whose sample points can be seen
+    // from the eye is skipped entirely, along with all of its submeshes. Pass nullptr for the
+    // frustum-only behaviour (town, arena, anything without a meaningful occluder set).
     void submitAll(const LevelSection* sections, u32 count,
-                   const Shader& shader);
+                   const Shader& shader,
+                   const LevelGrid* grid = nullptr, Vec3 eye = {0, 0, 0});
 
     // Destroy all GPU resources in sections array.
     void destroyAll(LevelSection* sections, u32 count);

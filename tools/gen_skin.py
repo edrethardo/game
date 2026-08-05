@@ -42,6 +42,228 @@ def write_png(path, width, height, pixels):
 # Eye colors are muted because they show on all faces of the voxel.
 # ---------------------------------------------------------------------------
 
+def skin_griswald():
+    """Grid: x=[-6,4] (w=11), y=[0,14] (h=15). Matches gen_griswald.
+
+    ELEVEN columns — the hammer and anvil on his left reach out to gx=-6, and a 9-wide skin was
+    cropping them off. Fifteen rows: py 0-4 the legs and anvil, 5-11 the body and arms, 12-14 head.
+
+    Palette: the left half is smith's iron and forge-glow; the RIGHT half is the unfinished build —
+    raw magenta placeholder, the colour of an asset that never resolved. The seam is at px 5-6.
+    """
+    w, h = 11, 15
+    p = {}
+    iron    = (88, 84, 88, 255)
+    iron_d  = (60, 58, 62, 255)
+    apron   = (96, 62, 40, 255)
+    forge   = (238, 140, 46, 255)
+    missing = (255, 0, 220, 255)      # the unbuilt half
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = missing if px >= 6 else iron
+    for py in range(0, 5):
+        for px in range(0, 6): p[(px, py)] = iron_d    # legs + anvil, in shadow
+    for py in range(5, 10):
+        for px in range(1, 6): p[(px, py)] = apron     # the smith's apron
+    for px in range(0, 3): p[(px, 3)] = forge          # forge glow off the anvil
+    for px in range(5, 8): p[(px, 13)] = forge         # the eyes, half-lit
+    p[(5, 7)] = (245, 240, 236, 255)                   # the seam itself, marker-white
+    p[(5, 9)] = (245, 240, 236, 255)
+    return w, h, p
+
+def skin_perpetual_commuter():
+    """Grid: x=[-3,4] (w=8), y=[0,14] (h=15). Matches gen_perpetual_commuter.
+
+    Eight columns (the briefcase fused to its right hand reaches gx=+4) and fifteen rows: py 0-4
+    trouser legs, 5-11 the suit, 12-14 what is left of the head.
+
+    Palette: the ruin of a good suit — charcoal gone grey, a tie still knotted, and the briefcase
+    column in cracked oxblood. He has been walking this route since before the gate opened.
+    """
+    w, h = 8, 15
+    p = {}
+    suit   = (62, 62, 70, 255)
+    suit_d = (44, 44, 50, 255)
+    shirt  = (176, 172, 164, 255)
+    tie    = (128, 40, 44, 255)
+    case   = (96, 52, 40, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = suit
+    for py in range(0, 5):
+        for px in range(w): p[(px, py)] = suit_d       # trousers
+    for py in range(6, 11): p[(3, py)] = shirt         # shirt front
+    for py in range(6, 9):  p[(3, py)] = tie           # and the tie over it
+    for py in range(3, 12): p[(7, py)] = case          # the briefcase column
+    for px in range(2, 5): p[(px, 13)] = (108, 96, 84, 255)   # face
+    p[(2, 13)] = (218, 120, 40, 255)                   # one ember eye
+    return w, h, p
+
+def skin_mind_the_gap():
+    """Grid: x=[-3,3] (w=7), y=[0,6] (h=7). Matches gen_mind_the_gap.
+
+    Seven rows, not sixteen — it is a low thing that lives in the platform gap, so the warning line
+    and the grate teeth have to sit in the bottom half of a SEVEN-row grid or they ride up onto its
+    back. py 0-1 is the lip, py 2-4 the maw, py 5-6 the hunched top.
+
+    Palette: platform concrete and grimy steel, with the ONE flash of Underground yellow along the
+    lip. The eyes are the only warm thing in the slot.
+    """
+    w, h = 7, 7
+    p = {}
+    concrete = (104, 102, 98, 255)
+    steel    = (74, 78, 82, 255)
+    warn     = (226, 184, 32, 255)
+    maw      = (16, 14, 14, 255)
+    ember    = (232, 96, 40, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = concrete
+    for px in range(w): p[(px, 0)] = steel        # the lip itself
+    for px in range(w): p[(px, 1)] = warn         # the painted warning line
+    for px in range(w):                           # grate teeth over the dark
+        p[(px, 2)] = steel if px % 2 == 0 else maw
+        p[(px, 3)] = maw
+    p[(1, 3)] = ember; p[(5, 3)] = ember          # eyes in the dark
+    for py in range(5, 7):
+        for px in range(2, 5): p[(px, py)] = steel
+    return w, h, p
+
+def skin_signal_failure():
+    """Grid: x=[-3,3] (w=7), y=[1,14] (h=14). Matches gen_signal_failure.
+
+    Note the Y OFFSET: the mesh starts at gy=1, so py = gy-1. Fourteen rows, not sixteen — it is a
+    hovering mast, so its lamps sit at py 11-13 and the arms at py 5-9. Authored at 7x16 those
+    landed low and the red/green lamps blurred into the mast.
+
+    Palette: rusted signal steel showing RED AND GREEN AT ONCE, because that is what a signal
+    failure is — the one thing it must never do.
+    """
+    w, h = 7, 14
+    p = {}
+    steel   = (92, 88, 84, 255)
+    rust    = (124, 74, 44, 255)
+    red     = (232, 48, 40, 255)
+    green   = (60, 226, 96, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = steel
+    for py in range(0, 5):
+        for px in range(w): p[(px, py)] = rust         # the corroded mast
+    for px in range(w): p[(px, 5)] = green             # lower arm reading CLEAR
+    for px in range(w): p[(px, 9)] = red               # upper arm reading DANGER
+    for py in range(11, 14):
+        for px in range(w): p[(px, py)] = steel
+    p[(2, 12)] = red; p[(4, 12)] = green               # both lamps lit at the head
+    return w, h, p
+
+def skin_zombie_process():
+    """Grid: x=[-3,3] (w=7), y=[0,14] (h=15). Matches gen_zombie_process.
+
+    FIFTEEN rows, not sixteen: py 0-4 legs, 6-10 torso, 12-14 head. Authored against a 16-row grid,
+    every band sat a fraction high and the lit eye drifted off the face.
+
+    Palette: grey-green necrotic flesh over rotted cloth, and ONE eye still lit — the process was
+    never reaped, so something in it is still running.
+    """
+    w, h = 7, 15
+    p = {}
+    flesh   = (118, 132, 104, 255)
+    flesh_d = (86, 98, 76, 255)
+    cloth   = (72, 68, 62, 255)
+    lit     = (120, 255, 140, 255)   # the eye that is still on
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = flesh
+    for py in range(0, 5):
+        for px in range(w): p[(px, py)] = cloth      # rotted trousers
+    for py in range(6, 11):
+        for px in range(w): p[(px, py)] = flesh_d    # torso, in shadow
+    for px in range(w): p[(px, 11)] = flesh          # neck
+    p[(2, 13)] = lit                                 # the one live eye
+    p[(4, 13)] = (32, 30, 28, 255)                   # the dead socket
+    return w, h, p
+
+def skin_garbage_collector():
+    """Grid: x=[-3,4] (w=8), y=[0,15] (h=16). Matches gen_garbage_collector.
+
+    EIGHT columns, not seven — the reclaiming arm reaches out to gx=+4 and was being squeezed out
+    of a 7-wide skin. py 0-10 robe, 11-15 hood.
+
+    Palette: a reclaimer's robe in dead grey-green, hem stained with what it has collected, and a
+    cold collection-light where a face should be.
+    """
+    w, h = 8, 16
+    p = {}
+    robe   = (86, 94, 84, 255)
+    robe_d = (58, 64, 56, 255)
+    stain  = (94, 78, 52, 255)
+    glow   = (150, 236, 190, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = robe
+    for py in range(0, 3):
+        for px in range(w): p[(px, py)] = stain        # the hem, dragged through it
+    for py in range(3, 11):
+        for px in range(w): p[(px, py)] = robe_d
+    for py in range(11, 16):
+        for px in range(w): p[(px, py)] = robe         # hood
+    p[(3, 13)] = glow; p[(4, 13)] = glow               # the collection light
+    for py in range(3, 11): p[(7, py)] = robe          # the outstretched arm column
+    return w, h, p
+
+def skin_bit_rat():
+    """Grid: x=[-2,1] (w=4), y=[0,5] (h=6). Matches gen_bit_rat.
+
+    The mesh is a LOW quadruped — four voxel columns and six rows, not the 7x16 a standing humanoid
+    gets. It was authored at 7x16 and every band therefore landed on the wrong voxels.
+    py 0-1 are the stubby legs, py 2-5 the body, and the spine ridge tops it.
+
+    Palette: mangy brown DEGRADING into magenta/cyan corruption toward the tail — the classic look
+    of a texture that failed to load. Only the front of the animal still renders correctly.
+    """
+    w, h = 4, 6
+    p = {}
+    fur   = (96, 78, 58, 255)
+    fur_d = (70, 56, 42, 255)
+    rot_a = (206, 60, 190, 255)   # corruption magenta
+    rot_b = (70, 220, 220, 255)   # corruption cyan
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = fur
+    for px in range(w): p[(px, 0)] = fur_d; p[(px, 1)] = fur_d   # legs/underside in shadow
+    p[(1, 3)] = (200, 40, 40, 255)                               # eyes
+    p[(2, 3)] = (200, 40, 40, 255)
+    for px in range(w): p[(px, 5)] = rot_b if px % 2 else rot_a  # the bit-rotted spine ridge
+    p[(0, 4)] = rot_a; p[(3, 4)] = rot_a                         # rot creeping down the flanks
+    return w, h, p
+
+def skin_legacy_archer():
+    """Grid: x=[-4,2] (w=7), y=[0,14] (h=15). Matches gen_legacy_archer.
+
+    Fifteen rows: py 0-4 legs, 6-12 body, 13-14 head. Column px 0 is the BOW arm, held out at
+    gx=-4 — which is why the grid is offset and not centred.
+
+    Palette: faded uniform of a unit that was deprecated but never removed, and the bow bleached
+    to bone. Still firing.
+    """
+    w, h = 7, 15
+    p = {}
+    cloth   = (108, 96, 74, 255)
+    cloth_d = (78, 68, 52, 255)
+    bow     = (196, 186, 160, 255)
+    skin_c  = (146, 118, 92, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = cloth
+    for py in range(0, 5):
+        for px in range(w): p[(px, py)] = cloth_d      # legs
+    for py in range(h): p[(0, py)] = bow               # the bow arm column
+    for px in range(1, w): p[(px, 13)] = skin_c        # face
+    for px in range(1, w): p[(px, 14)] = cloth_d       # hood
+    p[(3, 13)] = (196, 60, 48, 255)                    # one red eye under the hood
+    return w, h, p
+
 def skin_skeleton():
     """Grid: x=[-3,3] (w=7), y=[0,15] (h=16). Offset: gx+3."""
     w, h = 7, 16
@@ -164,24 +386,30 @@ def skin_bat():
 
 
 def skin_human():
-    """Grid: approx w=9, h=17."""
-    w, h = 9, 17
+    """Grid: x=[-4,4] (w=9), y=[0,15] (h=16). Matches gen_humanoid.
+
+    SIXTEEN rows, not the seventeen this was authored at — the mesh's real anatomy is py 0-4 legs,
+    5 belt, 6-10 torso and arms, 11 neck, 12-15 head. The extra row stretched every band upward, so
+    the eyes sat above the face and the hair ran off the top of the skull.
+
+    Palette is the ORIGINAL: this is the base humanoid every class body and several enemies wear, so
+    only the GRID is corrected here — re-colouring it would silently restyle half the roster.
+    """
+    w, h = 9, 16
     p = {}
+    skin_c = (210, 170, 130, 255)
     for py in range(h):
         for px in range(w):
-            if py >= 13: p[(px, py)] = (210, 170, 130, 255)    # skin
-            elif py >= 11: p[(px, py)] = (210, 170, 130, 255)  # neck
-            elif py >= 6: p[(px, py)] = (100, 90, 80, 255)     # armor
-            elif py >= 5: p[(px, py)] = (70, 60, 50, 255)      # belt
-            elif py >= 2: p[(px, py)] = (80, 75, 70, 255)      # pants
-            else: p[(px, py)] = (60, 50, 40, 255)              # boots
-    # Hair
-    for px in range(1, 4): p[(px, 16)] = (80, 60, 40, 255)
-    # Eyes
-    p[(3, 14)] = (50, 100, 160, 255)
+            if   py >= 12: p[(px, py)] = skin_c              # head
+            elif py == 11: p[(px, py)] = skin_c              # neck
+            elif py >= 6:  p[(px, py)] = (100, 90, 80, 255)  # armor
+            elif py == 5:  p[(px, py)] = (70, 60, 50, 255)   # belt
+            elif py >= 2:  p[(px, py)] = (80, 75, 70, 255)   # pants
+            else:          p[(px, py)] = (60, 50, 40, 255)   # boots
+    for px in range(3, 6): p[(px, 15)] = (80, 60, 40, 255)   # hair, on the crown row
+    p[(3, 14)] = (50, 100, 160, 255)                         # eyes
     p[(5, 14)] = (50, 100, 160, 255)
     return w, h, p
-
 
 def skin_cleric():
     """Grid: approx w=9, h=17."""
@@ -1709,59 +1937,28 @@ def skin_void_skeleton():
 # ---------------------------------------------------------------------------
 
 def skin_goblin():
-    """Loot goblin — sickly green hide, gold-glinting sack, yellow eyes.
-    Grid matches gen_mesh.gen_goblin: x=[-2,2] (w=5), y=[0,11] (h=12). px=gx+2, py=gy.
-    The sack is deliberately the brightest thing on the model: the player has to understand,
-    with no tooltip and about half a second of sight, that this thing is carrying loot and
-    running away with it."""
-    w, h = 5, 12
+    """Grid: x=[-2,2] (w=5), y=[0,10] (h=11). Matches gen_goblin.
+
+    ELEVEN rows, not twelve: py 0 feet, 1-2 legs, 3 hips, 4-10 body and head. One row of drift was
+    enough to slide the eyes off the face.
+
+    Palette: sickly green hide, a scrap-leather belt, and the gold it is running away with.
+    """
+    w, h = 5, 11
     p = {}
-    hide      = (86, 140, 62, 255)    # sickly green
-    hide_dark = (64, 108, 48, 255)
-    sack      = (150, 116, 66, 255)   # burlap
-    sack_lit  = (196, 160, 88, 255)   # sunlit burlap — the "there is loot in here" read
-    gold      = (228, 190, 76, 255)   # coins spilling from the cinch
+    hide   = (108, 148, 78, 255)
+    hide_d = (78, 110, 56, 255)
+    belt   = (86, 62, 40, 255)
+    gold   = (232, 194, 62, 255)
     for py in range(h):
         for px in range(w):
             p[(px, py)] = hide
-
-    # Head (py 8-10) — slightly lighter than the body
-    for py in range(8, 11):
-        for px in range(1, 4):
-            p[(px, py)] = (100, 156, 72, 255)
-    # Ears (py 10) — the silhouette read, darker so they separate from the head
-    p[(0, 10)] = hide_dark
-    p[(4, 10)] = hide_dark
-    # Yellow eyes
-    p[(1, 9)] = (240, 214, 92, 255)
-    p[(3, 9)] = (240, 214, 92, 255)
-    # Snout / grin
-    p[(2, 8)] = (58, 96, 44, 255)
-
-    # THE SACK — upper back, py 5-10. Brightest region on the whole skin.
-    for py in range(5, 11):
-        for px in range(0, 5):
-            p[(px, py)] = sack if (px + py) % 2 else sack_lit
-    # Cinched neck of the sack, with coins glinting out of it
-    for px in range(1, 4):
-        p[(px, 10)] = gold
-
-    # Torso below the sack
-    for py in range(4, 6):
-        for px in range(1, 4):
-            p[(px, py)] = hide
-    # Arms — darker, clutching the strap
-    for py in range(5, 8):
-        p[(0, py)] = hide_dark
-        p[(4, py)] = hide_dark
-    # Legs / big flat feet
     for py in range(0, 4):
-        for px in range(1, 4):
-            p[(px, py)] = hide_dark
-    for px in range(0, 5):
-        p[(px, 0)] = (48, 80, 36, 255)
+        for px in range(w): p[(px, py)] = hide_d       # legs
+    for px in range(w): p[(px, 4)] = belt              # belt at the hips
+    p[(1, 9)] = (28, 26, 24, 255); p[(3, 9)] = (28, 26, 24, 255)   # eyes
+    p[(2, 5)] = gold                                   # the loot it is clutching
     return w, h, p
-
 
 def skin_gargoyle():
     """Gargoyle — grey stone body, amber eyes, mossy green patches.
@@ -3495,32 +3692,28 @@ def skin_icon_turret():
 
 
 def skin_bat_wing():
-    """4x4 bat wing membrane texture — dark membrane with bone structure visible."""
-    w, h = 4, 4
-    membrane = (40, 30, 50, 255)     # dark purple-brown membrane
-    bone     = (80, 65, 75, 255)     # lighter bone/finger lines
-    edge     = (25, 20, 35, 255)     # dark wing tip
-    joint    = (100, 70, 55, 255)    # warm joint where wing meets body
-    p = {(px, py): membrane for py in range(h) for px in range(w)}
+    """Grid: x=[0,7] (w=8), y=[0,1] (h=2). Matches gen_bat_wing.
 
-    # Bone fingers radiating from top-left (joint) to bottom-right (tip)
-    p[(0, 3)] = joint                # shoulder joint
-    p[(1, 3)] = bone                 # upper bone
-    p[(0, 2)] = bone                 # bone line
-    p[(1, 2)] = bone                 # bone line
-    p[(2, 1)] = bone                 # finger extending
-    p[(3, 0)] = edge                 # wing tip
-    p[(3, 1)] = edge                 # edge
-    p[(0, 0)] = edge                 # lower edge
-    # Thin membrane between bones (slightly lighter)
-    p[(2, 2)] = (50, 38, 58, 255)    # mid-membrane
-    p[(1, 1)] = (45, 34, 54, 255)    # membrane between bones
-    p[(2, 3)] = (55, 42, 62, 255)    # near-body membrane
+    A wing is WIDE and FLAT — eight voxel columns, two rows. Authored 4x4, so the bone-finger detail
+    was stretched across a shape that has no room for it and the gradient ran diagonally instead of
+    outward. On 8x2 the only meaningful axis is root -> tip, which is what this uses.
 
+    Palette is the ORIGINAL membrane/bone/joint/edge set; every bat in the game wears this.
+    """
+    w, h = 8, 2
+    membrane = (40, 30, 50, 255)
+    bone     = (80, 65, 75, 255)
+    edge     = (25, 20, 35, 255)
+    joint    = (100, 70, 55, 255)
+    p = {}
+    for px in range(w):
+        t = px / float(w - 1)                       # 0 at the shoulder, 1 at the tip
+        # Membrane darkening toward the tip, where the original used `edge`.
+        p[(px, 0)] = tuple(int(membrane[i] + (edge[i] - membrane[i]) * t) for i in range(3)) + (255,)
+        # Upper row carries the bone structure, warm at the joint and fading to the tip edge.
+        base = joint if px == 0 else bone
+        p[(px, 1)] = tuple(int(base[i] + (edge[i] - base[i]) * t) for i in range(3)) + (255,)
     return w, h, p
-
-
-# --- Legendary glow variants ---
 
 def skin_legendary_weapon_tex():
     """Legendary weapon: bright gold blade, white-hot edge, rune marks."""
@@ -4956,8 +5149,292 @@ def skin_player_ranger():
     return w, h, p
 
 
+# =====================================================================================
+# ACT 1 / ACT 2 overworld skins.
+#
+# Every grid below is the mesh's REAL filled voxel extent, not a nominal 7x16 — add_voxel_model
+# derives tex_w/tex_h from `filled` itself (u = (gx-min_gx+0.5)/grid_w), so a skin sized to the
+# nominal grid gets STRETCHED across the model and every carefully placed band lands somewhere
+# else. The numbers here were measured off the generators, and tests/tools check they stay in sync.
+# Read each docstring as: px = gx - min_gx, py = gy - min_gy.
+# =====================================================================================
+
+def skin_null_pointer():
+    """Grid: x=[-3,2] (w=6), y=[0,12] (h=13). Matches gen_null_pointer.
+
+    Palette: D2 Fallen red, drained. The hollow head ring is rimmed in the dead grey of an
+    uninitialised value, so the hole in the silhouette reads as deliberate rather than a mesh bug.
+    """
+    w, h = 6, 13
+    p = {}
+    hide   = (150, 58, 44, 255)
+    hide_d = (108, 40, 32, 255)
+    null   = (128, 132, 140, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = hide
+    for py in range(0, 3):
+        for px in range(w): p[(px, py)] = hide_d          # legs, in shadow
+    for px in range(w): p[(px, 7)] = (196, 176, 60, 255)  # the shard it holds up
+    for py in range(8, 12):
+        for px in range(w): p[(px, py)] = null            # the null ring
+    for px in range(w): p[(px, 12)] = hide_d              # horns stay flesh
+    return w, h, p
+
+
+def skin_hot_reloader():
+    """Grid: x=[-5,2] (w=8), y=[0,15] (h=16). Matches gen_hot_reloader.
+
+    Palette: a shaman's robe in the amber of a rebuild in progress, hem scorched, and the staff
+    ring burning the bright green of a build that just went through.
+    """
+    w, h = 8, 16
+    p = {}
+    robe   = (152, 96, 34, 255)
+    robe_d = (92, 56, 22, 255)
+    ember  = (232, 150, 48, 255)
+    ok     = (96, 226, 110, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = robe
+    for py in range(0, 2):
+        for px in range(w): p[(px, py)] = robe_d      # scorched hem
+    for px in range(w): p[(px, 6)] = ember            # sash
+    for py in range(9, 14):
+        for px in range(3, 7): p[(px, py)] = robe_d   # hood shadow (gx -2..1)
+    for py in range(14, 16):
+        for px in range(w): p[(px, py)] = ok          # only the staff ring reaches this high
+    return w, h, p
+
+
+def skin_core_dump():
+    """Grid: x=[-4,3] (w=8), y=[5,8] (h=4). Matches gen_core_dump.
+
+    Only four voxel rows tall — it is a bird in flight, so the whole model is body and wing. Carrion
+    black, with the trailing tail fragments in raw hex-viewer green.
+    """
+    w, h = 8, 4
+    p = {}
+    feather = (38, 36, 44, 255)
+    wing    = (56, 54, 66, 255)
+    dumped  = (110, 230, 120, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = feather
+    for px in (0, 1, 6, 7):                            # outer wing voxels
+        for py in range(0, 3): p[(px, py)] = wing
+    p[(4, 2)] = (226, 172, 44, 255)                    # beak column
+    p[(3, 3)] = (214, 60, 50, 255)                     # eye
+    p[(4, 0)] = dumped                                 # the trail, spilling out behind
+    p[(3, 0)] = dumped
+    return w, h, p
+
+
+def skin_merge_conflict():
+    """Grid: x=[-4,4] (w=9), y=[0,14] (h=15). Matches gen_merge_conflict.
+
+    The palette IS the gimmick: the LEFT half carries one branch's colour and the RIGHT half
+    another, they never blend, and the single seam column between them alternates conflict-marker
+    white and red. A diff you can walk up to.
+    """
+    w, h = 9, 15
+    p = {}
+    ours    = (72, 108, 158, 255)
+    ours_d  = (48, 74, 112, 255)
+    theirs  = (150, 92, 52, 255)
+    theirs_d= (104, 62, 34, 255)
+    seam    = (226, 66, 66, 255)
+    mark    = (245, 240, 236, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = ours if px < 4 else theirs
+    for py in range(0, 5):
+        for px in range(w):
+            p[(px, py)] = ours_d if px < 4 else theirs_d
+    for py in range(h):
+        p[(4, py)] = mark if (py % 2 == 0) else seam   # <<<<<<< made geometry
+    return w, h, p
+
+
+def skin_detached_head():
+    """Grid: x=[-3,3] (w=7), y=[0,14] (h=15). Matches gen_detached_head.
+
+    A severed head that is, on inspection, a PINK UNICORN's. The mesh puts each rainbow band on its
+    own grid row precisely so this can paint them as clean stripes — py 0-5 are the six bands from
+    violet at the trailing end up to red at the neck, py 6-12 the pink head, py 13-14 the horn.
+
+    Painting the rainbow relies on the row-per-band layout: add_voxel_model maps the texture by
+    (gx, gy), so a band sharing a row with anything else would bleed its colour onto it.
+    """
+    w, h = 7, 15
+    p = {}
+    pink   = (244, 150, 200, 255)   # the unicorn
+    pink_d = (208, 112, 166, 255)   # muzzle / underside
+    mane   = (250, 205, 228, 255)
+    horn   = (250, 232, 170, 255)   # pearly gold
+    # ROYGBIV bottom-up: the band furthest from the head is violet, the one at the neck is red.
+    bands = [(150, 90, 210, 255),   # py0 violet
+             (70, 120, 226, 255),   # py1 blue
+             (70, 190, 120, 255),   # py2 green
+             (246, 222, 80, 255),   # py3 yellow
+             (244, 156, 60, 255),   # py4 orange
+             (228, 72, 72, 255)]    # py5 red
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = pink
+    for py, col in enumerate(bands):
+        for px in range(w):
+            p[(px, py)] = col
+    for px in range(w): p[(px, 6)] = pink_d        # jaw underside, in shadow
+    for px in range(w): p[(px, 7)] = pink_d        # muzzle
+    for px in range(w): p[(px, 12)] = mane         # forelock between the ears
+    p[(2, 10)] = (40, 34, 44, 255)                 # eye
+    p[(4, 10)] = (40, 34, 44, 255)
+    for py in range(13, 15):
+        for px in range(w): p[(px, py)] = horn     # the horn
+    return w, h, p
+
+def skin_rubber_duck():
+    """Grid: x=[-4,3] (w=8), y=[0,13] (h=14). Matches gen_rubber_duck.
+
+    The exact cheerful bath-toy yellow, orange bill, two black eye dots — played entirely straight.
+    Nothing in the colouring hints that it is hostile, which is the joke.
+    """
+    w, h = 8, 14
+    p = {}
+    duck   = (246, 206, 62, 255)
+    duck_d = (206, 166, 40, 255)
+    bill   = (238, 132, 40, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = duck
+    for py in range(0, 2):
+        for px in range(w): p[(px, py)] = duck_d   # waterline shadow
+    for py in range(11, 13):
+        for px in range(w): p[(px, py)] = bill     # bill / lower face band
+    p[(2, 13)] = (28, 26, 24, 255)
+    p[(6, 13)] = (28, 26, 24, 255)                 # eyes
+    return w, h, p
+
+
+def skin_escalator_hound():
+    """Grid: x=[-2,1] (w=4), y=[0,10] (h=11). Matches gen_escalator_hound.
+
+    Soot-black hide with the spine steps picked out in the worn steel-and-hazard-yellow of a comb
+    plate — the one part of it that is machinery rather than animal.
+    """
+    w, h = 4, 11
+    p = {}
+    hide   = (46, 42, 46, 255)
+    hide_d = (30, 28, 32, 255)
+    steel  = (152, 152, 160, 255)
+    hazard = (222, 186, 46, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = hide
+    for py in range(0, 4):
+        for px in range(w): p[(px, py)] = hide_d       # legs
+    p[(0, 7)] = (218, 96, 40, 255)
+    p[(3, 7)] = (218, 96, 40, 255)                     # eyes / ears, lit
+    for py in range(8, 11):                            # the stepped spine
+        for px in range(w):
+            p[(px, py)] = steel if (px % 2 == 0) else hazard
+    return w, h, p
+
+
+def skin_turnstile_wraith():
+    """Grid: x=[-3,3] (w=7), y=[0,14] (h=15). Matches gen_turnstile_wraith.
+
+    Barrier grey and hazard yellow at the base, going ghost-pale as it rises: the machine half is
+    solid, the half that used to be a passenger is not.
+    """
+    w, h = 7, 15
+    p = {}
+    steel   = (140, 142, 148, 255)
+    steel_d = (96, 98, 104, 255)
+    hazard  = (226, 190, 52, 255)
+    ghost   = (172, 208, 220, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = ghost
+    for py in range(0, 5):
+        for px in range(w): p[(px, py)] = steel     # the barrier pedestal
+    for px in range(w): p[(px, 0)] = steel_d
+    for px in range(w): p[(px, 5)] = hazard         # the tripod arms
+    p[(2, 13)] = (86, 216, 236, 255)
+    p[(4, 13)] = (86, 216, 236, 255)                # eyes
+    return w, h, p
+
+
+def skin_fare_evader():
+    """Grid: x=[-3,2] (w=6), y=[0,10] (h=11). Matches gen_fare_evader.
+
+    A scrappy grey hoodie, hood up, nothing reflective — dressed not to be described afterwards.
+    """
+    w, h = 6, 11
+    p = {}
+    cloth   = (86, 88, 96, 255)
+    cloth_d = (58, 60, 68, 255)
+    skin    = (126, 96, 74, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = cloth
+    for py in range(0, 5):
+        for px in range(w): p[(px, py)] = cloth_d   # legs
+    for px in range(w): p[(px, 7)] = skin           # bare hands, thrown forward
+    for py in range(9, 11):
+        for px in range(w): p[(px, py)] = cloth_d   # hood shadow
+    p[(3, 9)] = (214, 66, 60, 255)                  # one eye under the hood
+    return w, h, p
+
+
+def skin_rail_replacement():
+    """Grid: x=[-4,4] (w=9), y=[0,14] (h=15). Matches gen_rail_replacement.
+
+    Oxidised rail-iron and creosoted sleeper, with a strip of destination-board amber at the head —
+    the only part of it still trying to tell you where you are going.
+    """
+    w, h = 9, 15
+    p = {}
+    iron    = (104, 96, 88, 255)
+    iron_d  = (72, 66, 60, 255)
+    sleeper = (78, 58, 42, 255)
+    board   = (232, 168, 46, 255)
+    for py in range(h):
+        for px in range(w):
+            p[(px, py)] = iron
+    for py in range(0, 5):
+        for px in range(w): p[(px, py)] = sleeper   # sleeper legs
+    for py in range(5, 11):
+        p[(0, py)] = iron_d; p[(8, py)] = iron_d    # girder arms, in shadow
+    for py in range(13, 15):
+        for px in range(w): p[(px, py)] = board     # the destination board
+    return w, h, p
+
+
 SKIN_TYPES = {
+    "null_pointer": ("null_pointer_skin_42.png", skin_null_pointer),
+    "hot_reloader": ("hot_reloader_skin_42.png", skin_hot_reloader),
+    "core_dump": ("core_dump_skin_42.png", skin_core_dump),
+    "merge_conflict": ("merge_conflict_skin_42.png", skin_merge_conflict),
+    "detached_head": ("detached_head_skin_42.png", skin_detached_head),
+    "rubber_duck": ("rubber_duck_skin_42.png", skin_rubber_duck),
+    "escalator_hound": ("escalator_hound_skin_42.png", skin_escalator_hound),
+    "turnstile_wraith": ("turnstile_wraith_skin_42.png", skin_turnstile_wraith),
+    "fare_evader": ("fare_evader_skin_42.png", skin_fare_evader),
+    "rail_replacement": ("rail_replacement_skin_42.png", skin_rail_replacement),
+
     "skeleton":           ("skeleton_skin_42.png",           skin_skeleton),
+    # --- Act 1 overworld bestiary (grids match their gen_mesh.py generators) ---
+    "griswald":           ("griswald_skin_42.png",           skin_griswald),
+    # --- Act 2 ---
+    "perpetual_commuter": ("perpetual_commuter_skin_42.png", skin_perpetual_commuter),
+    "mind_the_gap":       ("mind_the_gap_skin_42.png",       skin_mind_the_gap),
+    "signal_failure":     ("signal_failure_skin_42.png",     skin_signal_failure),
+    "zombie_process":     ("zombie_process_skin_42.png",     skin_zombie_process),
+    "garbage_collector":  ("garbage_collector_skin_42.png",  skin_garbage_collector),
+    "bit_rat":            ("bit_rat_skin_42.png",            skin_bit_rat),
+    "legacy_archer":      ("legacy_archer_skin_42.png",      skin_legacy_archer),
     "spider":             ("spider_skin_42.png",             skin_spider),
     "bat":                ("bat_skin_42.png",                skin_bat),
     "human":              ("human_skin_42.png",              skin_human),

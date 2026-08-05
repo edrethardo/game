@@ -50,14 +50,6 @@ const char* userDataPath(const char* filename, char* buf, u32 bufSize) {
     return buf;
 }
 
-bool atomicReplace(const char* srcPath, const char* dstPath) {
-#ifdef _WIN32
-    // std::rename fails if the target exists on Windows; MoveFileEx replaces atomically.
-    return MoveFileExA(srcPath, dstPath, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
-#else
-    return std::rename(srcPath, dstPath) == 0;  // POSIX rename atomically replaces
-#endif
-}
 
 #ifndef __SWITCH__
 // Byte-for-byte copy src -> dst. Returns true on success.

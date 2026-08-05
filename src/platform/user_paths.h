@@ -6,6 +6,7 @@
 // "<ORG>/<APP>". On Switch this is a no-op (returns "") — the CWD is the app's writable storage, so
 // existing Switch behavior is preserved. See docs: store/steam/steam_cloud.md.
 #include "core/types.h"
+#include "platform/atomic_file.h"
 
 namespace Platform {
 
@@ -20,7 +21,8 @@ const char* userDataPath(const char* filename, char* buf, u32 bufSize);
 // Atomically replace dstPath with srcPath (both must be on the same filesystem). Used to make save
 // writes crash-safe: serialize to a temp file, then replace — so an interrupted write (crash / power
 // loss / disk full) can never truncate or corrupt an existing save. Returns true on success.
-bool atomicReplace(const char* srcPath, const char* dstPath);
+// Defined in atomic_file.h (SDL-free, unit-tested) and re-exported here so the many
+// existing callers keep including just this header.
 
 // One-time, best-effort migration of legacy files into userDataDir(): save_NN.dat and
 // difficulty_unlock.dat (from the CWD) and controls.json / audio.json / video.cfg (from

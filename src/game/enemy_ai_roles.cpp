@@ -16,6 +16,13 @@
 #include <cmath>
 #include <cstdlib>  // std::rand for boss speech-line variety
 
+// EnemyRole::ROUT tuning. A THIRD of health is high enough that the break happens mid-fight (where
+// it is a tactic the player has to respond to) rather than as a death rattle, and 3 s is long enough
+// to actually leave the fight — a shorter rout just backs out of melee range and walks straight back
+// in, which reads as stuttering, not as cowardice.
+static constexpr f32 ROUT_HEALTH_FRAC = 0.33f;
+static constexpr f32 ROUT_SECONDS     = 3.0f;
+
 AIStep applyRoleModifiers(Entity& e, u32 i,
                            EntityPool& pool,
                            Player& player, Player* targetPlayer,
@@ -250,6 +257,39 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
         // Prefer surround state to spread out with other melee
         if (e.aiState == AIState::CHASE && dist < e.attackRange * 2.0f) {
             e.aiState = AIState::SURROUND;
+        }
+    }
+
+    // ROUT: break and run at low health, rally after a beat, come back. Diablo 2's Fallen.
+    //
+    // FLEE is reused rather than RETREAT, and that is the whole reason this needs a role at all:
+    // RETREAT auto-exits to CHASE whenever a player is inside detectionRange, so an enemy routing
+    // FROM the player would turn and charge the instant it was being chased. FLEE has no such exit
+    // (it is the loot goblin's absolute run-away), so the clock below is the only way out — which
+    // is what makes it read as a rout rather than a flinch. FLEE's goblin-only gloat block is gated
+    // on `lifeTimer > 0` and a router has none, so it inherits just the serpentine scatter.
+    if (e.enemyRole & EnemyRole::ROUT) {
+        if (e.aiState == AIState::FLEE) {
+            // Its OWN timer, not one of the shared scratch fields. kiteTimer looked free — a
+            // fleeing enemy is not being kited — but it is ALSO the summoner's curse cooldown and
+            // the CHASE anti-kite accumulator, both of which rewrite it every tick. Measured: the
+            // rout fired and then never rallied, because the clock was being trampled.
+            e.routTimer -= dt;
+            if (e.routTimer <= 0.0f) {
+                e.aiState     = AIState::CHASE;
+                e.speechText  = "...RIGHT. RIGHT!";
+                e.speechTimer = 1.5f;
+            }
+        } else if (!e.hasRouted && e.aiState != AIState::DORMANT &&
+                   e.health < e.maxHealth * ROUT_HEALTH_FRAC) {
+            // ONE break per lifetime. A pack that can rout repeatedly never commits to anything:
+            // each break re-triggers the moment the player lands the next hit, so the fight becomes
+            // a chase with no combat in it. Once rallied, they fight to the death.
+            e.hasRouted   = true;
+            e.aiState     = AIState::FLEE;
+            e.routTimer   = ROUT_SECONDS;
+            e.speechText  = "NOPE!";
+            e.speechTimer = 1.5f;
         }
     }
 

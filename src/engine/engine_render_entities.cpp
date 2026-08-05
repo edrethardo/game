@@ -48,6 +48,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include "world/visibility.h"
 
 // Shared statics defined in engine.cpp
 // Shared statics defined in engine.cpp
@@ -75,6 +76,12 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         MaterialSystem::getIdByName("prop_web_d"),
     };
 
+    // Frames an entity keeps being drawn after it stops passing the visibility test. Four is about
+    // 65 ms — long enough to ride out a sampling miss on a moving body, short enough that a genuinely
+    // hidden enemy stops costing draw calls almost immediately.
+    static constexpr u8 VIS_HOLD_FRAMES = 4;
+    static u8 s_entVisHold[MAX_ENTITIES] = {};
+
     // Per-slot memory of the burrow bit so the FRAME a widow surfaces gets a dirt eruption.
     // Keyed entirely on the replicated ENT_BURROWED flag, so host and guests burst identically;
     // per-machine render state, never simulation.
@@ -91,6 +98,25 @@ void Engine::renderEntities(u32 sw, u32 sh) {
         }
         s_wasBurrowed[i] = burrowedNow;
         if (burrowedNow) continue;
+
+        // OCCLUSION CULL. The frustum keeps everything in front of the camera, which on a maze or a
+        // stacked hall is nearly the whole floor — measured 165 entity draw calls per frame from 114
+        // entities on FOUR_STORY, the great majority of them behind a wall or on another storey.
+        // Skipping the body ALSO skips its limbs and weapon below, which is where the multiplier is.
+        //
+        // HYSTERESIS, not a bare test: once shown, an entity stays shown for VIS_HOLD_FRAMES. A body
+        // is a moving target sampled by a handful of rays, so an isolated miss would otherwise blink
+        // it out for a frame — and a flicker reads as a far worse bug than the overdraw this saves.
+        // The counter is per-slot render state, never simulation, so co-op peers may legitimately
+        // cull differently and nothing desyncs.
+        if (!m_visCullOff && !(e.flags & ENT_DEAD)) {
+            if (Visibility::entityVisible(m_level.grid, m_camera.position, e.position, e.halfExtents))
+                s_entVisHold[i] = VIS_HOLD_FRAMES;
+            else if (s_entVisHold[i] > 0)
+                s_entVisHold[i]--;
+            else
+                continue;                       // provably hidden, and has been for a while
+        }
 
         f32 scaleY = 1.0f;
         if (e.flags & ENT_DEAD) {

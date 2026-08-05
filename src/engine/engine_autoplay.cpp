@@ -195,6 +195,17 @@ static bool intentActs(const Autoplay::BotIntent& in) {
 void Engine::updateAutoplay(f32 dt) {
     if (!m_autoplayActive) return;
 
+    // THE OVERWORLD ENDS THE RUN (Aaron: the bot's remit stops at Inferno). A zone is post-Inferno
+    // hand-played content with no descent objective, so a bot standing in one would idle forever —
+    // the exact shape of the town and credits strands that each cost a soak to find. End the run
+    // deliberately and loudly instead, the same orderly exit the standard ending uses.
+    if (m_level.inZone) {
+        LOG_INFO("[AUTOPLAY] reached the overworld (zone %u) — ending the run",
+                 static_cast<u32>(m_level.zoneFloor));
+        exitAutoplayRun();
+        return;
+    }
+
     // Takeover latch. Activity while a blocking UI is open must NOT grab control (browsing the build
     // in the inventory is the whole point of "keep fighting while I re-gear"), so uiOpen mirrors
     // gameplayInputFrozen()'s screen set and is passed to the latch, which freezes on it.
@@ -1890,6 +1901,7 @@ Autoplay::BotView Engine::buildBotView() {
             // A teleport/gap-close skill authors a dash `distance` (Holy Smite 3 m, Shadow Step 15 m);
             // damage skills leave it 0. That is the exact set the bot should use to close on a target.
             v.skillIsGapClose[s] = def->distance > 0.0f;
+            v.skillGapDist[s]    = def->distance;
             // SUMMON / DEPLOY skills. SkillDef carries no flag for this, so classify by id — these are
             // the four that leave a persistent ALLY behind (Tinkerer drones/queen, Combat Engineer
             // turret/coil). Their value is independent of the current target, so the policy fires them
@@ -2008,7 +2020,10 @@ Autoplay::BotView Engine::buildBotView() {
     // by construction, so DESCEND stays disarmed), its flow field is seeded at the centre where the
     // Engine stands (so TRAVEL walks toward the fight), and pickTarget already skips an invulnerable
     // target — so while the Engine is shielded the bot fights the adds, which is the intended answer.
-    v.onNormalFloor = !(m_level.inTown || m_level.inArena) &&
+    // A ZONE is not a world the brain can express (no floor door, no descent objective), and per
+    // Aaron the bot's remit ends at Inferno anyway — the overworld is hand-played content. Treated
+    // exactly like the town and the arena here, and the driver ENDS the run on entering one.
+    v.onNormalFloor = !(m_level.inTown || m_level.inArena || m_level.inZone) &&
                       (m_level.floorDoorActive || m_level.inSourceChamber);
     // Stacked styles carry walk-on slab storys, so "3 m above me" means "another floor of the
     // building" rather than "up a step" — the policy's cross-story target gate keys off this.

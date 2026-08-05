@@ -75,16 +75,33 @@ enum struct EnemyType : u8 {
 
 // Special archetype role — bitmask so bosses can combine multiple roles.
 // Regular enemies typically have one role; bosses can stack 2-3.
+// The archetype bitmask. u16, NOT u8: the original eight roles filled every bit of a byte, so the
+// overworld's ROUT and SPLITTER had nowhere to live. `role` is NOT on the snapshot wire (a guest
+// learns an enemy's behaviour by watching it), so the widening is local — no protocol bump.
 namespace EnemyRole {
-    constexpr u8 NORMAL        = 0x00;
-    constexpr u8 AMBUSH        = 0x01;  // gargoyle — starts dormant, wakes when player is close
-    constexpr u8 SUMMONER      = 0x02;  // necromancer — resurrects dead enemies
-    constexpr u8 HEALER        = 0x04;  // shaman — heals injured allies
-    constexpr u8 AURA          = 0x08;  // herald — passive damage aura around self
-    constexpr u8 RANGED_CASTER = 0x10;  // bone mage — prefers strafe, fires projectiles
-    constexpr u8 CHARGER       = 0x20;  // ghoul — sprint-charge then retreat
-    constexpr u8 BOMBER        = 0x40;  // plague bat — dive-bomb or explode on death
-    constexpr u8 SHIELD_BEARER = 0x80;  // sentinel — frontal damage reduction, forces flanking
+    constexpr u16 NORMAL        = 0x000;
+    constexpr u16 AMBUSH        = 0x001;  // gargoyle — starts dormant, wakes when player is close
+    constexpr u16 SUMMONER      = 0x002;  // necromancer — resurrects dead enemies
+    constexpr u16 HEALER        = 0x004;  // shaman — heals injured allies
+    constexpr u16 AURA          = 0x008;  // herald — passive damage aura around self
+    constexpr u16 RANGED_CASTER = 0x010;  // bone mage — prefers strafe, fires projectiles
+    constexpr u16 CHARGER       = 0x020;  // ghoul — sprint-charge then retreat
+    constexpr u16 BOMBER        = 0x040;  // plague bat — dive-bomb or explode on death
+    constexpr u16 SHIELD_BEARER = 0x080;  // sentinel — frontal damage reduction, forces flanking
+
+    // ROUT — Diablo 2's Fallen. Breaks and RUNS at low health, then rallies and comes back. The
+    // existing `retreat` aiPreference could not express this: that is an OPENER (the state the
+    // enemy aggros into) and it auto-exits to CHASE the moment a player is inside detectionRange,
+    // so a router would turn around and charge the instant it was being chased — the opposite of
+    // routing. This is a health-triggered, timed, repeatable break, and it is what makes a pack of
+    // them read as cowardly rather than merely weak.
+    constexpr u16 ROUT          = 0x100;
+
+    // SPLITTER — dies into two smaller copies of the enemy named by `spawnEnemy`. Distinct from
+    // the BREEDER use of that same field, which spawns periodically WHILE ALIVE: a splitter spawns
+    // exactly once, at death, and therefore terminates (the halves are a different, non-splitting
+    // def). Killing it is progress you have to finish, which is the Merge Conflict's whole joke.
+    constexpr u16 SPLITTER      = 0x200;
 }
 
 // Boss multi-phase / "false death" state machine (currently Malachar, floor 20).
@@ -183,7 +200,9 @@ struct Entity {
     f32  kiteTimer     = 0.0f;  // how long target has maintained distance (triggers sprint)
     f32  breedTimer    = 0.0f;  // breeder (Broodmother) countdown to next brood spawn — Engine::tickBreeders
     bool hasRetreated  = false; // prevents immediate re-retreat after re-engage
-    u8 enemyRole = EnemyRole::NORMAL; // archetype bitmask (summoner, healer, aura, ambush, etc.)
+    bool hasRouted     = false; // EnemyRole::ROUT — one break per lifetime (see the role's note)
+    f32  routTimer     = 0.0f;  // EnemyRole::ROUT — seconds left of the current break
+    u16 enemyRole = EnemyRole::NORMAL; // archetype bitmask (summoner, healer, aura, ambush, rout, splitter, …)
     // Authored combat OPENER (EnemyDef.aiPreference, an AIState ordinal) — the state this enemy
     // enters when it aggros, instead of the historical hardcoded CHASE. Stamped at spawn from
     // enemies.json; defaults to CHASE for drones/summons/pets (and is reset in spawn(), so a
@@ -330,7 +349,11 @@ struct Entity {
 // padding before assuming they are free. (Entity::timesRevived landed in existing padding beside
 // resurrectCount and did NOT move this number.) The tenacity hook (ccResist) landed in the status
 // block with no spare padding, so it grew the struct by one 8-byte-aligned slot: 528 -> 536.
-static_assert(sizeof(Entity) == 536, "Entity layout changed — re-check field packing");
+// EnemyRole::ROUT's two fields cost one more slot: hasRouted took padding beside hasRetreated for
+// free, routTimer did not — 536 -> 544. Entity is a POOL struct, never serialized (the wire carries
+// SnapEntity), so growing it costs MAX_ENTITIES * 8 B of static memory and nothing on the network.
+
+static_assert(sizeof(Entity) == 544, "Entity layout changed — re-check field packing");
 
 // How many times one corpse may be raised before it is spent for good (Entity::timesRevived).
 // A necromancer that outlives its escort otherwise re-raises the same body indefinitely, which

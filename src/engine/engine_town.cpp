@@ -69,6 +69,20 @@ Vec3 Engine::buildTownLevel() {
                 c.wallMaterialId = plank;
             }
     };
+    // THE NORTH GATE — the way out into the overworld (Act 1). Always CARVED, for every hero,
+    // because the town is deterministic geometry that host and client each build from the sentinel
+    // seed: making the opening conditional on a save's unlock state would let two peers build
+    // DIFFERENT towns and desync the moment one walked where the other saw a wall. The gate is
+    // therefore always a hole; whether it takes you anywhere is decided by the transition
+    // (updateZoneTransitions), which is host-authoritative and checks the Inferno clear.
+    for (s32 o = -2; o <= 2; o++) {
+        GridCell& g = LevelGridSystem::getCell(m_level.grid, static_cast<u32>(TOWN_W / 2 + o), 0);
+        g.flags           = CELL_FLOOR;
+        g.floorHeight     = 0;
+        g.ceilingHeight   = 12;
+        g.floorMaterialId = grass;
+    }
+
     hut(8, 8, 5, 4);      // north-west lodge
     hut(30, 9, 4, 4);     // north-east hut
     hut(9, 30, 4, 5);     // south-west hut
@@ -119,89 +133,39 @@ void Engine::spawnTownContents(Vec3 center) {
 
 // Host/SP: enter the town — wipe world pools, build, place players, populate, broadcast.
 void Engine::enterTown() {
-    EntitySystem::init(m_entities);
-    ProjectileSystem::init(m_projectiles);
-    WorldItemSystem::init(m_worldItems);
+    worldResetPools();
     Vec3 center = buildTownLevel();
-
-    m_level.inTown             = true;
-    m_level.inSourceChamber    = false;
-    m_level.floorDoorActive    = false;   // no ordinary exit; the town portal opens the select
-    m_level.floorHasBoss       = false;
-    m_level.sourcePortalActive = false;
-    m_level.exitPortalActive   = false;
+    worldClearLevelFlags();
+    m_level.inTown = true;   // no ordinary exit here; the town portal opens the Free-Play select
 
     // Players arrive at the south gate, facing the plaza (the stash straight ahead).
+    // yaw 0 faces -Z, which from the south gate IS the plaza.
     Vec3 base = {center.x, 0.0f, center.z + 14.0f};
-    const f32 facePlaza = 0.0f;   // yaw 0 faces -Z — from the south gate that is the plaza
-    m_localPlayer.position    = base;
-    m_localPlayer.yaw         = facePlaza;
-    m_localPlayer.pitch       = 0.0f;
-    m_localPlayer.invulnTimer = 1.0f;
-    for (u8 lane = 0; lane < m_splitPlayerCount && lane < MAX_LOCAL_PLAYERS; lane++) {
-        if (lane == m_localPlayerIndex) continue;
-        m_localPlayers[lane].position = base + Vec3{(f32)lane * 1.6f, 0.0f, 0.0f};
-        m_localPlayers[lane].yaw      = facePlaza;
-        m_localPlayers[lane].pitch    = 0.0f;
-    }
-    // Every enterTown call site (launch flag, menu Continue, the VICTORY handler) runs OUTSIDE
-    // the per-player swap, so the alias write above would be erased by next frame's
-    // swapInPlayer — persist the lane array explicitly (the applyClassToLane0 pattern).
-    m_localPlayers[m_localPlayerIndex] = m_localPlayer;
-    snapCameraToPlayer();
-    for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
-        if (!m_players[pi].active) continue;
-        m_players[pi].position      = base + Vec3{(f32)pi * 1.2f - 0.6f, 0.0f, 0.0f};
-        m_players[pi].spawnPosition = m_players[pi].position;   // town IS the respawn point here
-        m_players[pi].invulnTimer   = 1.0f;
-        m_players[pi].isDead        = false;
-    }
+    worldPlaceLocalPlayers(base, 0.0f);
+    // Seeding the host's own slot was MISSING here for the whole life of this function. It only
+    // ever worked because the menu path calls startGame immediately before enterTown; reached any
+    // other way (a cleared-save --town, the VICTORY roll-on) the seating loop below skips the
+    // inactive host slot and the first frame stomps it to {0,0,0}/health-100 — inside the wall.
+    worldSeedHostSlot();
+    worldSeatNetPlayers(base);   // the town IS the respawn point while you are here
 
     spawnTownContents(center);
-    EnemyAI::setTownMode(true);   // townsfolk hold posts + small talk (cleared by startGame)
-    m_gameState = GameState::IN_GAME;
-    Input::setRelativeMouseMode(true);
-
-    if (m_netRole == NetRole::SERVER) {
-        // Same gap as the arena: a cleared-hero Continue host reaches the town WITHOUT
-        // startGame, so the server callbacks (onPlayerJoin!) were never wired on that path —
-        // a joiner connected but was never seated. wireServerNet is idempotent.
-        wireServerNet();
-        Net::broadcastLevelSeed(GameConst::TOWN_SENTINEL_FLOOR, m_difficulty, m_level.levelSeed);
-        Server::updateLevel(m_level.levelSeed, GameConst::TOWN_SENTINEL_FLOOR, m_difficulty);
-    }
+    worldFinishEntry(GameConst::TOWN_SENTINEL_FLOOR, /*peaceful=*/true);
     LOG_INFO("Entered the town (host).");
 }
 
 // Client: mirror of enterTown, driven by the sentinel-floor SV_LEVEL_SEED (see onLevelSeed).
 void Engine::enterTownClient() {
-    // A join-accept can route here INSTEAD of startGame (joining a host who is at home) —
-    // wire the client net callbacks or the join is connected but deaf (no snapshots, no
-    // SV_EVENTs). Harmless for the mid-session SV_LEVEL_SEED route (already wired; idempotent).
-    if (m_netRole == NetRole::CLIENT) wireClientNet();
-    EntitySystem::init(m_entities);
-    ProjectileSystem::init(m_projectiles);
-    WorldItemSystem::init(m_worldItems);
+    worldResetPools();
     Vec3 center = buildTownLevel();
+    worldClearLevelFlags();
+    m_level.inTown = true;
 
-    m_level.inTown             = true;
-    m_level.inSourceChamber    = false;
-    m_level.floorDoorActive    = false;
-    m_level.floorHasBoss       = false;
-    m_level.sourcePortalActive = false;
-    m_level.exitPortalActive   = false;
-
-    Vec3 base = {center.x, 0.0f, center.z + 14.0f};
-    m_localPlayer.position    = base;
-    m_localPlayer.yaw         = 0.0f;   // face the plaza (-Z)
-    m_localPlayer.pitch       = 0.0f;
-    m_localPlayer.invulnTimer = 1.0f;
-    m_localPlayers[m_localPlayerIndex] = m_localPlayer;   // outside the swap — persist (see enterTown)
-    snapCameraToPlayer();
-
+    worldPlaceLocalPlayers(Vec3{center.x, 0.0f, center.z + 14.0f}, 0.0f);   // face the plaza (-Z)
     spawnTownContents(center);   // stash chest + portal are local fixtures; NPCs mirror over snapshots
-    EnemyAI::setTownMode(true);
-    m_gameState = GameState::IN_GAME;
-    Input::setRelativeMouseMode(true);
+    // worldFinishEntry wires the CLIENT callbacks: a join-accept can route here INSTEAD of startGame
+    // (joining a host who is at home), and without that wiring the join is connected but deaf — no
+    // snapshots, no SV_EVENTs. Idempotent on the mid-session SV_LEVEL_SEED route.
+    worldFinishEntry(GameConst::TOWN_SENTINEL_FLOOR, /*peaceful=*/true);
     LOG_INFO("Entered the town (client).");
 }

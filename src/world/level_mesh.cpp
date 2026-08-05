@@ -1,4 +1,5 @@
 #include "world/level_mesh.h"
+#include "world/visibility.h"
 #include "world/tile_noise.h"
 #include "renderer/renderer.h"
 #include "renderer/material.h"
@@ -532,9 +533,22 @@ u32 LevelMeshSystem::buildAll(const LevelGrid& grid, u32 seed,
 }
 
 void LevelMeshSystem::submitAll(const LevelSection* sections, u32 count,
-                                 const Shader& shader)
+                                 const Shader& shader,
+                                 const LevelGrid* grid, Vec3 eye)
 {
+    // Hysteresis per section, same reasoning as the entity cull: a section is a big static box, so
+    // it flickers far less than a body, but the cost of being wrong once is a whole 16x16 m slab of
+    // world blinking out. Cheap insurance at one byte per section.
+    static u8 s_visHold[MAX_TRACKED_SECTIONS] = {};
+    constexpr u8 kHoldFrames = 4;
+
     for (u32 i = 0; i < count; i++) {
+        if (grid && i < MAX_TRACKED_SECTIONS) {
+            const AABB& b = sections[i].bounds;
+            if (Visibility::boxVisible(*grid, eye, b.min, b.max)) s_visHold[i] = kHoldFrames;
+            else if (s_visHold[i] > 0)                            s_visHold[i]--;
+            else                                                  continue;
+        }
         for (u32 j = 0; j < sections[i].submeshCount; j++) {
             const SectionSubmesh& sm = sections[i].submeshes[j];
             if (sm.mesh.indexCount == 0) continue;

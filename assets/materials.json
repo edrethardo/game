@@ -1083,6 +1083,96 @@
         0.35,
         1.0
       ]
+    },
+    {
+      "id": 169,
+      "name": "zombie_process_skin",
+      "texture": "zombie_process_skin_42.png"
+    },
+    {
+      "id": 170,
+      "name": "garbage_collector_skin",
+      "texture": "garbage_collector_skin_42.png"
+    },
+    {
+      "id": 171,
+      "name": "bit_rat_skin",
+      "texture": "bit_rat_skin_42.png"
+    },
+    {
+      "id": 172,
+      "name": "legacy_archer_skin",
+      "texture": "legacy_archer_skin_42.png"
+    },
+    {
+      "id": 173,
+      "name": "perpetual_commuter_skin",
+      "texture": "perpetual_commuter_skin_42.png"
+    },
+    {
+      "id": 174,
+      "name": "mind_the_gap_skin",
+      "texture": "mind_the_gap_skin_42.png"
+    },
+    {
+      "id": 175,
+      "name": "signal_failure_skin",
+      "texture": "signal_failure_skin_42.png"
+    },
+    {
+      "id": 176,
+      "name": "griswald_skin",
+      "texture": "griswald_skin_42.png"
+    },
+    {
+      "id": 177,
+      "name": "null_pointer_skin",
+      "texture": "null_pointer_skin_42.png"
+    },
+    {
+      "id": 178,
+      "name": "hot_reloader_skin",
+      "texture": "hot_reloader_skin_42.png"
+    },
+    {
+      "id": 179,
+      "name": "core_dump_skin",
+      "texture": "core_dump_skin_42.png"
+    },
+    {
+      "id": 180,
+      "name": "merge_conflict_skin",
+      "texture": "merge_conflict_skin_42.png"
+    },
+    {
+      "id": 181,
+      "name": "detached_head_skin",
+      "texture": "detached_head_skin_42.png"
+    },
+    {
+      "id": 182,
+      "name": "rubber_duck_skin",
+      "texture": "rubber_duck_skin_42.png"
+    },
+    {
+      "id": 183,
+      "name": "escalator_hound_skin",
+      "texture": "escalator_hound_skin_42.png"
+    },
+    {
+      "id": 184,
+      "name": "turnstile_wraith_skin",
+      "texture": "turnstile_wraith_skin_42.png"
+    },
+    {
+      "id": 185,
+      "name": "fare_evader_skin",
+      "texture": "fare_evader_skin_42.png"
+    },
+    {
+      "id": 186,
+      "name": "rail_replacement_skin",
+      "texture": "rail_replacement_skin_42.png"
     }
   ]
 }

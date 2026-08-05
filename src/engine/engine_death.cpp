@@ -107,6 +107,16 @@ static void broadcastLootSpawn(const WorldItemPool& pool, u32 uid, Vec3 pos, u16
 // Handles: squad reassignment, friendly NPC speech, Shadow Dance extension,
 // Wanderer mark-prey passives, Mark Prey arrow chain, and Bomber death explosion.
 void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
+    // ACT 1 QUESTS. Hooked at the ONE choke every enemy death funnels through, so a SLAY objective
+    // cannot be missed by a kill route nobody thought about (a proc, a pet, a thorns reflect). The
+    // CLEAR_ZONE poll runs right after, because "the last one just died" is only observable from the
+    // pool, never from the death itself.
+    if (m_level.inZone && !(pool.entities[idx].flags & ENT_FRIENDLY)) {
+        const u16 dIdx = pool.entities[idx].enemyDefIdx;
+        if (dIdx < m_enemyDefs.count) questOnEnemyKilled(m_enemyDefs.defs[dIdx].name);
+        questCheckZoneCleared();
+    }
+
     // The Dungeon Engine secret superboss is slain → the run's true ending. This handler runs on
     // the authoritative host/SP (enemy deaths aren't simulated on a client). It used to snap the
     // HOST's m_gameState straight to VICTORY — a purely local flip that was never broadcast, so
@@ -276,6 +286,34 @@ void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
     // a player through the floor, and widening the radius to 3.5 m reaches slightly further into that
     // case than 3.0 m did. Left as-is on purpose — do not "fix" it by switching to a 3D distance
     // without handling the flyer case, or flying bombers stop dealing damage at all.
+    // SPLITTER: dies into SPLIT_COUNT smaller copies of the enemy named by `spawnEnemy`.
+    //
+    // Host-authoritative like every other spawn — a client would otherwise conjure halves the server
+    // never made and then have them yanked away by the next snapshot. Note this reads the SAME
+    // `spawnEnemy` field the BREEDER path uses but with the opposite lifetime: a breeder spawns
+    // repeatedly WHILE ALIVE, a splitter exactly once, AT DEATH. tickBreeders therefore skips
+    // splitters explicitly, or a Merge Conflict would shed halves continuously while you fought it.
+    // The halves are a different def and never split themselves, so the recursion terminates in one
+    // step by construction rather than by a depth counter that could be mis-set in JSON.
+    if ((pool.entities[idx].enemyRole & EnemyRole::SPLITTER) &&
+        !(pool.entities[idx].flags & ENT_FRIENDLY) && m_netRole != NetRole::CLIENT) {
+        const u8 dIdx = pool.entities[idx].enemyDefIdx;
+        if (dIdx < m_enemyDefs.count) {
+            const u16 halfIdx = m_enemyDefs.defs[dIdx].spawnEnemyIdx;
+            if (halfIdx != 0xFFFF) {
+                // Offset the halves to either side so they don't spawn inside one another and
+                // spend their first second shoving each other apart.
+                constexpr u32 SPLIT_COUNT  = 2;
+                constexpr f32 SPLIT_OFFSET = 0.9f;
+                for (u32 h = 0; h < SPLIT_COUNT; h++) {
+                    const f32 side = (h == 0) ? -SPLIT_OFFSET : SPLIT_OFFSET;
+                    spawnBredEnemy(static_cast<u8>(halfIdx), pos + Vec3{side, 0.0f, 0.0f});
+                }
+                LOG_INFO("%s split into %u", m_enemyDefs.defs[dIdx].name, SPLIT_COUNT);
+            }
+        }
+    }
+
     if ((pool.entities[idx].enemyRole & EnemyRole::BOMBER) &&
         !(pool.entities[idx].flags & ENT_FRIENDLY)) {
         // 3.5 m (Aaron; was 3.0). The detonation trigger is 0.85 * attackRange — 2.1 m for a Plague
@@ -628,7 +666,8 @@ bool Engine::handleGoblinLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
         // Fan them out so the pile is readable rather than one item stacked on three others.
         const f32 ang = (6.2831853f * static_cast<f32>(i)) / static_cast<f32>(Goblin::DEATH_DROPS);
         Vec3 dropPos = pos + Vec3{ cosf(ang) * 0.6f, 0.5f, sinf(ang) * 0.6f };
-        if (!WorldItemSystem::spawn(m_worldItems, item, dropPos, &m_level.grid, e.killerSlot)) {
+        if (!WorldItemSystem::spawn(m_worldItems, item, dropPos, &m_level.grid, e.killerSlot,
+                                0.0f, m_itemDefs, m_itemDefCount)) {
             LOG_WARN("LootGoblin: death drop lost — world-item pool full");
             break;
         }
@@ -703,7 +742,8 @@ bool Engine::handleChampionLootDrop(EntityPool& pool, u16 idx, Vec3 pos) {
     Vec3 dropPos = pos + Vec3{0, 0.5f, 0};
     // Check the return: spawn() reports a full pool by returning false, and every OTHER caller in
     // this file ignores it — which is how a *guaranteed* drop can silently not exist.
-    if (!WorldItemSystem::spawn(m_worldItems, item, dropPos, &m_level.grid, e.killerSlot)) {
+    if (!WorldItemSystem::spawn(m_worldItems, item, dropPos, &m_level.grid, e.killerSlot,
+                                0.0f, m_itemDefs, m_itemDefCount)) {
         LOG_WARN("Champion: guaranteed drop LOST — world-item pool full");
         return false;
     }

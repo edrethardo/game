@@ -8,7 +8,7 @@ struct LevelGrid; // forward declaration for WorldItemSystem::spawn
 
 // ---- Constants ----
 
-static constexpr u32 MAX_ITEM_DEFS       = 224; // 158 gear defs + one "Mini <Enemy>" pet consumable per enemies.json entry
+static constexpr u32 MAX_ITEM_DEFS       = 256; // 158 gear defs + one "Mini <Enemy>" pet consumable per enemies.json entry
 static constexpr u32 MAX_AFFIX_DEFS      = 32;
 static constexpr u32 MAX_AFFIXES_PER_ITEM = 4;
 static constexpr u32 MAX_INVENTORY_ITEMS = 24;
@@ -406,8 +406,19 @@ static constexpr u16 CHEST_ID = 0xFFF8;
 // its E-interact needs no server round-trip.
 static constexpr u16 STASH_ID = 0xFFF7;
 
-// Fourth shrine: +spell damage (arcane purple). Below STASH_ID; next free sentinel is 0xFFF5.
+// Fourth shrine: +spell damage (arcane purple). Below STASH_ID; next free sentinel is 0xFFF4.
 static constexpr u16 SHRINE_SPELL_ID = 0xFFF6;
+
+// --- Overworld fixtures (sentinel floors 52-96, see game/zone_def.h) ---
+// A WAYPOINT is the fast-travel anchor of a zone. Unlike every other sentinel it is NOT consumed on
+// use: touching it discovers it (a per-character bit) and opens the destination list, and it must
+// still be standing afterwards — this is the one sentinel whose interaction leaves it active.
+static constexpr u16 WAYPOINT_ID = 0xFFF5;
+// A ZONE GATE is the mouth of a POI (a cave entrance, a stairway down) or an interior's way back
+// out. It carries the destination floor in its `itemLevel` byte, which is why it can be a plain
+// sentinel rather than a new object type: world items already replicate and already validate their
+// pickups server-side, and one spare byte is all the routing needs.
+static constexpr u16 ZONE_GATE_ID = 0xFFF4;
 
 inline bool isGlobe(const ItemInstance& item) {
     return item.defId == GLOBE_HEALTH_ID || item.defId == GLOBE_ENERGY_ID;
@@ -430,9 +441,18 @@ inline bool isStash(const ItemInstance& item) {
     return item.defId == STASH_ID;
 }
 
+inline bool isWaypoint(const ItemInstance& item) {
+    return item.defId == WAYPOINT_ID;
+}
+
+inline bool isZoneGate(const ItemInstance& item) {
+    return item.defId == ZONE_GATE_ID;
+}
+
 // Any sentinel — i.e. "not a real item". Anything that must not enter the inventory or be dropped.
 inline bool isSentinelItem(const ItemInstance& item) {
-    return isGlobe(item) || isSourceShard(item) || isShrine(item) || isChest(item) || isStash(item);
+    return isGlobe(item) || isSourceShard(item) || isShrine(item) || isChest(item) || isStash(item) ||
+           isWaypoint(item) || isZoneGate(item);
 }
 
 // ---- Rarity color lookup ----
@@ -710,7 +730,29 @@ namespace ItemGen {
     // legendary ceiling. That is the "one extra power" shape rather than a wider item — deliberately
     // so, because adding a 5th affix slot would grow ItemInstance and force a SAVE_VERSION bump plus
     // a legacy mirror for a tier that is meant to be a power step, not a layout change.
-    constexpr f32 MYTHIC_SHARE_OF_LEGENDARY = 0.25f;  // a quarter of Inferno's legendary slice
+    // TOP-OF-TABLE PAYOUT RATE (halved 2026-08-04, Aaron's call).
+    //
+    // Legendary chance is `LEGENDARY_BASE + level * LEGENDARY_PER_LEVEL`, held under a
+    // per-difficulty ceiling. Previously 2% base / 0.5% per level under 3 / 4.5 / 6 / 7.5%; a 3 h
+    // soak at those rates left deep floors carpeted in legendaries, which is both a value problem
+    // (the top tier stops reading as special) and a mechanical one — legendaries NEVER despawn, so
+    // they accumulate until the 64-slot world-item pool saturates and further drops are refused.
+    // These are the single source for the roll AND for the test that pins it: the ceiling used to
+    // be a literal in both places, which is how a rate change silently keeps a stale assertion.
+    constexpr f32 LEGENDARY_BASE       = 1.0f;   // % at level 1
+    constexpr f32 LEGENDARY_PER_LEVEL  = 0.25f;  // % added per level above 1
+    constexpr f32 LEGENDARY_CAP_BASE   = 1.5f;   // Normal's ceiling
+    constexpr f32 LEGENDARY_CAP_TIER   = 0.75f;  // added per difficulty tier above Normal
+
+    // Ceiling for a difficulty tier (0 = Normal … 3 = Inferno): 1.5 / 2.25 / 3 / 3.75 %.
+    constexpr f32 legendaryCeiling(u32 diffTier) {
+        return LEGENDARY_CAP_BASE + LEGENDARY_CAP_TIER * static_cast<f32>(diffTier);
+    }
+
+    // Mythic is carved OUT of that slice, never added beside it. Cut from a quarter to a fifth so
+    // the rarity falls by more than the legendary halving alone would give it — it is the top of
+    // the table and should stay a story, not a drop rate.
+    constexpr f32 MYTHIC_SHARE_OF_LEGENDARY = 0.20f;  // a fifth of Inferno's legendary slice
     constexpr f32 MYTHIC_AFFIX_POWER        = 1.25f;  // affix rolls, over the legendary range
     constexpr f32 MYTHIC_BASE_POWER         = 1.15f;  // base damage/armor
 
@@ -811,8 +853,12 @@ namespace WorldItemSystem {
     // timer). The killer's slot still rides along as inert metadata. The mechanism (ownerSlot +
     // exclusiveTimer + the SnapWorldItem wire fields + both pickup gates) is kept intact so a
     // future FFA/public-lobby mode can re-arm it per spawn site without another wire change.
+    // `defs`/`defCount` are optional and only used when the pool is FULL: they let the eviction
+    // rule recognise pet consumables, which are COMMON rarity but must never be traded away for an
+    // ordinary drop. Every existing call site compiles unchanged; the loot paths pass them.
     bool spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 position,
-               const LevelGrid* grid = nullptr, u8 ownerSlot = 0xFF, f32 exclusiveSeconds = 0.0f);
+               const LevelGrid* grid = nullptr, u8 ownerSlot = 0xFF, f32 exclusiveSeconds = 0.0f,
+               const ItemDef* defs = nullptr, u32 defCount = 0);
     // For an item the run CANNOT afford to lose (the source shard). A full pool makes spawn() fail,
     // and every caller ignored the return — so the key just wasn't there, silently. This evicts the
     // most expendable drop on the floor (the ordinary item closest to expiring anyway) and takes its

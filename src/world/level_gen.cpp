@@ -1136,6 +1136,122 @@ static bool fsHasSlab(const GridCell& c, u8 q) {
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// WILDERNESS — the overworld zone terrain (Diablo 2 Act 1 homage; see game/zone_def.h).
+//
+// Every other style CARVES rooms out of solid rock. This one is the inverse: the whole interior is
+// open ground from the start and the generator ADDS obstacles, because that is what outdoor terrain
+// is — a field with things standing in it, not a cave with the rock removed.
+//
+// Two rules make it an outdoor world rather than a big room:
+//   * NO CELL_CEILING anywhere. The mesher builds no lid and the sky-blue clear colour shows through
+//     (the same trick the town uses). This is also why the clumps below matter: with no ceiling there
+//     is nothing to occlude anything, and the renderer's only culling is frustum-based at 16 m
+//     section granularity, so an empty plain is the WORST case for the 500-draw-call budget. The
+//     clumps are cover, silhouette, and framerate all at once.
+//   * The border ring stays solid. Zone edges are opened afterwards by the caller (edge gates), so
+//     the generator never has to know the zone graph.
+//
+// The clump scatter is deliberately integer/compare-only through GenRNG — no libm — because host and
+// client carve this from the same seed and must agree bit-for-bit; a cosf() here would desync co-op
+// on a different platform's libm.
+static void carveWilderness(LevelGrid& grid, GenRNG& rng, DungeonResult& result)
+{
+    const u32 W = grid.width, D = grid.depth;
+    constexpr f32 CEIL = 3.0f;   // wall height of the border/clumps; NOT a ceiling (see above)
+
+    // 1. Open the whole interior as grass under open sky.
+    for (u32 z = 1; z < D - 1; z++) {
+        for (u32 x = 1; x < W - 1; x++) {
+            GridCell& c = LevelGridSystem::getCell(grid, x, z);
+            c.flags           = CELL_FLOOR;       // no CELL_CEILING — this is the outdoor bit
+            c.floorHeight     = 0;
+            c.ceilingHeight   = static_cast<u8>(CEIL / 0.25f);
+            c.floorMaterialId = 1;
+            c.wallMaterialId  = 0;
+        }
+    }
+
+    // 2. Scatter rock/tree clumps. Kept off the border ring and off the middle band that the
+    //    caller uses for anchors, so a landmark can never be buried — the anchor pass clears its own
+    //    3x3 anyway, but not colliding in the first place keeps the terrain readable.
+    const u32 clumpTarget = (W * D) / 90;   // ~30 on a 52-grid: enough to break sightlines
+    for (u32 i = 0; i < clumpTarget; i++) {
+        const u32 cw = rng.range(2, 5), cd = rng.range(2, 5);
+        if (W < cw + 6 || D < cd + 6) break;
+        const u32 cx = rng.range(3, W - cw - 3);
+        const u32 cz = rng.range(3, D - cd - 3);
+        for (u32 z = cz; z < cz + cd; z++) {
+            for (u32 x = cx; x < cx + cw; x++) {
+                if (!LevelGridSystem::isInBounds(grid, x, z)) continue;
+                GridCell& c = LevelGridSystem::getCell(grid, x, z);
+                c.flags          = CELL_SOLID;
+                c.wallMaterialId = 0;
+            }
+        }
+    }
+
+    // 3. Rooms. Every downstream consumer — enemy, shrine, chest, boss and light placement — reads
+    //    room rects and centres, and generate() REPLACES a style outright if it emits fewer than 5
+    //    (the degenerate-carve fallback). An open field has no natural rooms, so it is divided into a
+    //    3x3 lattice of overlapping regions: honest rectangles over open ground, which is exactly
+    //    what those consumers need. Centres are cleared so nothing is ever placed inside a clump.
+    const u32 margin = 3;
+    const u32 cellW  = (W - margin * 2) / 3;
+    const u32 cellD  = (D - margin * 2) / 3;
+    for (u32 gz = 0; gz < 3; gz++) {
+        for (u32 gx = 0; gx < 3; gx++) {
+            if (result.roomCount >= MAX_DUNGEON_ROOMS) break;
+            DungeonRoom& r = result.rooms[result.roomCount];
+            r = DungeonRoom{};
+            r.x = margin + gx * cellW;
+            r.z = margin + gz * cellD;
+            r.w = cellW;
+            r.d = cellD;
+            r.floorHeight = 0.0f;
+            r.wallMat = 0;
+            // Clear a 3x3 at the centre: a room centre MUST be an open cell (every consumer treats
+            // it as one), and the clump scatter above has no idea where these landed.
+            const u32 rcx = r.x + r.w / 2, rcz = r.z + r.d / 2;
+            for (s32 dz = -1; dz <= 1; dz++) {
+                for (s32 dx = -1; dx <= 1; dx++) {
+                    const s32 px = static_cast<s32>(rcx) + dx, pz = static_cast<s32>(rcz) + dz;
+                    if (px < 1 || pz < 1 || px >= static_cast<s32>(W) - 1 || pz >= static_cast<s32>(D) - 1)
+                        continue;
+                    GridCell& c = LevelGridSystem::getCell(grid, static_cast<u32>(px), static_cast<u32>(pz));
+                    c.flags           = CELL_FLOOR;
+                    c.floorHeight     = 0;
+                    c.ceilingHeight   = static_cast<u8>(CEIL / 0.25f);
+                    c.floorMaterialId = 1;
+                }
+            }
+            result.roomCount++;
+        }
+    }
+
+    // The lattice is fully connected by construction (it is one open field), so every region is
+    // adjacent to its orthogonal neighbours. Consumers use adjacency for corridor reasoning; here it
+    // just records the truth that you can walk between any two.
+    for (u32 gz = 0; gz < 3; gz++) {
+        for (u32 gx = 0; gx < 3; gx++) {
+            const u32 idx = gz * 3 + gx;
+            if (idx >= result.roomCount) continue;
+            if (gx + 1 < 3 && idx + 1 < result.roomCount)
+                addAdjacency(result.rooms[idx], static_cast<u16>(idx),
+                             result.rooms[idx + 1], static_cast<u16>(idx + 1));
+            if (gz + 1 < 3 && idx + 3 < result.roomCount)
+                addAdjacency(result.rooms[idx], static_cast<u16>(idx),
+                             result.rooms[idx + 3], static_cast<u16>(idx + 3));
+        }
+    }
+
+    // Spawn in the middle, exit in the far corner region — finalizeDungeon overrides both for a
+    // style with a mandatory flow, and a zone's real entry point is its edge gate, but these keep
+    // the result well-formed for any consumer that reads them.
+    result.spawnRoomIdx = (result.roomCount > 4) ? 4u : 0u;
+    result.exitRoomIdx  = (result.roomCount > 8) ? 8u : (result.roomCount ? result.roomCount - 1 : 0);
+}
+
 static void carveFourStory(LevelGrid& grid, GenRNG& rng, DungeonResult& result,
                            s32& forcedSpawn, s32& forcedExit) {
     const u32 W = grid.width, D = grid.depth;
@@ -1489,6 +1605,7 @@ const char* LevelGen::styleName(LayoutStyle style) {
         case LayoutStyle::HUB:       return "hub";
         case LayoutStyle::VERTICAL_HALL: return "vertical";
         case LayoutStyle::FOUR_STORY:    return "descent";
+        case LayoutStyle::WILDERNESS:    return "wilderness";
         default:                     return "?";
     }
 }
@@ -1557,6 +1674,7 @@ DungeonResult LevelGen::generate(LevelGrid& grid, u32 seed, u32 gridWidth, u32 g
             carveVerticalHall(grid, rng, result, forcedSpawn, forcedExit); break;
         case LayoutStyle::FOUR_STORY:
             carveFourStory(grid, rng, result, forcedSpawn, forcedExit); break;
+        case LayoutStyle::WILDERNESS: carveWilderness(grid, rng, result); break;
         case LayoutStyle::BSP_ROOMS:
         default:                    carveRoomsBSP(grid, rng, result); break;
     }

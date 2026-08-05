@@ -94,6 +94,7 @@ namespace LevelGen {
         HUB,            // grand central chamber, spoke corridors to perimeter vaults
         VERTICAL_HALL,  // two-story chambers: ground pit + walk-under balcony, ramps, opposite-story exit
         FOUR_STORY,     // four dead-stacked walkable stories on one footprint; one-way drop-only descent
+        WILDERNESS,     // OVERWORLD zones: open sky, scattered clumps, a 3x3 lattice of regions
         COUNT
     };
 

@@ -31,6 +31,7 @@ add_executable(dungeon_tests
     game/test_armor_tier.cpp
     game/test_armor_mitigation.cpp
     game/test_difficulty_scaling.cpp
+    game/test_zone_def.cpp
     game/test_free_play.cpp
     game/test_engine_shield.cpp
     game/test_audio_settings.cpp
@@ -78,11 +79,16 @@ add_executable(dungeon_tests
     world/test_ray_targeting.cpp
     world/test_level_gen.cpp         # layout styles: seed-determinism + reachability contract
     world/test_pathfinder.cpp
+    game/test_world_item_pool.cpp
+    world/test_visibility.cpp
+    world/test_spatial_grid.cpp
     world/test_raycast.cpp
     world/test_tile_noise.cpp
     world/test_collision_push.cpp    # a push may crowd the player, never shove them into a wall
     world/test_grounded.cpp          # a resting body must report onGround EVERY tick, not alternate
     world/test_platform.cpp          # CELL_PLATFORM slab: story selection, walk-under collision, ray planes
+    world/test_level_preview.cpp
+    world/test_wilderness.cpp
     world/test_vertical_hall.cpp     # VERTICAL_HALL: room-count, balconies, ramp portals, spawn/exit
     world/test_story_nav.cpp         # pure cross-story chase helpers (onUpperStory / nearestPortalGoal)
     world/test_four_story.cpp        # FOUR_STORY "Descent": offset holes, quadrant disjointness, L3→L0 descent
@@ -93,6 +99,7 @@ add_executable(dungeon_tests
     balance/test_balance_lab.cpp     # balance lab: enemy/boss curves + typical-gear sanity pins
     balance/balance_lab.cpp          # the lab itself (tests-only; NEVER linked into the game)
     platform/test_input_focus.cpp    # unfocused window: no device input, mouse released (header-only)
+    platform/test_atomic_replace.cpp # save promotion: must overwrite (the Switch FAT rename bug)
     renderer/test_hud_cooldown.cpp
     ${CMAKE_SOURCE_DIR}/src/net/clock_sync.cpp
     ${CMAKE_SOURCE_DIR}/src/net/client_time.cpp

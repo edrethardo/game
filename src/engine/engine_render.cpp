@@ -725,6 +725,20 @@ void Engine::render(f32 alpha) {
     selectPointLights();
 
     // Level geometry
+    // SECTION occlusion culling is DISABLED — measured on the device as visible pop-in.
+    //
+    // The entity cull below is sound because it samples 5 points across a ~1 m body. Applying the
+    // same trick to a level section is not: a section is a 16x16 m box, and on a maze or a stacked
+    // hall its centre and corners are usually INSIDE walls while a corridor through the middle is
+    // plainly visible — so all 9 samples come back blocked and a whole 16 m slab of world blinks
+    // out, taking the props baked into it with it. Aaron saw exactly that: "objects and walls are
+    // visibly popping in and out".
+    //
+    // Sampling a volume that large cannot be made reliable by adding a few more rays; the honest
+    // fix is a real visibility structure (a per-cell PVS built at floor time, or portals), which is
+    // its own piece of work. Until then the level draws frustum-only, as it always did. The ENTITY
+    // cull is what carried most of the win anyway — it was 165 of ~250 draw calls on FOUR_STORY
+    // against 55 for the whole level.
     LevelMeshSystem::submitAll(m_level.sections, m_level.sectionCount, m_basicShader);
 
     // Choose entity source based on role

@@ -27,7 +27,7 @@ static char* readFileToBuffer(const char* path) {
     return buf;
 }
 
-static u8 parseRole(const std::string& s) {
+static u16 parseRole(const std::string& s) {
     if (s == "normal")        return EnemyRole::NORMAL;
     if (s == "ambush")        return EnemyRole::AMBUSH;
     if (s == "summoner")      return EnemyRole::SUMMONER;
@@ -37,6 +37,8 @@ static u8 parseRole(const std::string& s) {
     if (s == "charger")       return EnemyRole::CHARGER;
     if (s == "bomber")        return EnemyRole::BOMBER;
     if (s == "shield_bearer") return EnemyRole::SHIELD_BEARER;
+    if (s == "rout")          return EnemyRole::ROUT;
+    if (s == "splitter")      return EnemyRole::SPLITTER;
     return EnemyRole::NORMAL;
 }
 
@@ -50,6 +52,25 @@ static u8 parseAIPreference(const std::string& s) {
     if (s == "retreat")  return static_cast<u8>(AIState::RETREAT);
     if (s == "surround") return static_cast<u8>(AIState::SURROUND);
     return static_cast<u8>(AIState::IDLE);
+}
+
+// Explicit enemyType from JSON. The inference below is a NAME-MATCH table, so any mesh it does not
+// recognise falls through to SKELETON and gets a humanoid limb rig bolted onto it — correct for the
+// original roster (whose meshes are torsos the rig completes) and wrong for every voxel model that
+// already contains its own legs and wings. The overworld's bestiary is entirely the latter: without
+// this, the Escalator Hound grows a second set of arms and the Rubber Duck sprouts legs.
+// COUNT means "not specified" — fall back to inference, so no existing def changes behaviour.
+static EnemyType parseEnemyType(const std::string& s) {
+    if (s == "generic")   return EnemyType::GENERIC;
+    if (s == "skeleton")  return EnemyType::SKELETON;
+    if (s == "bat")       return EnemyType::BAT;
+    if (s == "spider")    return EnemyType::SPIDER;
+    if (s == "hellhound") return EnemyType::HELLHOUND;
+    if (s == "sentinel")  return EnemyType::SENTINEL;
+    if (s == "succubus")  return EnemyType::SUCCUBUS;
+    if (s == "pit_fiend") return EnemyType::PIT_FIEND;
+    if (s == "boss")      return EnemyType::BOSS;
+    return EnemyType::COUNT;
 }
 
 // Infer EnemyType from mesh name for limb system compatibility
@@ -127,7 +148,7 @@ bool EnemyLoader::load(const char* path, EnemyDefTable& table) {
 
             // Role: supports single string or array of strings for combined roles
             if (entry.contains("role") && entry["role"].is_array()) {
-                u8 mask = EnemyRole::NORMAL;
+                u16 mask = EnemyRole::NORMAL;
                 for (auto& r : entry["role"]) mask |= parseRole(r.get<std::string>());
                 def.role = mask;
             } else {
@@ -138,12 +159,18 @@ bool EnemyLoader::load(const char* path, EnemyDefTable& table) {
             def.onHitDuration = entry.value("onHitDuration", 0.0f);
             def.onHitDps      = entry.value("onHitDps", 0.0f);
             def.dropWeight    = entry.value("dropWeight", 1.0f);
+            // A named boss opts OUT of its tier's random roster (see EnemyDef::unique).
+            def.unique        = entry.value("unique", false);
+            // 0 = dungeon (the default, and what every pre-overworld def is), 1 = Act 1, 2 = Act 2.
+            def.act           = static_cast<u8>(entry.value("act", 0));
 
             // Breeder target (optional): name resolved to spawnEnemyIdx after all defs load.
             std::string spawnName = entry.value("spawnEnemy", std::string{});
             std::strncpy(def.spawnEnemyName, spawnName.c_str(), sizeof(def.spawnEnemyName) - 1);
 
-            def.enemyType = inferEnemyType(def.meshName);
+            const EnemyType authored = parseEnemyType(entry.value("enemyType", std::string()));
+            def.enemyType = (authored != EnemyType::COUNT) ? authored
+                                                           : inferEnemyType(def.meshName);
 
             table.count++;
         }

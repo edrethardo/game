@@ -57,6 +57,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include "game/free_play.h"   // ladder-end constants for zone scaling
 
 // Breeder tunables (Broodmother → Dungeon Spider). See Engine::tickBreeders.
 static constexpr f32 BREED_INTERVAL = 5.0f;   // seconds between brood spawns while engaged
@@ -202,6 +203,30 @@ static const BossTemplate kBosses[BOSS_COUNT] = {
 // lets one helper serve both the JSON and the fallback spawn path (EnemyDef and EnemyTemplate are
 // different types; duplicating this per branch is how those two paths would rot apart).
 // ---------------------------------------------------------------------------
+// The floor the difficulty curve is evaluated at.
+//
+// `currentFloor + difficulty*50` is right for the dungeon and WRONG for an overworld zone, where
+// `currentFloor` is a SENTINEL (52-96) that identifies the world rather than measuring depth. It fed
+// straight into the curve, so a post-Inferno player (difficulty 3) met enemies scaled at effective
+// floor 202-246 against Inferno-50's 200 — and because HP COMPOUNDS at 3.9% per floor, that is x1.31
+// health in TristRAM, x1.84 in Hellgate: Localhost and x5.81 at the top of the sentinel range, while
+// damage (linear) barely moved. Exactly the reported "much tankier and stronger than Inferno".
+//
+// Zones therefore scale at the END OF THE LADDER — the same numbers as Inferno floor 50, derived
+// from the FreePlay constants rather than typed as 200 so it follows if a tier is ever added. That
+// is the intent: the overworld is post-Inferno content, so its trash should be as hard as the
+// hardest dungeon content and no harder. (Zone BOSSES bypass scaling entirely and are authored at
+// post-Inferno numbers directly — see spawnZoneContents.)
+//
+// One helper because the expression was open-coded at SEVEN spawn sites, none of which knew zones
+// existed; a zone-aware fix at one of them would have left the other six wrong.
+u32 Engine::scalingEffectiveFloor() const {
+    if (m_level.inZone)
+        return static_cast<u32>(FreePlay::MAX_FLOOR)
+             + static_cast<u32>(FreePlay::FINAL_DIFFICULTY) * 50u;
+    return m_level.currentFloor + m_difficulty * 50u;
+}
+
 bool Engine::tryMakeChampion(Entity& leader, u16 leaderIdx, const DungeonRoom& room, u32 effFloor)
 {
     if (effFloor < Champion::MIN_FLOOR) return false;
@@ -310,7 +335,7 @@ bool Engine::tryMakeChampion(Entity& leader, u16 leaderIdx, const DungeonRoom& r
 // tier-appropriate hostile entities. Reads tier to pick kTier* fallback table
 // and collectTierDefs for the JSON path. Writes into m_entities and m_level.grid.
 // ---------------------------------------------------------------------------
-void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
+void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier, u8 act)
 {
     // Fresh floor, fresh pack budget.
     m_championPacksThisFloor = 0;
@@ -334,7 +359,7 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
 
     // Collect JSON defs for this tier
     const EnemyDef* tierDefs[MAX_ENEMY_DEFS];
-    u32 tierDefCount = collectTierDefs(m_enemyDefs, tier, tierDefs, MAX_ENEMY_DEFS);
+    u32 tierDefCount = collectTierDefs(m_enemyDefs, tier, tierDefs, MAX_ENEMY_DEFS, act);
 
     // Fallback: use kTier arrays if no JSON defs loaded
     const EnemyTemplate* fallbackTier = kTier1;
@@ -497,7 +522,7 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     if (def.spawnEnemyIdx != 0xFFFF) ent->breedTimer = BREED_INTERVAL;
 
                     // Floor scaling
-                    u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+                    u32 effectiveFloor = scalingEffectiveFloor();
                     ent->level = static_cast<u16>(effectiveFloor);
                     // HP compounds with the effective floor (Nightmare/Hell ramp
                     // exponentially); damage stays on the linear floor curve plus a flat
@@ -593,7 +618,7 @@ void Engine::spawnFloorEnemies(DungeonResult& dungeon, u8 tier)
                     }
                     ent->enemyType = tmpl.etype;
 
-                    u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+                    u32 effectiveFloor = scalingEffectiveFloor();
                     ent->level = static_cast<u16>(effectiveFloor);
                     // HP compounds; damage linear + per-difficulty bump (see other spawn path);
                     // plus the Hellforge lava-floor surcharge (+50% HP / +30% damage, else 1.0).
@@ -826,7 +851,7 @@ u32 Engine::spawnFloorBoss(DungeonResult& dungeon)
         // Use the effective floor so bosses ramp with difficulty like every other enemy:
         // HP compounds, damage is linear + the per-tier bump. (bossEffFloor is reused below
         // for boss->level / ability keying.)
-        u32 bossEffFloor = m_level.currentFloor + m_difficulty * 50;
+        u32 bossEffFloor = scalingEffectiveFloor();
         f32 bossHpMult   = GameConst::floorHealthMult(bossEffFloor)
                            * GameConst::difficultyHealthBump(m_difficulty);
         f32 bossDmgMult  = GameConst::floorDamageMult(bossEffFloor)
@@ -991,7 +1016,7 @@ void Engine::spawnFloorChests(const DungeonResult& dungeon)
             // Mimics are hostile ambush enemies — scale them with floor/difficulty exactly
             // like every other enemy (HP compounds, damage linear + per-tier bump) so a
             // late-Hell mimic isn't a trivial 60 HP. effectiveFloor also drives loot/DoT credit.
-            u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+            u32 effectiveFloor = scalingEffectiveFloor();
             // ...plus the Hellforge lava-floor surcharge (+50% HP / +30% damage, else 1.0) — a mimic is
             // a hostile enemy, so it wades the molten tier like the rest.
             f32 mimicHp  = GameConst::MIMIC_HEALTH * GameConst::floorHealthMult(effectiveFloor)
@@ -1020,7 +1045,7 @@ void Engine::spawnFloorChests(const DungeonResult& dungeon)
             // Level scales with effectiveFloor like the mimic's drop — if real chests paid
             // early-floor trash while mimics paid depth-scaled loot, the LOOT would become
             // the tell.
-            u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+            u32 effectiveFloor = scalingEffectiveFloor();
             u32 lootLvl = effectiveFloor + r / 3;   // deeper rooms slightly better, as before
             ItemInstance chest;
             chest.defId     = CHEST_ID;
@@ -1237,7 +1262,7 @@ void Engine::spawnFloorEvents(DungeonResult& dungeon)
 {
     if (m_netRole == NetRole::CLIENT) return;
 
-    const u32 effFloor = m_level.currentFloor + m_difficulty * 50;
+    const u32 effFloor = scalingEffectiveFloor();
     u32 rng = static_cast<u32>(std::rand());
     const FloorEventId id = FloorEvent::pick(m_floorEvents, effFloor, rng);
     if (id == FloorEventId::NONE) return;
@@ -1281,7 +1306,7 @@ void Engine::spawnLootGoblin(const DungeonResult& dungeon)
                  room.floorHeight + 0.5f,
                  (room.z + room.d * 0.5f) * m_level.grid.cellSize };
 
-    const u32 effFloor = m_level.currentFloor + m_difficulty * 50;
+    const u32 effFloor = scalingEffectiveFloor();
     const f32 hp = Goblin::HEALTH * GameConst::floorHealthMult(effFloor);
     const f32 speed = 5.0f * Goblin::SPEED_MULT;   // ~player base speed, scaled
 
@@ -1437,7 +1462,7 @@ void Engine::spawnBredEnemy(u8 defIdx, Vec3 nearPos) {
 
     // Floor scaling — identical to spawnFloorEnemies, so a bred spider matches a placed one
     // (including the Hellforge lava-floor surcharge: +50% HP / +30% damage, else 1.0).
-    u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+    u32 effectiveFloor = scalingEffectiveFloor();
     ent->level = static_cast<u16>(effectiveFloor);
     f32 hpMult  = GameConst::floorHealthMult(effectiveFloor)
                                   * GameConst::difficultyHealthBump(m_difficulty)
@@ -1462,7 +1487,7 @@ void Engine::spawnFloorNests(const DungeonResult& dungeon, u8 tier) {
     // ones so they sit ON the balcony (the story-snap keeps them there); fall back to flyers, which
     // hover above it and still shoot down.
     const EnemyDef* tierDefs[MAX_ENEMY_DEFS];
-    u32 tierCount = collectTierDefs(m_enemyDefs, tier, tierDefs, MAX_ENEMY_DEFS);
+    u32 tierCount = collectTierDefs(m_enemyDefs, tier, tierDefs, MAX_ENEMY_DEFS, /*act=*/0);
     const EnemyDef* ranged[MAX_ENEMY_DEFS];
     u32 rangedCount = 0;
     for (u32 i = 0; i < tierCount; i++)
@@ -1481,7 +1506,7 @@ void Engine::spawnFloorNests(const DungeonResult& dungeon, u8 tier) {
     for (u32 i = 0; i < tierCount; i++)
         if (tierDefs[i]->attackRange <= 5.0f && !tierDefs[i]->flying) melee[meleeCount++] = tierDefs[i];
 
-    const u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+    const u32 effectiveFloor = scalingEffectiveFloor();
     const f32 hpMult  = GameConst::floorHealthMult(effectiveFloor)
                                   * GameConst::difficultyHealthBump(m_difficulty)
                                   * GameConst::hellforgeHpMult(m_level.lavaFloor);      // +50% on lava
@@ -1594,7 +1619,7 @@ void Engine::spawnFloorHoleSnipers(const DungeonResult& dungeon, u8 tier) {
     // Ranged defs of this tier (grounded preferred so they sit ON the slab; flyers fall back). Same
     // selection as spawnFloorNests so the two sniper sources read identically.
     const EnemyDef* tierDefs[MAX_ENEMY_DEFS];
-    u32 tierCount = collectTierDefs(m_enemyDefs, tier, tierDefs, MAX_ENEMY_DEFS);
+    u32 tierCount = collectTierDefs(m_enemyDefs, tier, tierDefs, MAX_ENEMY_DEFS, /*act=*/0);
     const EnemyDef* ranged[MAX_ENEMY_DEFS];
     u32 rangedCount = 0;
     for (u32 i = 0; i < tierCount; i++)
@@ -1604,7 +1629,7 @@ void Engine::spawnFloorHoleSnipers(const DungeonResult& dungeon, u8 tier) {
             if (tierDefs[i]->attackRange > 5.0f) ranged[rangedCount++] = tierDefs[i];
     if (rangedCount == 0) return;   // no ranged enemies this tier → no hole snipers
 
-    const u32 effectiveFloor = m_level.currentFloor + m_difficulty * 50;
+    const u32 effectiveFloor = scalingEffectiveFloor();
     const f32 hpMult  = GameConst::floorHealthMult(effectiveFloor)
                                   * GameConst::difficultyHealthBump(m_difficulty);
     const f32 dmgMult = GameConst::floorDamageMult(effectiveFloor)
@@ -1683,6 +1708,9 @@ void Engine::tickBreeders(f32 dt) {
         Entity& e = m_entities.entities[m_entities.activeList[a]];
         if (e.flags & (ENT_DEAD | ENT_FRIENDLY)) continue;
         if (e.enemyDefIdx >= m_enemyDefs.count) continue;
+        // A SPLITTER reuses `spawnEnemy` to name what it dies INTO, not what it breeds — without
+        // this it would shed halves on the breed cadence while still alive.
+        if (e.enemyRole & EnemyRole::SPLITTER) continue;
         const u16 spawnIdx = m_enemyDefs.defs[e.enemyDefIdx].spawnEnemyIdx;
         if (spawnIdx == 0xFFFF) continue;                       // not a breeder
         // Only breed while actually engaged — otherwise a Broodmother would carpet the whole

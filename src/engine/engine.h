@@ -19,6 +19,8 @@
 #include "game/weapon.h"
 #include "game/projectile.h"
 #include "game/item.h"
+#include "game/zone_def.h"      // Zone::ZoneDef / Dir — the overworld zone graph (sentinel floors 52-96)
+#include "game/quest_def.h"     // Quest::QuestDef — the Act 1 chain
 #include "game/stash.h"
 #include "game/arena.h"   // PvP deathmatch rules (Arena mode, floor 97)
 #include "game/combat.h"  // Combat::PvpHit/PvpHitOutcome — the arena's atomic hit apply
@@ -146,7 +148,8 @@ private:
                                  // 10=host mode, 11=P2 New/Continue chooser, 12=P2 slot select,
                                  // 14=free-play level select (post-clear),
                                  // 15=options:audio, 16=options:keyboard&mouse, 17=options:controller,
-                                 // 18=options:display, 22=Arena Mode chooser (Host Arena / Local Versus)
+                                 // 18=options:display, 22=Arena Mode chooser (Host Arena / Local Versus),
+                                 // 23/24=Auto-Loot chooser (P1/couch P2), 25=waypoint travel list
         u8   subSelection = 0;
         // Free-Play (post-clear level select, sub-state 14): a cleared character's chosen difficulty
         // (0-2) and floor (1-50) for a non-destructive farming session. subSelection picks the active
@@ -873,6 +876,14 @@ private:
     // Only player body meshes have .valid=true; filled at load in engine_init_assets.
     BodyRegions m_bodyRegions[MAX_MESH_DEFS] = {};
 
+    // A/B kill-switch for the occlusion cull (VIS_CULL_OFF=1), read once at init. A member rather
+    // than a getenv per entity per frame — and it is what lets the paired measurement come from ONE
+    // binary, the method that caught the Y-banded-section regression.
+    bool m_visCullOff = false;
+    // --devperf: emit the 1 Hz [DEVPERF] measurement line (tools/switch_perf_run.sh). Off unless
+    // asked for, so a build that is being PLAYED carries no instrumentation.
+    bool m_devPerf    = false;
+
     // Level, dungeon, and world state
     struct LevelState {
         LevelGrid    grid;
@@ -908,6 +919,11 @@ private:
         // town's daylight rendering, gates ALL PvP damage (Combat::pvpActive), and firewalls
         // progression: no XP, no loot, no drops, no saves. Like inTown, never serialized.
         bool          inArena            = false;
+        // The OVERWORLD zones (sentinel floors 52-96, engine_world.cpp / zone_def.h). Like the town
+        // these are daylight worlds off the numbered ladder; zoneFloor IS the zone's identity (the
+        // same byte the wire and the save header carry), so nothing else has to be serialized.
+        bool          inZone             = false;
+        u8            zoneFloor          = 0;      // 0 = not in a zone; else the 52-96 sentinel
         bool          townPortalActive   = false; // the town's to-dungeon portal (opens Free-Play select)
         Vec3          townPortalPos;
         bool          sourcePortalActive = false; // the second hidden portal is live in the floor-50 arena
@@ -1347,6 +1363,10 @@ private:
         bool nearPortal = false;     // standing in The Source portal trigger (floor 50 secret)
         bool nearExitPortal = false; // standing in the post-Engine exit portal (rolls credits)
         s32  stashIdx  = -1;         // world-item index of the town's stash chest in reach (-1 none)
+        // Overworld fixtures (engine_zone.cpp). A waypoint opens the travel list and is NEVER
+        // consumed; a zone gate walks you through to the floor named in its itemLevel byte.
+        s32  waypointIdx = -1;
+        s32  zoneGateIdx = -1;
         bool nearTownPortal = false; // standing in the town's to-dungeon portal
         Interact::HoldState hold;    // tap/hold machine state (see game/interact.h)
     };
@@ -1427,6 +1447,53 @@ private:
     void arenaSendScores(u8 toSlot);   // ARENA_SCORES refresh (0xFF = broadcast)
     void arenaLeaveToMenu();           // teardown, never saves
     void arenaPushFeed(u8 killerSlot, u8 victimSlot);
+    // --- OVERWORLD zones (engine_zone.cpp) ------------------------------------------------------
+    // Sentinel floors 52-96 (game/zone_def.h). Seeded terrain + deterministic landmarks; entry rides
+    // the same sentinel rails as the town, so a client rebuilds a zone from (floor, difficulty, seed).
+    Vec3 buildZoneLevel(const Zone::ZoneDef& def);
+    // The zone's generated room rects, kept from buildZoneLevel so spawnZoneContents can populate
+    // from them (the same data spawnFloorEnemies reads on a dungeon floor).
+    DungeonResult m_zoneGen{};
+    void spawnZoneContents(const Zone::ZoneDef& def, Vec3 center);
+    void enterZone(u8 zoneFloor, u8 fromFloor);   // fromFloor 0 = unknown (waypoint jump)
+    void enterZoneClient(u8 zoneFloor);
+    void zoneClearPad(u32 cx, u32 cz, u32 radius);
+    void zoneOpenGate(Zone::Dir dir);
+    Vec3 zoneGatePos(Zone::Dir dir) const;
+    Vec3 zoneArrivalPos(const Zone::ZoneDef& def, u8 fromFloor);
+    // Walking into a border band with a linked neighbour hands off to the next zone (host decides,
+    // clients follow the broadcast) — the town-portal proximity pattern.
+    void updateZoneTransitions();
+    f32  m_zoneGateHintTimer = 0.0f;   // throttles the locked-gate chat line
+    // Edge transitions are DISARMED on arrival and re-arm only once the player has stood clear of
+    // every border band. Without it, arriving at a gate re-triggers that same gate — which links
+    // straight back where you came from — and you ping-pong between two zones forever. See
+    // updateZoneTransitions.
+    bool m_zoneEdgeArmed = false;
+    // Waypoints: per-character discovery (a u64 bit per ZONES[] row) + the travel list.
+    u8   zoneBitFor(u8 zoneFloor);
+    bool waypointDiscovered(u8 zoneFloor) const;
+    void touchWaypoint(s32 worldItemIdx);
+    void enterZoneGate(s32 worldItemIdx);
+    void openWaypointUI();
+    // Act 1 quests (game/quest_def.h). Offered on entering their zone, completed by one of three
+    // triggers the engine can already observe. No journal UI — the chat line IS the journal.
+    void questOnZoneEnter(u8 zoneFloor);
+    void questOnEnemyKilled(const char* enemyName);
+    void questCheckZoneCleared();
+    void questComplete(u8 zoneFloor);
+    u32  waypointDestinations(u8* outFloors, u32 maxOut) const;
+
+    // --- Shared world-entry ritual (engine_world.cpp) -------------------------------------------
+    // The steps every NON-startGame world entry (town/arena/Source/zone) must perform, in order.
+    // Each was copy-pasted four times and each omission has shipped as a bug — see the file header.
+    void worldResetPools();                                  // 1. entities/projectiles/world items
+    void worldClearLevelFlags();                             // 2. all "which world" flags off
+    void worldSeedHostSlot();                                // 3. the host's own NetPlayer slot
+    void worldPlaceLocalPlayers(Vec3 base, f32 yaw);         // 4. placement + the lane-alias persist
+    void worldSeatNetPlayers(Vec3 base);                     // 5. seats + respawn anchors
+    void worldFinishEntry(u8 sentinelFloor, bool peaceful);  // 6. mode, state, net wiring, seed
+
     // SERVER net-callback wiring + Server::init, extracted from startGame so hosts that build
     // their world WITHOUT startGame (arena Continue / --arena, town cleared-Continue) still
     // seat joiners. Idempotent.
@@ -1511,7 +1578,13 @@ private:
     // background projects through the correct HUD ortho and stays crisp.
     void renderInteractionPrompts(u32 sw, u32 sh);
     void renderHUD(u32 sw, u32 sh);
+    // The floor number the DIFFICULTY CURVE should be evaluated at. Not simply
+    // `currentFloor + difficulty*50`: in an overworld zone `currentFloor` is a SENTINEL (52-96),
+    // which fed straight into the curve as if it were dungeon depth. See engine_spawn.cpp.
+    u32 scalingEffectiveFloor() const;
+
     void logStats();
+    void logDevicePerf();   // [DEVPERF] 1 Hz line — see engine.cpp; printf, not LOG_
 
     // renderHUD helpers — extracted contiguous blocks, called in original order
     void renderInventoryHUD(u32 sw, u32 sh);          // inventory screen branch
@@ -1662,7 +1735,7 @@ private:
 
     // Floor-population helpers called by startGame in engine_spawn.cpp.
     // All receive dungeon by reference because spawnFloorBoss mutates room geometry.
-    void spawnFloorEnemies(DungeonResult& dungeon, u8 tier);
+    void spawnFloorEnemies(DungeonResult& dungeon, u8 tier, u8 act);
     // VERTICAL_HALL only: place ranged "sniper nest" enemies on the balconies (ramp-top positions),
     // floor-scaled like normal spawns but at the balcony story Y (not the ground snap). See startGame.
     void spawnFloorNests(const DungeonResult& dungeon, u8 tier);
@@ -1858,6 +1931,11 @@ private:
         SkillState      skill{};
         u8 cls = 0, activeSkill = 0;
         SkillState      classSkills[4]{};
+        // v6 tail: discovered overworld waypoints + completed Act 1 quests. A pre-v6 save leaves
+        // both 0, which reads as "this hero has found/done none" — correct, since those characters
+        // predate the overworld entirely.
+        u64 waypointMask = 0;
+        u64 questMask    = 0;
     };
     // Apply a deserialized character to a local lane: affix migration, stat recompute, class base
     // stats, energy/skill rewire. Does NOT touch world state. (Defined in engine_persist.cpp.)
@@ -1891,6 +1969,15 @@ private:
     // lobby. saveAllCharacters() writes each active lane to its own slot, so characters never share
     // a file. Reset (lane 1 -> 0) whenever a fresh game-setup begins so a solo Continue stays solo.
     u8 m_playerSaveSlot[MAX_LOCAL_PLAYERS] = {0, 0};
+    // Discovered waypoints, one bit per ZONES[] row, PER CHARACTER (serialized — SAVE_VERSION 6).
+    // Lane-indexed like every other per-character field so couch heroes keep their own networks.
+    // The bit index is the zone's POSITION in the table, which makes ZONES effectively append-only:
+    // reordering it silently reassigns every saved hero's discovered set.
+    u64 m_waypointMask[MAX_LOCAL_PLAYERS] = {0, 0};
+    // Completed Act 1 quests, one bit per QUESTS[] row, per character. Rides the SAME v6 save tail as
+    // the waypoint mask — v6 is unreleased, so widening its tail now costs nothing, whereas adding a
+    // second version later would mean two conditional reads in every reader forever.
+    u64 m_questMask[MAX_LOCAL_PLAYERS] = {0, 0};
 
     // Per-lane origin (runtime only, not persisted): true if this lane's character
     // was loaded from a save (Continue / network join), false if it's a fresh New

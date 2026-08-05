@@ -79,14 +79,22 @@ extern bool s_engineSlain;    // secret superboss — Engine defeated this sessi
 //             autosave, permanently demoting an Inferno hero by 150 effective floors and keeping its
 //             gear. Silent, unrecoverable, and indistinguishable from a bug in the run. A version the
 //             old build refuses turns that into an honest "incompatible save".
-static constexpr u32 SAVE_VERSION           = 5;
+// Version 6 = the overworld WAYPOINT MASK (u64) appended to each character's block. Appended to the
+//             PER-PLAYER tail rather than the header on purpose: the header is read by THREE sites
+//             (scanSaveSlots, loadGame, loadCharacterInto) and growing it shifts offsets for all of
+//             them including the slot-list scan that never needs the field, whereas the per-player
+//             tail has one writer and two readers. Not inside PlayerInventory either — that would
+//             break its size static_assert and force a fourth Legacy mirror struct.
+static constexpr u32 SAVE_VERSION           = 6;
+static constexpr u32 SAVE_VERSION_LEGACY_V5 = 5;   // same layout minus the mask (reads as 0)
 static constexpr u32 SAVE_VERSION_LEGACY_V4 = 4;   // same layout — read as-is, migrates on next save
 static constexpr u32 SAVE_VERSION_LEGACY_V3 = 3;
 static constexpr u32 SAVE_VERSION_LEGACY_V2 = 2;
 
 // True for any version this build can read (the current one or a supported legacy one).
 static bool saveVersionReadable(u32 ver) {
-    return ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V4 ||
+    return ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V5 ||
+           ver == SAVE_VERSION_LEGACY_V4 ||
            ver == SAVE_VERSION_LEGACY_V3 || ver == SAVE_VERSION_LEGACY_V2;
 }
 
@@ -134,7 +142,7 @@ static bool readPlayerInventory(FILE* f, PlayerInventory& out, u32 ver) {
     // v5 and v4 share one layout (v5 only widened the difficulty and rarity VALUE ranges), so both
     // read the struct directly. Keying this on `== SAVE_VERSION` alone is a trap when a bump adds no
     // fields: every v4 save would fall past the legacy branches below and fail to load outright.
-    if (ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V4)
+    if (ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V5 || ver == SAVE_VERSION_LEGACY_V4)
         return std::fread(&out, sizeof(PlayerInventory), 1, f) == 1;
     if (ver == SAVE_VERSION_LEGACY_V3) {
         // v3: identical up to the v4 tail — items copy 1:1, autoMode/buildCell keep their
@@ -328,6 +336,10 @@ void Engine::saveCharacter(u8 lane, u8 slot) {
     std::fwrite(&cls,         sizeof(u8), 1, f);
     std::fwrite(&activeSkill, sizeof(u8), 1, f);
     for (u32 s = 0; s < 4; s++) writeSkillStateLegacy(m_classSkillStatesPerPlayer[lane][s]);
+    // v6 tail: the overworld waypoints this character has discovered (one bit per ZONES[] row) and
+    // the Act 1 quests it has completed (one bit per QUESTS[] row).
+    std::fwrite(&m_waypointMask[lane], sizeof(u64), 1, f);
+    std::fwrite(&m_questMask[lane],    sizeof(u64), 1, f);
 
     // Only promote the temp over the real slot if every write succeeded (ferror catches a disk-full
     // or I/O error along the way). On any failure, drop the temp and keep the previous good save.
@@ -422,6 +434,8 @@ static bool v2HasWideSkillId(FILE* f, u8 playerCount) {
 // loadCharacterIntoLane (the Player-2 seat). Includes the old-save affix migration + stat rebuild.
 void Engine::applySavedCharToLane(u8 lane, const SavedChar& ps) {
     if (lane >= MAX_LOCAL_PLAYERS) return;
+    m_waypointMask[lane] = ps.waypointMask;   // v6; 0 on any older save (nothing discovered)
+    m_questMask[lane]    = ps.questMask;      // v6; 0 on any older save (nothing completed)
 
     // Restore the BASE max HP. maxHealth itself is derived (base + gear + buffs) and is recomputed
     // below — never trusted from disk.
@@ -549,6 +563,12 @@ bool Engine::loadGame(u8 slot) {
         pok = pok && std::fread(&ps.cls,         sizeof(u8),        1, f) == 1;
         pok = pok && std::fread(&ps.activeSkill, sizeof(u8),        1, f) == 1;
         for (u32 s = 0; s < 4; s++) pok = pok && readSkillLegacy(f, ps.classSkills[s], wideSkill);
+        // v6 tail. Version-conditional rather than unconditional: a v5 file simply ends here, and
+        // reading past it would fail the load outright for every save written before the overworld.
+        if (pok && ver >= SAVE_VERSION) {
+            pok = std::fread(&ps.waypointMask, sizeof(u64), 1, f) == 1;
+            pok = pok && std::fread(&ps.questMask, sizeof(u64), 1, f) == 1;
+        }
         if (!pok) { ok = false; break; }
     }
     std::fclose(f);
@@ -658,6 +678,10 @@ bool Engine::loadCharacterIntoLane(u8 slot, u8 lane) {
     ok = ok && std::fread(&ps.cls,         sizeof(u8),        1, f) == 1;
     ok = ok && std::fread(&ps.activeSkill, sizeof(u8),        1, f) == 1;
     for (u32 s = 0; s < 4; s++) ok = ok && readSkillLegacy(f, ps.classSkills[s], wideSkill);
+    if (ok && ver >= SAVE_VERSION) {
+        ok = std::fread(&ps.waypointMask, sizeof(u64), 1, f) == 1;
+        ok = ok && std::fread(&ps.questMask, sizeof(u64), 1, f) == 1;
+    }
     std::fclose(f);
     if (!ok) return false;
 

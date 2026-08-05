@@ -988,6 +988,31 @@ void Engine::renderMenu() {
         const char* hint = "Up/Down, Enter/A to confirm, B/ESC to go back";
         f32 hintW = FontSystem::textWidth(hint, 1);
         FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hintW) * 0.5f, sh * 0.12f, hint, {0.4f, 0.4f, 0.5f}, 1);
+    } else if (m_menu.subState == 25) {
+        // Waypoint travel list, drawn OVER the live zone (the world behind is never torn down).
+        const char* title = "Waypoints";
+        const f32 tW = FontSystem::textWidth(title, 3);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - tW) * 0.5f, sh * 0.74f, title,
+                             {0.55f, 0.85f, 1.0f}, 3);
+
+        u8 dests[Zone::COUNT + 1];
+        const u32 n = waypointDestinations(dests, Zone::COUNT + 1);
+        for (u32 i = 0; i < n; i++) {
+            const bool sel = (m_menu.subSelection == i);
+            const f32  y   = sh * 0.60f - static_cast<f32>(i) * 46.0f * uiScale;
+            HUD::drawMenuOption(sw, sh, y, 420.0f * uiScale, 35.0f * uiScale,
+                                sel ? Vec3{0.35f, 0.75f, 1.0f} : Vec3{0.15f, 0.3f, 0.45f}, sel);
+            const Zone::ZoneDef* z = Zone::find(dests[i]);
+            const char* label = z ? z->name : "Town";
+            const Vec3 tc = sel ? Vec3{1, 1, 1} : Vec3{0.6f, 0.6f, 0.6f};
+            const f32 lw = FontSystem::textWidth(label, 2);
+            FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - lw) * 0.5f, y + 10.0f * uiScale,
+                                 label, tc, 2);
+        }
+        const char* hint = "Enter: travel    Esc: back";
+        const f32 hw = FontSystem::textWidth(hint, 1);
+        FontSystem::drawText(sw, sh, (static_cast<f32>(sw) - hw) * 0.5f, sh * 0.16f, hint,
+                             {0.4f, 0.4f, 0.5f}, 1);
     } else if (m_menu.subState == 14) {
         // Free-Play level select — a cleared hero (Hell, floor > 50) picks difficulty + floor 1-50
         // to farm. Non-destructive: the no-downgrade save guard keeps the cleared slot pinned.

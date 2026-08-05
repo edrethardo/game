@@ -21,9 +21,10 @@
 #endif
 
 #include "engine/engine.h"
-#ifndef __SWITCH__
-#include "engine/launch_options.h"   // desktop-only CLI launch flags
-#endif
+// CLI launch flags. On Switch these arrive via `nxlink --args`, which is the only way to drive the
+// console into a specific scenario for a measurement; launch_options.cpp was already in the Switch
+// source list, only this include was gated.
+#include "engine/launch_options.h"
 
 // Change CWD to the directory containing the executable so that relative
 // asset paths ("assets/...") resolve correctly regardless of where the
@@ -73,9 +74,6 @@ static void setCwdToExeDir([[maybe_unused]] const char* argv0) {
 int main(int argc, char* argv[]) {
 #ifndef __SWITCH__
     setCwdToExeDir(argv[0]);
-#else
-    (void)argc;
-    (void)argv;
 #endif
 
 #ifdef __SWITCH__
@@ -99,11 +97,14 @@ int main(int argc, char* argv[]) {
     // Heap-allocate Engine to avoid ~500KB on the stack (Switch stack is limited)
     Engine* engine = new Engine();
     engine->init();
-#ifndef __SWITCH__
-    // Desktop dev convenience: parse launch flags and jump straight into the requested state
-    // (host/join/single + load/new). No flags, bad flags, or --help → normal menu boot.
+    // Launch flags jump straight into a requested state (host/join/single + load/new, --vhall,
+    // --autoplay, ...). No flags, bad flags or --help fall through to the normal menu boot.
+    //
+    // ON SWITCH these arrive from `nxlink --args "..."`, and they are the only way to put the
+    // console into a specific, repeatable scenario. Without them a device measurement depends on a
+    // human walking to the right kind of floor and holding still, which is neither repeatable nor
+    // fair to ask for. Harmless in a normal launch from the homebrew menu: argc is 1.
     engine->applyLaunchOptions(parseLaunchArgs(argc, argv));
-#endif
     engine->run();
     engine->shutdown();
     delete engine;

@@ -13,6 +13,10 @@
 //                  "flank" | "retreat" | "surround"   (initial AI state)
 //   onHitEffect  : 0=none 1=poison 2=slow 3=burn 4=freeze (+ onHitDuration / onHitDps)
 //   dropWeight   : relative loot-drop weighting (default 1.0)
+//   unique       : OMIT for a normal enemy. true = a NAMED one-of-a-kind monster
+//                  (an overworld ZoneDef::boss) that is placed BY NAME and never
+//                  drawn by the random tier roster. Set it on any boss, or the
+//                  spawn pool rolls it as ordinary trash beside itself.
 {
   "name": "<Display Name>",
   "tier": 2,

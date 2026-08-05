@@ -423,7 +423,7 @@
       "minLevel": 1,
       "maxLevel": 5,
       "maxRarity": "rare",
-      "dropWeight": 0.8
+      "dropWeight": 2.4
     },
     {
       "name": "Hunting Bow",
@@ -1119,7 +1119,7 @@
       "minLevel": 1,
       "maxLevel": 5,
       "maxRarity": "rare",
-      "dropWeight": 0.8
+      "dropWeight": 2.4
     },
     {
       "name": "Arcane Staff",
@@ -1136,7 +1136,7 @@
       "minLevel": 3,
       "maxLevel": 8,
       "maxRarity": "rare",
-      "dropWeight": 0.7
+      "dropWeight": 2.1
     },
     {
       "name": "Staff of the Void",
@@ -1251,7 +1251,8 @@
       "baseRecoil": 0.008,
       "minLevel": 8,
       "maxLevel": 18,
-      "maxRarity": "rare"
+      "maxRarity": "rare",
+      "dropWeight": 3.0
     },
     {
       "name": "Crypt Helmet",
@@ -1432,7 +1433,8 @@
       "baseRecoil": 0.012,
       "minLevel": 16,
       "maxLevel": 28,
-      "maxRarity": "rare"
+      "maxRarity": "rare",
+      "dropWeight": 3.0
     },
     {
       "name": "Cavern Helm",
@@ -1619,7 +1621,8 @@
       "baseRecoil": 0.012,
       "minLevel": 24,
       "maxLevel": 38,
-      "maxRarity": "rare"
+      "maxRarity": "rare",
+      "dropWeight": 3.0
     },
     {
       "name": "Demon Helm",
@@ -2879,7 +2882,223 @@
       "minLevel": 32,
       "maxLevel": 50,
       "maxRarity": "rare",
-      "dropWeight": 1.0
+      "dropWeight": 3.0
+    },
+    {
+      "name": "Mini Zombie Process",
+      "slot": "ring",
+      "mesh": "zombie_process",
+      "material": "zombie_process_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Zombie Process"
+    },
+    {
+      "name": "Mini The Garbage Collector",
+      "slot": "ring",
+      "mesh": "garbage_collector",
+      "material": "garbage_collector_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "The Garbage Collector"
+    },
+    {
+      "name": "Mini Bit Rat",
+      "slot": "ring",
+      "mesh": "bit_rat",
+      "material": "bit_rat_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Bit Rat"
+    },
+    {
+      "name": "Mini Legacy Archer",
+      "slot": "ring",
+      "mesh": "legacy_archer",
+      "material": "legacy_archer_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Legacy Archer"
+    },
+    {
+      "name": "Mini The Perpetual Commuter",
+      "slot": "ring",
+      "mesh": "perpetual_commuter",
+      "material": "perpetual_commuter_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "The Perpetual Commuter"
+    },
+    {
+      "name": "Mini Mind The Gap",
+      "slot": "ring",
+      "mesh": "mind_the_gap",
+      "material": "mind_the_gap_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Mind The Gap"
+    },
+    {
+      "name": "Mini Signal Failure",
+      "slot": "ring",
+      "mesh": "signal_failure",
+      "material": "signal_failure_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Signal Failure"
+    },
+    {
+      "name": "Mini Griswald, the Unfinished Build",
+      "slot": "ring",
+      "mesh": "griswald",
+      "material": "griswald_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Griswald, the Unfinished Build"
+    },
+    {
+      "name": "Mini Null Pointer",
+      "slot": "ring",
+      "mesh": "null_pointer",
+      "material": "null_pointer_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Null Pointer"
+    },
+    {
+      "name": "Mini Hot Reloader",
+      "slot": "ring",
+      "mesh": "hot_reloader",
+      "material": "hot_reloader_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Hot Reloader"
+    },
+    {
+      "name": "Mini Core Dump",
+      "slot": "ring",
+      "mesh": "core_dump",
+      "material": "core_dump_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Core Dump"
+    },
+    {
+      "name": "Mini The Merge Conflict",
+      "slot": "ring",
+      "mesh": "merge_conflict",
+      "material": "merge_conflict_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "The Merge Conflict"
+    },
+    {
+      "name": "Mini Detached HEAD",
+      "slot": "ring",
+      "mesh": "detached_head",
+      "material": "detached_head_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Detached HEAD"
+    },
+    {
+      "name": "Mini The Rubber Duck",
+      "slot": "ring",
+      "mesh": "rubber_duck",
+      "material": "rubber_duck_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "The Rubber Duck"
+    },
+    {
+      "name": "Mini Escalator Hound",
+      "slot": "ring",
+      "mesh": "escalator_hound",
+      "material": "escalator_hound_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Escalator Hound"
+    },
+    {
+      "name": "Mini Turnstile Wraith",
+      "slot": "ring",
+      "mesh": "turnstile_wraith",
+      "material": "turnstile_wraith_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Turnstile Wraith"
+    },
+    {
+      "name": "Mini Fare Evader",
+      "slot": "ring",
+      "mesh": "fare_evader",
+      "material": "fare_evader_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Fare Evader"
+    },
+    {
+      "name": "Mini Rail Replacement",
+      "slot": "ring",
+      "mesh": "rail_replacement",
+      "material": "rail_replacement_skin",
+      "minLevel": 255,
+      "maxLevel": 255,
+      "maxRarity": "common",
+      "dropWeight": 0.0,
+      "petSummon": true,
+      "petEnemy": "Rail Replacement"
     }
   ]
 }

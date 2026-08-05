@@ -8,6 +8,7 @@
 #include "core/log.h"
 #include "game/game_constants.h"   // GameConst::FINAL_FLOOR — demo caps --floor at 20
 #include "game/free_play.h"        // DIFFICULTY_COUNT — the tier bound --difficulty accepts
+#include "game/zone_def.h"         // Zone::FLOOR_MIN/MAX — the band --zone accepts
 
 #include <cstring>
 #include <cstdlib>
@@ -149,6 +150,14 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             // all ten shards, so without this the secret fight could only be exercised by accident.
             opt.source = true;
             opt.active = true;
+        } else if (ieq(a, "--zone")) {
+            const char* v = nextVal(i); if (!v) break;
+            long n; if (!parseInt(v, n) || n < Zone::FLOOR_MIN || n > Zone::FLOOR_MAX) {
+                LOG_WARN("--zone expects an overworld floor %u-%u (got '%s')",
+                         Zone::FLOOR_MIN, Zone::FLOOR_MAX, v); opt.valid = false; break;
+            }
+            opt.zoneFloor = (u8)n;
+            opt.active    = true;
         } else if (ieq(a, "--victory")) {
             // Dev door onto the ENDING screens: builds the world, then rolls the standard ending's
             // credits on the spot. Exercises credits -> victory -> (autoplay) next-run continuation
@@ -170,6 +179,8 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
         } else if (ieq(a, "--arena-couch")) {
             opt.arenaCouch = true;
             opt.active     = true;
+        } else if (ieq(a, "--devperf")) {
+            opt.devPerf = true; opt.active = true;
         } else if (ieq(a, "--vhall")) {
             opt.verticalHall = true;   // modifier on normal play (needs --new/--load); not a separate entry
             opt.active       = true;

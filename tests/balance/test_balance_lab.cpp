@@ -49,7 +49,7 @@ TEST_CASE("enemy trash curve: multiplier path matches the spawn code exactly") {
     const u8 rawFloor = 25, difficulty = 2;                    // Hell 25 -> effective 125
     const u32 eff = 125;
     const EnemyDef* defs[MAX_ENEMY_DEFS];
-    const u32 n = collectTierDefs(t, enemyTierForFloor(rawFloor), defs, MAX_ENEMY_DEFS);
+    const u32 n = collectTierDefs(t, enemyTierForFloor(rawFloor), defs, MAX_ENEMY_DEFS, /*act=*/0);   // the lab models the DUNGEON
     REQUIRE(n > 0);
     f32 hp[MAX_ENEMY_DEFS], hit[MAX_ENEMY_DEFS], dps[MAX_ENEMY_DEFS];
     // BOTH per-tier bumps, mirroring engine_spawn.cpp. This test used to omit difficultyHealthBump

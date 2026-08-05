@@ -319,6 +319,334 @@ def write_obj(path, mb):
 # Mesh generators
 # ---------------------------------------------------------------------------
 
+def gen_griswald(height=2.4):
+    """ACT 1 BOSS — "Griswald, the Unfinished Build": TristRAM's smith, restored once too often.
+
+    D2's Griswold is the undead blacksmith standing in the ruins of his own town. This is the same
+    beat through the act's lens: TristRAM has been restored from backup so many times that its smith
+    came back WRONG — a hulk that is still hammering something that will never compile.
+
+    The silhouette has to read as BOSS at a glance and as SMITH on approach, so: half again as tall as
+    a man, an anvil-wide upper body, one arm ending in a hammer that was never put down — and the
+    other side of him visibly UNFINISHED, voxels missing like a model that failed to load. That
+    asymmetry is the whole character: one half is a craftsman, the other half never got written.
+    Grid x=[-4,4] (w=9), y=[0,15] (h=16) — WIDER than the humanoid grid, so its skin is 9 wide.
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Head — low, sunk between enormous shoulders; a smith's stoop that never straightened
+    fill_box(-1, 12, -2, 3, 3, 3)
+    filled.discard((1, 14, -2))          # a corner of the skull simply absent
+
+    # Torso: anvil-shaped, widest at the shoulders
+    fill_box(-4, 9, -2, 9, 3, 4)         # shoulder span
+    fill_box(-3, 5, -2, 7, 4, 4)         # chest
+    fill_box(-2, 3, -1, 5, 2, 3)         # waist, narrowing
+
+    # LEFT side: the craftsman. Full arm, gripping the hammer.
+    fill_box(-5, 6, -1, 1, 4, 2)         # upper arm
+    fill_box(-5, 4, -2, 1, 2, 2)         # forearm
+    fill_box(-6, 2, -3, 3, 3, 4)         # THE HAMMER — oversized, the eye lands here
+
+    # RIGHT side: unfinished. The arm exists in fragments with gaps between them.
+    fill_box(4, 8, -1, 1, 2, 2)
+    fill_box(4, 5, -1, 1, 1, 2)          # a floating chunk — nothing joins it to the shoulder
+    fill_box(4, 3, -1, 1, 1, 1)
+
+    # Legs — heavy, planted; the right one is thinner where the model gave out
+    fill_box(-3, 0, -1, 3, 3, 3)
+    fill_box(1, 0, -1, 2, 3, 2)
+
+    # The anvil he is fused to, still under the hammer
+    fill_box(-3, 0, -5, 4, 2, 3)
+
+    ox = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, 0))
+    return mb
+
+
+def gen_perpetual_commuter(height=1.9):
+    """ACT 2 — "The Perpetual Commuter": a demon in the ruin of a suit, still holding its briefcase.
+
+    Hellgate London puts demons in a fallen city; this is the city's own contribution. The read is a
+    silhouette everyone recognises — squared shoulders, a case in one hand — gone wrong: the head is
+    too low, the case has fused to the arm, and it is still walking the route. Grid x=[-3,3] (w=7),
+    y=[0,15] (h=16).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Head, sunk between the shoulders — no neck left
+    fill_box(-1, 12, -2, 3, 3, 3)
+    # Squared, padded shoulders: the suit is the silhouette
+    fill_box(-3, 10, -2, 7, 2, 4)
+    fill_box(-2, 5, -1, 5, 5, 3)
+    # Arms; the right one ends in the case
+    fill_box(-3, 6, 0, 1, 4, 1)
+    fill_box(3, 6, 0, 1, 4, 1)
+    # THE BRIEFCASE — fused on, oversized, the thing the eye lands on
+    fill_box(2, 3, -3, 3, 3, 4)
+    # Legs, mid-stride forever
+    fill_box(-2, 0, 0, 2, 5, 2)
+    fill_box(1, 0, -1, 2, 5, 2)
+
+    ox = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, 0))
+    return mb
+
+
+def gen_mind_the_gap(height=1.2):
+    """ACT 2 — "Mind The Gap": the thing that lives in the platform gap. An AMBUSH enemy.
+
+    The joke is the sign. It spawns dormant and flat — a low, wide, grate-like mass that reads as
+    part of the platform until it stands up. Deliberately WIDE and LOW so that, seen from the front,
+    it is a slot in the floor. Grid x=[-3,3] (w=7), y=[0,15] (h=16).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # A long low slab — the "gap" itself
+    fill_box(-3, 0, -1, 7, 2, 3)
+    # Grate teeth along the lip, with bites missing so it is not a tidy machine part
+    for x in range(-3, 4):
+        if x % 2 == 0:
+            fill_box(x, 2, -1, 1, 2, 1)
+    # The hunched mass behind it that you only see once it rises
+    fill_box(-2, 2, 0, 5, 3, 2)
+    fill_box(-1, 5, 0, 3, 2, 2)
+    # Two eyes set deep in the slot
+    fill_box(-2, 3, -2, 1, 1, 1)
+    fill_box(1, 3, -2, 1, 1, 1)
+
+    ox = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, 0))
+    return mb
+
+
+def gen_signal_failure(height=1.6):
+    """ACT 2 — "Signal Failure": a hovering knot of dead signalling gear. The act's rift-boss.
+
+    Hellgate's demons come through a rift; this one came through the wiring. Read: a floating mast
+    with three signal arms at broken angles and a lamp housing that no longer agrees with itself.
+    Flies, so the body starts above the floor. Grid x=[-3,3] (w=7), y=[0,15] (h=16).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Central mast — hovering, so nothing touches y=0..3
+    fill_box(0, 4, 0, 1, 9, 1)
+    # Lamp housing at the top, lopsided
+    fill_box(-1, 12, -1, 3, 3, 3)
+    filled.discard((1, 14, -1))
+    # Three signal arms, each at a different broken angle
+    fill_box(-3, 10, 0, 3, 1, 1)
+    fill_box(1, 8, 0, 3, 1, 1)
+    fill_box(-2, 6, 0, 2, 1, 1)
+    # Counterweights hanging off the arms
+    fill_box(-3, 9, 0, 1, 1, 1)
+    fill_box(3, 7, 0, 1, 1, 1)
+    # Trailing cable bundle beneath — the only thing pointing at the ground
+    fill_box(0, 2, 0, 1, 2, 1)
+    filled.add((0, 1, 1))
+
+    ox = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, 0))
+    return mb
+
+
+def gen_zombie_process(height=1.8):
+    """ACT 1 — "Zombie Process": a hunched, half-terminated humanoid that never exited cleanly.
+
+    The wink is that it is literally a zombie process: a thing whose parent forgot to reap it, still
+    holding resources, shambling. Read: lopsided (one shoulder collapsed), one arm hanging longer
+    than the other, head tipped. Grid x=[-3,3] (w=7), y=[0,15] (h=16) — the skin MUST match.
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Head, tipped to one side (the collapse is the silhouette — it reads at distance)
+    fill_box(-2, 12, -2, 4, 3, 4)
+    filled.discard((-2, 14, -2))          # corner chipped off — decay, not damage
+    fill_box(-1, 11, -2, 2, 1, 3)         # slack jaw
+    # Torso: one shoulder dropped a voxel, so the whole body leans
+    fill_box(-2, 6, -1, 5, 5, 3)
+    fill_box(-3, 9, -1, 1, 1, 3)          # left shoulder high
+    fill_box(3, 8, -1, 1, 1, 3)           # right shoulder LOW — the lean
+    # Arms: the right hangs to the knee (unreaped, still holding on)
+    fill_box(-3, 6, 0, 1, 3, 1)
+    fill_box(3, 3, 0, 1, 5, 1)            # long dangling arm
+    fill_box(-3, 5, -1, 1, 1, 2)
+    fill_box(3, 2, -1, 1, 1, 2)
+    # Legs — stiff, one dragging
+    fill_box(-2, 0, 0, 2, 6, 2)
+    fill_box(1, 0, 0, 2, 5, 2)
+    fill_box(1, 0, -1, 2, 1, 3)           # dragged foot, splayed forward
+
+    ox = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, 0))
+    return mb
+
+
+def gen_garbage_collector(height=2.0):
+    """ACT 1 — "The Garbage Collector": a tall robed reclaimer that re-allocates the dead.
+
+    D2's Fallen Shaman resurrects its minions; this one collects them. The joke is exact — a garbage
+    collector that gives freed objects back. Read: tall, no legs (hem to the floor), a lantern-arm
+    it sweeps like a collection pass. Grid x=[-3,3] (w=7), y=[0,15] (h=16).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Hood — deep, with a hollow front so the face is a void the skin can paint
+    fill_box(-2, 12, -2, 5, 4, 4)
+    filled.discard((0, 13, -2))
+    filled.discard((-1, 13, -2))
+    filled.discard((1, 13, -2))
+    # Robe: widens all the way down to the floor — no legs at all, it hovers/sweeps
+    fill_box(-2, 8, -1, 5, 4, 3)
+    fill_box(-3, 4, -2, 7, 4, 4)
+    fill_box(-3, 0, -2, 7, 4, 5)          # hem pools on the ground
+    # Collection arm, extended forward holding a lantern
+    fill_box(3, 9, -1, 1, 2, 1)
+    fill_box(3, 9, -3, 1, 1, 2)
+    fill_box(2, 8, -4, 3, 3, 3)           # the lantern — the eye-catch
+    # Trailing arm tucked into the robe
+    fill_box(-3, 8, 0, 1, 3, 1)
+
+    ox = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, 0))
+    return mb
+
+
+def gen_bit_rat(height=0.9):
+    """ACT 1 — "Bit Rat": a low, fast vermin made of decaying data (bit rot, with whiskers).
+
+    D2's Quill Rat fires quills; this fires corrupted bits. Read: long body, low to the ground, a
+    ridge of spines along the back that are visibly MISSING chunks — the rot is the silhouette.
+    Grid x=[-3,3] (w=7), y=[0,15] (h=16); short enemies simply leave the upper rows empty.
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Body — long and low
+    fill_box(-2, 2, -3, 4, 3, 7)
+    # Head, tapered snout
+    fill_box(-1, 2, -5, 2, 2, 2)
+    fill_box(-1, 2, -6, 2, 1, 1)
+    # Ears
+    fill_box(-2, 5, -4, 1, 1, 1)
+    fill_box(1, 5, -4, 1, 1, 1)
+    # Spine ridge with BIT ROT — every third spine is missing, which is the whole joke
+    for z in range(-2, 4):
+        if (z + 2) % 3 == 1:
+            continue
+        fill_box(-1, 5, z, 2, 1, 1)
+    # Legs — stubby
+    for lz in (-2, 2):
+        fill_box(-2, 0, lz, 1, 2, 1)
+        fill_box(1, 0, lz, 1, 2, 1)
+    # Tail, thinning
+    fill_box(0, 3, 4, 1, 1, 2)
+    fill_box(0, 3, 6, 1, 1, 1)
+
+    ox = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, 0))
+    return mb
+
+
+def gen_legacy_archer(height=1.8):
+    """ACT 1 — "Legacy Archer": a rotted ranger still running a version nobody supports.
+
+    D2 gives you corrupted rogues; this is the same beat with the game's own joke — she is not
+    corrupted, she is DEPRECATED, and still firing. Read: humanoid with a shortbow held across the
+    body, quiver on the back, one arm permanently drawn. Grid x=[-3,3] (w=7), y=[0,15] (h=16).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Head + hood
+    fill_box(-2, 12, -2, 4, 3, 4)
+    filled.discard((0, 13, -2))           # face gap
+    # Torso
+    fill_box(-2, 6, -1, 4, 6, 3)
+    # Quiver on the back, arrows jutting up — the read that says "archer" from behind
+    fill_box(-2, 8, 2, 2, 4, 1)
+    fill_box(-2, 12, 2, 1, 2, 1)
+    fill_box(-1, 12, 2, 1, 1, 1)
+    # Bow arm out, string arm drawn to the cheek
+    fill_box(-3, 8, -2, 1, 1, 2)
+    fill_box(2, 9, -1, 1, 1, 1)
+    # The bow itself — a vertical arc in front
+    for by in range(5, 13):
+        fill_box(-4, by, -2, 1, 1, 1)
+    fill_box(-3, 12, -2, 1, 1, 1)
+    fill_box(-3, 5, -2, 1, 1, 1)
+    # Legs
+    fill_box(-2, 0, 0, 2, 6, 2)
+    fill_box(1, 0, 0, 2, 6, 2)
+
+    ox = -0.5 * vs
+    add_voxel_model(mb, filled, vs, offset=(ox, 0, 0))
+    return mb
+
+
 def gen_humanoid(height=1.8):
     """Barony-style chunky voxel skeleton. Origin at feet (Y=0).
 
@@ -4790,11 +5118,436 @@ def gen_player_ranger(height=1.8):
     return mb
 
 
+# =====================================================================================
+# ACT 1 — the overworld bestiary (Diablo 2 Act 1, Dungeon Engine'd) + two originals.
+# All use grid y=[0,15] (h=16); short enemies simply leave the upper rows empty.
+# =====================================================================================
+
+def gen_null_pointer(height=0.9):
+    """ACT 1 — "Null Pointer": D2's Fallen. A small, cowardly imp that points at NOTHING.
+
+    The joke has to be in the silhouette or it is just a small imp: its head is a hollow SQUARE
+    OUTLINE with the middle punched out, so you can see the level straight through it. Grid
+    x=[-3,3] (w=7).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Stubby legs and a squat body — it is built to run away, not to fight
+    for lx in (-2, 1):
+        fill_box(lx, 0, -1, 1, 3, 2)
+    fill_box(-2, 3, -1, 4, 4, 2)
+    # Arms, one holding a crude shard
+    fill_box(-3, 4, -1, 1, 3, 1)
+    fill_box(2, 4, -1, 1, 3, 1)
+    fill_box(2, 7, -1, 1, 2, 1)          # the shard, held up
+    # HEAD: a hollow ring. The centre column is deliberately never filled.
+    for x in range(-2, 3):
+        filled.add((x, 8, -1)); filled.add((x, 8, 0))
+        filled.add((x, 11, -1)); filled.add((x, 11, 0))
+    for y in range(9, 11):
+        filled.add((-2, y, -1)); filled.add((-2, y, 0))
+        filled.add((2, y, -1));  filled.add((2, y, 0))
+    # Two horns so the empty middle reads as a face and not a bug
+    filled.add((-2, 12, -1)); filled.add((2, 12, -1))
+
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, 0))
+    return mb
+
+
+def gen_hot_reloader(height=1.5):
+    """ACT 1 — "Hot Reloader": D2's Fallen Shaman. Re-instantiates its dead comrades.
+
+    Robed, hooded, and carrying a staff whose head is an open ring — the reload glyph. The robe
+    flares to the ground so it reads as a caster from any angle. Grid x=[-3,3] (w=7).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Flared robe — widest at the hem, no legs visible
+    fill_box(-3, 0, -2, 6, 2, 4)
+    fill_box(-2, 2, -2, 4, 4, 4)
+    fill_box(-2, 6, -1, 4, 3, 3)
+    # Hood, tapering to a point
+    fill_box(-2, 9, -1, 4, 3, 3)
+    fill_box(-1, 12, -1, 2, 2, 2)
+    # Staff arm and the staff itself, held out to the side
+    fill_box(-3, 8, -1, 1, 2, 1)
+    fill_box(-4, 3, -1, 1, 11, 1)
+    # Staff head: an open RING (the reload glyph), centre left empty on purpose
+    for dx, dy in ((-1, 14), (1, 14), (-1, 15), (1, 15), (0, 15)):
+        filled.add((-4 + dx, dy, -1))
+
+    add_voxel_model(mb, filled, vs, offset=(0.5 * vs, 0, 0))
+    return mb
+
+
+def gen_core_dump(height=0.8):
+    """ACT 1 — "Core Dump": D2's Foul Crow. A carrion bird trailing the memory it spilled.
+
+    Flying, so the body sits mid-grid; wings spread wide and the tail breaks up into loose
+    fragments behind it — the dump itself. Grid x=[-4,4] (w=9).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Body and beaked head
+    fill_box(-1, 5, -2, 2, 3, 5)
+    fill_box(-1, 7, -4, 2, 2, 2)
+    fill_box(0, 7, -5, 1, 1, 1)
+    # Wings — stepped so they read as spread feathers, not slabs
+    for i, x in enumerate((-2, -3, -4)):
+        fill_box(x, 7 - i, -1, 1, 1, 3)
+    for i, x in enumerate((1, 2, 3)):
+        fill_box(x, 7 - i, -1, 1, 1, 3)
+    # Tail, disintegrating into loose fragments: the core is being dumped behind it
+    fill_box(0, 6, 3, 1, 1, 2)
+    filled.add((0, 6, 6)); filled.add((-1, 5, 7)); filled.add((1, 7, 7))
+
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, 0))
+    return mb
+
+
+def gen_merge_conflict(height=2.0):
+    """ACT 1 ORIGINAL — "The Merge Conflict": two half-bodies fused along a seam that never resolved.
+
+    The whole read is ASYMMETRY: the left half is squat and blocky, the right half is taller and
+    narrower, and the two do not line up anywhere. A jagged one-voxel seam runs up the middle —
+    the <<<<<<< marker made geometry. Kill it and it splits into the two branches it was hiding.
+    Grid x=[-4,4] (w=9).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # LEFT branch — heavy, low, wide stance
+    fill_box(-4, 0, -2, 2, 4, 3)
+    fill_box(-4, 4, -2, 4, 6, 4)
+    fill_box(-3, 10, -2, 3, 3, 3)          # broad head
+    fill_box(-4, 6, -3, 1, 4, 1)           # slab arm
+    # RIGHT branch — taller, thinner, standing differently
+    fill_box(2, 0, -1, 2, 6, 2)
+    fill_box(1, 6, -1, 3, 5, 3)
+    fill_box(2, 11, -1, 2, 4, 2)           # narrow head, higher
+    fill_box(4, 8, -2, 1, 3, 1)            # thin arm
+    # The SEAM: a ragged single column where the two were forced together, stepping in and out
+    for y in range(0, 15):
+        z = -2 if (y % 3 == 0) else (0 if (y % 3 == 1) else -1)
+        filled.add((0, y, z))
+        if y % 4 == 0:
+            filled.add((-1, y, z)); filled.add((1, y, z))
+
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, 0))
+    return mb
+
+
+def gen_detached_head(height=0.95):
+    """ACT 1 — "Detached HEAD": a severed head, and the joke is that it is a PINK UNICORN's.
+
+    The name is the git one (a HEAD with nothing under it), so the model leans all the way into the
+    other reading: muzzle, ears, a spiral horn, and a RAINBOW trailing where a neck should be. The
+    rainbow is built as six stacked one-voxel bands, each on its OWN grid row — that matters,
+    because add_voxel_model maps the skin by (gx, gy), so one row per colour is what lets the skin
+    paint clean rainbow stripes instead of a smear.
+
+    Grid x=[-4,4], y=[0,14]. Rainbow occupies y 0-5, head y 6-12, horn y 13-14.
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # --- Rainbow trail: six bands, widening and pulling backward as they fall. One row each so the
+    #     skin can give every band its own colour.
+    for i in range(6):
+        gy    = i                       # 0 = the outermost (lowest) band
+        half  = 1 + i // 2              # narrows toward the head
+        zback = 1 + (5 - i)             # the lower the band, the further it trails behind
+        fill_box(-half, gy, zback, half * 2 + 1, 1, 2)
+
+    # --- Head: a horse skull, longer than it is wide, muzzle toward -Z.
+    fill_box(-2, 7, -2, 5, 5, 4)        # cranium
+    fill_box(-1, 7, -5, 3, 3, 3)        # muzzle, tapering forward
+    fill_box(-1, 6, -4, 3, 1, 3)        # jaw underside
+    # Cheeks, so it reads as a head from the front rather than a box
+    fill_box(-3, 8, -1, 1, 3, 2)
+    fill_box(2, 8, -1, 1, 3, 2)
+
+    # --- Ears: two points at the back of the crown
+    filled.add((-2, 12, 0)); filled.add((-2, 12, 1))
+    filled.add((1, 12, 0));  filled.add((1, 12, 1))
+
+    # --- HORN: a tapering spike off the forehead, tilted forward over the muzzle.
+    fill_box(-1, 12, -3, 3, 1, 2)       # base
+    fill_box(0, 13, -3, 1, 1, 2)        # mid
+    filled.add((0, 14, -4))             # tip, pushed forward
+
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, 0))
+    return mb
+
+def gen_rubber_duck(height=2.0):
+    """ACT 1 ORIGINAL — "The Rubber Duck": enormous, serene, and waiting for you to explain yourself.
+
+    Deliberately NOT monstrous in shape: a perfectly ordinary bath duck, scaled to something that
+    could step on you. Rounded body, flat bill, and the little tail flip. Grid x=[-4,4] (w=9).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Body — rounded by stepping the width in at top and bottom
+    fill_box(-3, 0, -3, 6, 1, 6)
+    fill_box(-4, 1, -4, 8, 4, 8)
+    fill_box(-3, 5, -3, 6, 2, 6)
+    fill_box(-2, 7, -2, 4, 1, 4)
+    # Neck and head
+    fill_box(-2, 8, -3, 4, 3, 3)
+    fill_box(-2, 11, -3, 4, 3, 4)
+    # BILL — flat, wide, and sticking straight out
+    fill_box(-2, 11, -6, 4, 2, 3)
+    # Tail flip
+    fill_box(-1, 5, 4, 2, 3, 1)
+
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, 0))
+    return mb
+
+
+# =====================================================================================
+# ACT 2 — the Underground bestiary (Hellgate London, tube-ified).
+# =====================================================================================
+
+def gen_escalator_hound(height=1.1):
+    """ACT 2 — "Escalator Hound": Hellgate's hellhound, and it only ever runs one direction.
+
+    A long low quadruped whose spine is a run of STEPS — the escalator teeth — rising toward the
+    shoulders. Grid x=[-3,3] (w=7).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Long body, four legs
+    fill_box(-2, 4, -4, 4, 4, 9)
+    for lz in (-3, 3):
+        fill_box(-2, 0, lz, 1, 4, 2)
+        fill_box(1, 0, lz, 1, 4, 2)
+    # Head, held low and forward
+    fill_box(-2, 4, -7, 4, 3, 3)
+    fill_box(-1, 4, -8, 2, 2, 1)           # muzzle
+    filled.add((-2, 7, -6)); filled.add((1, 7, -6))   # ears
+    # Spine STEPS — rising toward the shoulders, one riser per pair of cells
+    for i, z in enumerate(range(4, -5, -1)):
+        fill_box(-1, 8 + (i // 3), z, 2, 1, 1)
+
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, 0))
+    return mb
+
+
+def gen_turnstile_wraith(height=1.9):
+    """ACT 2 — "Turnstile Wraith": Hellgate's spectre, still trying to touch in.
+
+    A thin spectral torso fused into a ticket barrier: the three horizontal TRIPOD ARMS at waist
+    height are the recognisable part, and the body above them is deliberately sparse so it reads as
+    half-there. Grid x=[-3,3] (w=7).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Barrier pedestal — the solid half of it, planted on the ground
+    fill_box(-2, 0, -1, 4, 6, 3)
+    # The TRIPOD: three arms radiating from the post at waist height
+    fill_box(-3, 5, -1, 3, 1, 1)
+    fill_box(1, 5, -1, 3, 1, 1)
+    fill_box(-1, 5, -3, 1, 1, 3)
+    # Spectral torso — sparse on purpose, every other row, so it looks unfinished
+    for y in range(6, 12):
+        if y % 2 == 0:
+            fill_box(-2, y, -1, 4, 1, 2)
+        else:
+            filled.add((-1, y, -1)); filled.add((0, y, 0))
+    # Head and the two arms still reaching for the reader
+    fill_box(-1, 12, -1, 2, 3, 2)
+    filled.add((-2, 11, -2)); filled.add((1, 11, -2))
+
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, 0))
+    return mb
+
+
+def gen_fare_evader(height=1.2):
+    """ACT 2 — "Fare Evader": a small quick thing caught mid-vault, and it will not be paying.
+
+    Crouched forward with both arms thrown out ahead, one leg tucked — frozen in the act of going
+    over the barrier. Bolts the moment it is hurt. Grid x=[-3,3] (w=7).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Trailing leg planted, lead leg tucked up — asymmetric, mid-vault
+    fill_box(-2, 0, 1, 1, 5, 2)
+    fill_box(1, 3, -1, 1, 2, 3)
+    # Body, pitched forward
+    fill_box(-2, 5, -2, 4, 4, 4)
+    # Both arms thrown out in front
+    fill_box(-3, 7, -4, 1, 1, 3)
+    fill_box(2, 7, -4, 1, 1, 3)
+    # Head, low and ducked
+    fill_box(-1, 9, -3, 2, 2, 2)
+
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, 0))
+    return mb
+
+
+def gen_rail_replacement(height=2.6):
+    """ACT 2 — "Rail Replacement": the service that replaces the service. A hulk of rail and sleeper.
+
+    Broad, slab-shouldered and slow, with two girder arms that reach the ground. The head is a
+    small blunt destination-board sunk between the shoulders. Grid x=[-4,4] (w=9).
+    """
+    mb = MeshBuilder()
+    vs = height / 16.0
+    filled = set()
+
+    def fill_box(x0, y0, z0, w, h, d):
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                for z in range(z0, z0 + d):
+                    filled.add((x, y, z))
+
+    # Legs like sleepers — short, square, planted wide
+    for lx in (-3, 1):
+        fill_box(lx, 0, -2, 2, 5, 4)
+    # Slab torso, widening into the shoulders
+    fill_box(-3, 5, -2, 6, 5, 4)
+    fill_box(-4, 10, -2, 8, 3, 4)
+    # Girder arms — all the way to the floor
+    fill_box(-4, 2, -2, 1, 9, 3)
+    fill_box(4, 2, -2, 1, 9, 3)
+    # Head: a small blunt board, sunk between the shoulders so it reads as hunched
+    fill_box(-1, 13, -2, 2, 2, 3)
+    # Rail ridges along the shoulders
+    for x in range(-4, 5, 2):
+        filled.add((x, 13, 1))
+
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, 0))
+    return mb
+
+
 MESH_TYPES = {
+    "null_pointer": {"func": gen_null_pointer, "desc": "Act 1 Fallen parody — imp with a hollow null head. Params: --height", "default_file": "null_pointer.obj"},
+    "hot_reloader": {"func": gen_hot_reloader, "desc": "Act 1 Fallen Shaman parody — robed imp, reload-ring staff. Params: --height", "default_file": "hot_reloader.obj"},
+    "core_dump": {"func": gen_core_dump, "desc": "Act 1 Foul Crow parody — flier trailing spilled memory. Params: --height", "default_file": "core_dump.obj"},
+    "merge_conflict": {"func": gen_merge_conflict, "desc": "Act 1 original — two unresolved half-bodies on a seam. Params: --height", "default_file": "merge_conflict.obj"},
+    "detached_head": {"func": gen_detached_head, "desc": "Act 1 — floating severed head, splits off a Merge Conflict. Params: --height", "default_file": "detached_head.obj"},
+    "rubber_duck": {"func": gen_rubber_duck, "desc": "Act 1 original — enormous debugging duck. Params: --height", "default_file": "rubber_duck.obj"},
+    "escalator_hound": {"func": gen_escalator_hound, "desc": "Act 2 hellhound parody — stepped spine, runs one way. Params: --height", "default_file": "escalator_hound.obj"},
+    "turnstile_wraith": {"func": gen_turnstile_wraith, "desc": "Act 2 spectre parody — wraith fused to a ticket barrier. Params: --height", "default_file": "turnstile_wraith.obj"},
+    "fare_evader": {"func": gen_fare_evader, "desc": "Act 2 imp parody — caught mid-vault, bolts when hurt. Params: --height", "default_file": "fare_evader.obj"},
+    "rail_replacement": {"func": gen_rail_replacement, "desc": "Act 2 brute — hulk of rail and sleeper. Params: --height", "default_file": "rail_replacement.obj"},
+
     "humanoid": {
         "func": gen_humanoid,
         "desc": "Barony-style voxel humanoid. Params: --height",
         "default_file": "humanoid.obj",
+    },
+    # --- Act 1 overworld bestiary (original silhouettes; see each generator's docstring) ---
+    "griswald": {
+        "func": gen_griswald,
+        "desc": "Act 1 boss: TristRAM's half-unfinished smith. Params: --height",
+        "default_file": "griswald.obj",
+    },
+    # --- Act 2 (Hellgate: Localhost) ---
+    "perpetual_commuter": {
+        "func": gen_perpetual_commuter,
+        "desc": "Act 2: suited demon fused to its briefcase. Params: --height",
+        "default_file": "perpetual_commuter.obj",
+    },
+    "mind_the_gap": {
+        "func": gen_mind_the_gap,
+        "desc": "Act 2: low wide platform-gap ambusher. Params: --height",
+        "default_file": "mind_the_gap.obj",
+    },
+    "signal_failure": {
+        "func": gen_signal_failure,
+        "desc": "Act 2: hovering broken signal mast (rift boss). Params: --height",
+        "default_file": "signal_failure.obj",
+    },
+    "zombie_process": {
+        "func": gen_zombie_process,
+        "desc": "Act 1: half-terminated shambler, collapsed shoulder. Params: --height",
+        "default_file": "zombie_process.obj",
+    },
+    "garbage_collector": {
+        "func": gen_garbage_collector,
+        "desc": "Act 1: robed reclaimer with a lantern arm, no legs. Params: --height",
+        "default_file": "garbage_collector.obj",
+    },
+    "bit_rat": {
+        "func": gen_bit_rat,
+        "desc": "Act 1: low fast vermin with a rotted spine ridge. Params: --height",
+        "default_file": "bit_rat.obj",
+    },
+    "legacy_archer": {
+        "func": gen_legacy_archer,
+        "desc": "Act 1: deprecated ranger, bow drawn, quiver on the back. Params: --height",
+        "default_file": "legacy_archer.obj",
     },
     "humanoid_torso": {
         "func": gen_humanoid_torso,

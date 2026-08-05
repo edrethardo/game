@@ -74,6 +74,9 @@ extern bool s_firstKillDropGiven;
 // Engine lifecycle
 // ---------------------------------------------------------------------------
 void Engine::init() {
+    // Read once. See engine.h — this exists so the occlusion cull can be A/B'd from one binary.
+    m_visCullOff = (getenv("VIS_CULL_OFF") != nullptr);
+
     s_engine = this;
 
 #ifdef __SWITCH__

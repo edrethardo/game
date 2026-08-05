@@ -7,21 +7,36 @@
 #include "core/types.h"
 #include "core/math.h"
 #include "game/entity.h"
-#ifdef ENGINE_DEBUG
-#include "core/log.h"  // overflow diagnostics, debug builds only
-#endif
+#include "core/assert.h"
 
 static constexpr u32 SGRID_SIZE     = 64;   // 64×64 cells
 static constexpr f32 SGRID_CELL     = 4.0f; // 4m per cell (covers 256×256m world)
-// Max entities tracked per 4m cell. Entities beyond this in one cell are invisible
-// to queryNeighbors (projectile collision), so a too-low cap drops hits in dense
-// swarms (e.g. F4/F5 debug spawns, boss minion clusters). Debug builds log overflow.
+// Max entities tracked per 4m cell. Exceeding it is no longer a correctness problem — the
+// remainder goes to the overflow list below and is still returned by every query — so this is now
+// purely a memory/perf knob: raising it shrinks the overflow list at 8 KB per extra slot.
 static constexpr u32 SGRID_PER_CELL = 16;
 static constexpr f32 SGRID_OFFSET   = 128.0f; // world origin offset (positions range ±128m)
+
+// Worst case a single queryNeighbors can return: the 3x3 cell block plus every overflowed entity.
+// DERIVED, never hand-typed — a literal is exactly how this broke. The projectile candidate buffers
+// were sized 72 under the comment "3x3 cells x 8 per cell max" and stayed 72 when SGRID_PER_CELL was
+// raised to 16, so from then on a dense 3x3 block was silently truncated to half its contents on
+// every query, on top of the cell overflow below.
+static constexpr u32 SGRID_QUERY_MAX = 9 * SGRID_PER_CELL + MAX_ENTITIES;
 
 struct SpatialGrid {
     u8  count[SGRID_SIZE][SGRID_SIZE] = {};
     u16 cells[SGRID_SIZE][SGRID_SIZE][SGRID_PER_CELL] = {};
+
+    // Entities that did not fit their cell, or that stood outside the grid's span. They are NOT
+    // dropped: queryNeighbors appends this list to every query, so an entity is never invisible to
+    // projectile collision however tightly a swarm packs or however far out it wanders. Returning
+    // them for queries anywhere is conservative — the caller runs a precise AABB test on every
+    // candidate, so extra candidates cost comparisons and can never produce a wrong hit.
+    // Measured before this existed: 5643 overflow events in a 3 h soak, up to 15 at once, each one
+    // an enemy that could not be shot until the cluster spread out.
+    u16 overflow[MAX_ENTITIES] = {};
+    u16 overflowCount = 0;
 };
 
 namespace SpatialGridSystem {
@@ -31,10 +46,8 @@ namespace SpatialGridSystem {
         for (u32 z = 0; z < SGRID_SIZE; z++)
             for (u32 x = 0; x < SGRID_SIZE; x++)
                 grid.count[z][x] = 0;
+        grid.overflowCount = 0;
 
-#ifdef ENGINE_DEBUG
-        u32 dropped = 0;  // entities that overflowed a full cell this rebuild
-#endif
         for (u32 a = 0; a < pool.activeCount; a++) {
             u32 idx = pool.activeList[a];
             const Entity& e = pool.entities[idx];
@@ -43,23 +56,23 @@ namespace SpatialGridSystem {
             // Map world position to grid cell
             s32 cx = static_cast<s32>((e.position.x + SGRID_OFFSET) / SGRID_CELL);
             s32 cz = static_cast<s32>((e.position.z + SGRID_OFFSET) / SGRID_CELL);
-            if (cx < 0 || cx >= (s32)SGRID_SIZE || cz < 0 || cz >= (s32)SGRID_SIZE) continue;
 
-            u8& cnt = grid.count[cz][cx];
-            if (cnt < SGRID_PER_CELL) {
+            const bool inGrid = (cx >= 0 && cx < (s32)SGRID_SIZE &&
+                                 cz >= 0 && cz < (s32)SGRID_SIZE);
+            // Two ways an entity used to fall out of collision entirely, both silent: its cell was
+            // full, or it stood outside the grid's +/-128 m span. Both now park it in the overflow
+            // list instead, which every query appends — so "every active entity is a collision
+            // candidate" holds unconditionally.
+            if (inGrid && grid.count[cz][cx] < SGRID_PER_CELL) {
+                u8& cnt = grid.count[cz][cx];
                 grid.cells[cz][cx][cnt] = static_cast<u16>(idx);
                 cnt++;
+            } else if (grid.overflowCount < MAX_ENTITIES) {
+                // The bound is the whole pool, so it can only be reached if EVERY entity overflows;
+                // it exists to make the array access provably in range, not as a real limit.
+                grid.overflow[grid.overflowCount++] = static_cast<u16>(idx);
             }
-#ifdef ENGINE_DEBUG
-            else { dropped++; }
-#endif
         }
-#ifdef ENGINE_DEBUG
-        // If this fires, raise SGRID_PER_CELL: dropped entities can't be hit by
-        // projectiles (queryNeighbors never returns them) until the cluster spreads.
-        if (dropped > 0)
-            LOG_WARN("SpatialGrid: %u entities dropped from full cells (raise SGRID_PER_CELL)", dropped);
-#endif
     }
 
     // Query all entity indices in a cell and its 8 neighbors (3×3 region).
@@ -81,6 +94,18 @@ namespace SpatialGridSystem {
                 }
             }
         }
+        // Everything that could not be bucketed, appended to EVERY query. This is what makes
+        // "an active entity is always a collision candidate" true regardless of local density or
+        // distance from the origin — without it the list above is just a record of what was lost.
+        //
+        // Correctness here depends on maxOut being SGRID_QUERY_MAX. Overflow is appended LAST, so a
+        // caller passing a smaller buffer would truncate away exactly the entities this list exists
+        // to rescue — silently re-creating the unhittable-enemy bug it fixed. Every caller sizes
+        // from the constant today; this is what keeps that true when one is added.
+        ENGINE_ASSERT(maxOut >= SGRID_QUERY_MAX,
+                      "queryNeighbors needs an SGRID_QUERY_MAX buffer or overflow is dropped");
+        for (u16 i = 0; i < grid.overflowCount && out < maxOut; i++)
+            outIndices[out++] = grid.overflow[i];
         return out;
     }
 }

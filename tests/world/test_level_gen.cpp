@@ -194,8 +194,25 @@ TEST_CASE("LevelGen: pickLayoutStyle is floor-gated, deterministic, and mixes") 
     }
     for (u32 i = 0; i < static_cast<u32>(LevelGen::LayoutStyle::COUNT); i++) {
         CAPTURE(i);
-        REQUIRE(counts[i] > total / 20); // every style shows up at a meaningful rate
+        // WILDERNESS is OVERWORLD-ONLY: zones request it explicitly (engine_world.cpp), exactly as
+        // the town and arena build their own fixed levels, so it is deliberately absent from the
+        // dungeon weight table. Every OTHER style must still appear at a meaningful rate — that is
+        // what keeps a dead row out of the table.
+        if (i == static_cast<u32>(LevelGen::LayoutStyle::WILDERNESS)) {
+            REQUIRE(counts[i] == 0);
+            continue;
+        }
+        REQUIRE(counts[i] > total / 20);
     }
+}
+
+// The other half of the rule above, stated positively: no dungeon floor may ever roll an overworld
+// zone's terrain. If it did, a numbered floor would generate with no ceiling and no exit door.
+TEST_CASE("LevelGen: pickLayoutStyle never returns the overworld style") {
+    for (u32 seed = 0; seed < 300; seed++)
+        for (u8 floor = 1; floor <= 50; floor++)
+            REQUIRE(LevelGen::pickLayoutStyle(seed * 2654435761u, floor) !=
+                    LevelGen::LayoutStyle::WILDERNESS);
 }
 
 TEST_CASE("LevelGen: spawn position sits inside the spawn room") {

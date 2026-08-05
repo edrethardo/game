@@ -1349,3 +1349,49 @@ TEST_CASE("boss commit: releases exactly when the boss is fightable (or gone)") 
     CHECK(!Autoplay::bossCommitShouldLatch(45.0f, 45.0f, true, relR - 1.0f, relR));
     CHECK(Autoplay::bossCommitShouldRelease(true, true, relR - 1.0f, relR));
 }
+
+// --- A mobility skill is not a damage skill ------------------------------------------------------
+//
+// The in-range dump picks the biggest castable slot. It excluded COUNTER skills but nothing else, so
+// a gap-close sitting in a high slot became the pick every time its cooldown came up — and the Rogue
+// carries SHADOW_STEP, a 15 m teleport on a 3 s cooldown, in slot 1. Live that is a bot which blinks
+// 15 m off the enemy it is mid-fight with, every three seconds, forever ("he teleports all the
+// time"). The equipment rail already withheld Phase Dash in range for this reason; class skills did
+// not.
+//
+// The rule is DISTANCE, not category: a Paladin's 3 m dash-smite is his filler and must keep firing
+// at blade range, so excluding "gap-closes" wholesale would break him instead.
+
+TEST_CASE("an overshooting gap-close is withheld at blade range") {
+    BotView v = selfAt({0,0,0});
+    v.buildCell   = 4;                 // Moderate Melee
+    v.weaponRange = 4.0f;
+    BotTarget t{}; t.pos = {0, 1.7f, -2.0f}; t.dist = 2.0f; t.hasLOS = true;   // already in reach
+    v.targets = &t; v.targetCount = 1;
+    for (u8 s = 0; s < 4; s++) v.castableSkill[s] = true;
+
+    // Slots 1 and 3 blink 15 m — four times our reach. Neither may be the in-range pick.
+    v.skillIsGapClose[1] = true; v.skillGapDist[1] = 15.0f;
+    v.skillIsGapClose[3] = true; v.skillGapDist[3] = 15.0f;
+
+    const BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.classSkillSlot != 1);
+    CHECK(out.classSkillSlot != 3);
+    CHECK(out.classSkillSlot == 2);    // the biggest slot that does not throw us off the target
+}
+
+TEST_CASE("a short dash-smite stays in the rotation at blade range") {
+    BotView v = selfAt({0,0,0});
+    v.buildCell   = 4;
+    v.weaponRange = 4.0f;
+    BotTarget t{}; t.pos = {0, 1.7f, -2.0f}; t.dist = 2.0f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;
+
+    // Only slot 0 is up, and it is a 3 m gap-close under our 4 m reach — the Paladin case. It must
+    // still be cast; a blanket gap-close exclusion would silently mute his filler.
+    v.castableSkill[0] = true;
+    v.skillIsGapClose[0] = true; v.skillGapDist[0] = 3.0f;
+
+    const BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
+    CHECK(out.classSkillSlot == 0);
+}

@@ -28,7 +28,11 @@
 // full — an overflow silently drops the TAIL of the table (the player meshes), so the
 // static_assert below is the only thing standing between "added a mesh" and "the wanderer has no
 // model". Bump this, don't trim the table.
-constexpr u32 MESH_DEF_CAPACITY = 112;
+// 112 -> 128 (2026-08-03): the Act 1 + Act 2 overworld bestiary (7 new enemy meshes) pushed the
+// table past the old cap. The static_assert below is what caught it — without that guard the
+// loader silently drops the TAIL of the list and those enemies render as fallback cubes, which
+// is precisely how six limb meshes once became cubes and every spider grew mandibles.
+constexpr u32 MESH_DEF_CAPACITY = 160;
 
 struct MeshAsset { const char* name; const char* path; };
 
@@ -40,6 +44,25 @@ static constexpr MeshAsset kMeshAssets[] = {
     {"pillar",         "assets/meshes/pillar.obj"},
     {"chest",          "assets/meshes/chest.obj"},
     {"goblin",         "assets/meshes/goblin.obj"},   // loot goblin (floor event)
+    // --- Act 1 overworld bestiary (engine_zone.cpp worlds; silhouettes in tools/gen_mesh.py) ---
+    {"griswald",          "assets/meshes/griswald.obj"},   // Act 1 boss (TristRAM)
+    {"perpetual_commuter","assets/meshes/perpetual_commuter.obj"},
+    {"mind_the_gap",      "assets/meshes/mind_the_gap.obj"},
+    {"signal_failure",    "assets/meshes/signal_failure.obj"},
+    {"zombie_process",    "assets/meshes/zombie_process.obj"},
+    {"garbage_collector", "assets/meshes/garbage_collector.obj"},
+    {"bit_rat",           "assets/meshes/bit_rat.obj"},
+    {"null_pointer",      "assets/meshes/null_pointer.obj"},
+    {"hot_reloader",      "assets/meshes/hot_reloader.obj"},
+    {"core_dump",         "assets/meshes/core_dump.obj"},
+    {"merge_conflict",    "assets/meshes/merge_conflict.obj"},
+    {"detached_head",     "assets/meshes/detached_head.obj"},
+    {"rubber_duck",       "assets/meshes/rubber_duck.obj"},
+    {"escalator_hound",   "assets/meshes/escalator_hound.obj"},
+    {"turnstile_wraith",  "assets/meshes/turnstile_wraith.obj"},
+    {"fare_evader",       "assets/meshes/fare_evader.obj"},
+    {"rail_replacement",  "assets/meshes/rail_replacement.obj"},
+    {"legacy_archer",     "assets/meshes/legacy_archer.obj"},
     {"shrine",         "assets/meshes/shrine.obj"},   // walk-up buff shrine
     {"sword",          "assets/meshes/sword.obj"},
     {"dagger",         "assets/meshes/dagger.obj"},

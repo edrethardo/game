@@ -48,23 +48,23 @@ Rarity ItemGen::rollRarity(u8 enemyLevel) {
     f32 commonPct    = 60.0f;
     f32 magicPct     = 28.0f;
     f32 rarePct      = 10.0f;
-    f32 legendaryPct =  2.0f;
+    f32 legendaryPct = LEGENDARY_BASE;
 
-    // Per level above 1: common drops faster, legendary rises (+0.5%/level). The legendary
-    // CEILING scales with DIFFICULTY — Normal 3%, Nightmare 4.5%, Hell 6% — derived from
-    // enemyLevel, which is the EFFECTIVE floor (floor + difficulty*50), so the tier is
-    // (level-1)/50. The ramp still applies UNDER the ceiling: Normal climbs to 3% over its
-    // first few floors then holds; Nightmare/Hell start well past their ceilings and sit flat
-    // at 4.5% / 6%. (Down from the old flat 50% cap that poured legendaries out.)
+    // Per level above 1: common drops faster, legendary rises. The legendary CEILING scales with
+    // DIFFICULTY — 1.5 / 2.25 / 3 / 3.75% — derived from enemyLevel, which is the EFFECTIVE floor
+    // (floor + difficulty*50), so the tier is (level-1)/50. The ramp still applies UNDER the
+    // ceiling: Normal climbs to its cap over its first several floors then holds; the deeper tiers
+    // start well past theirs and sit flat. All four numbers live in item.h — see the note there for
+    // why these were halved.
     f32 levelsAbove1 = static_cast<f32>(enemyLevel > 1 ? enemyLevel - 1 : 0);
     commonPct    -= levelsAbove1 * 1.5f;
-    legendaryPct += levelsAbove1 * 0.5f;
+    legendaryPct += levelsAbove1 * LEGENDARY_PER_LEVEL;
 
     // Clamp to sane ranges
     if (commonPct < 0.0f) commonPct = 0.0f;
     u32 diffTier = (enemyLevel > 1) ? (enemyLevel - 1) / 50u : 0u;   // 0=Normal … 3=Inferno
     if (diffTier > 3) diffTier = 3;                                  // Inferno caps the ceiling
-    f32 legendaryCap = 3.0f + 1.5f * static_cast<f32>(diffTier);     // 3 / 4.5 / 6 / 7.5%
+    const f32 legendaryCap = legendaryCeiling(diffTier);              // 1.5 / 2.25 / 3 / 3.75%
     if (legendaryPct > legendaryCap) legendaryPct = legendaryCap;
 
     // MYTHIC is INFERNO-ONLY (2026-08-02) — the tier is the whole point of the rarity, and gating it

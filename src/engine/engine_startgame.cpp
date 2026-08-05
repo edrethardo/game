@@ -774,7 +774,7 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     u8 currentTier = enemyTierForFloor(static_cast<u8>(m_level.currentFloor));
 
     // Spawn enemies procedurally — themed variants + unique monsters per tier
-    spawnFloorEnemies(dungeon, currentTier);
+    spawnFloorEnemies(dungeon, currentTier, /*act=*/0);   // the dungeon's own bestiary
     // VERTICAL_HALL: seat ranged "sniper nests" on the balconies (the normal room spawn only places
     // ground-story enemies). They hold + fire down while they have LOS; melee chase across stories.
     if (layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL)

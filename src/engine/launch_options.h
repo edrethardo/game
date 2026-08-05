@@ -61,8 +61,15 @@ struct LaunchOptions {
     // as --source: the ending costs a full clear to reach (a 3 h soak produced exactly one), so the
     // credits-park strand and the run-continuation below it were effectively untestable.
     bool victory = false;
+    // --zone <floor>: after --load/--new, drop straight into an OVERWORLD zone (52-96). The zones
+    // sit behind an Inferno clear, so without this door the only way to see one is a full ladder.
+    u8   zoneFloor = 0;   // 0 = not requested
     bool arenaCouch = false;                   // --arena-couch: local-versus arena, two fresh lanes
     bool autoplayCouch = false;                // --autoplay-couch: split-screen, BOTH lanes bot-driven
+    // --devperf: emit the 1 Hz [DEVPERF] measurement line. OFF by default so a build you actually
+    // PLAY is silent — the probe exists for tools/switch_perf_run.sh, which passes this flag through
+    // nxlink --args. Printing it unconditionally put dev instrumentation in a release console build.
+    bool devPerf      = false;
     bool verticalHall = false;                 // --vhall: force the two-story VERTICAL_HALL layout on non-boss floors (dev)
     bool fourStory   = false;                  // --fourstory: force the four-story FOUR_STORY "Descent" layout on non-boss floors (dev)
     bool lava        = false;                  // --lava: force the molten Hellforge theme on any floor 31-40 (dev)

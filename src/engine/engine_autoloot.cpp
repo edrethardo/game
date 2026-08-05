@@ -213,6 +213,14 @@ void Engine::autoLootHousekeeping(u8 lane) {
 
     // Better-build nudge. Suppressed while on cooldown, and re-armed only when the SUGGESTION
     // changes — switching to the suggested build ends it naturally (best == current).
+    //
+    // Silent while the BOT is playing: the nudge's whole content is "switch builds in the
+    // Inventory", which is advice to a human who is not at the controls — autoplay re-gears itself
+    // but never changes build CELL, so it can never act on it. Left on, it fires forever, and
+    // because the re-arm only remembers the LAST suggestion, two builds that leapfrog each other
+    // (measured on a Rogue: Glass Cannon Melee -> Glass Cannon Ranged -> Tanky Melee) pass the
+    // guard every time and produce a permanent stream of "change your build" chat.
+    if (m_autoplayActive && m_autoplayControl.botInControl()) return;
     if (m_buildNotifyCooldown[lane] > 0.0f) return;
     f32 bestScore = 0.0f;
     const u8 best = BuildScore::bestBuildCell(inv, m_itemDefs, m_itemDefCount, bestScore);

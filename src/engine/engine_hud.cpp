@@ -54,6 +54,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include "game/zone_def.h"
 
 // Shared statics defined in engine.cpp
 // Shared statics defined in engine.cpp
@@ -570,9 +571,17 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
     // Floor indicator (top-left) — scaled with resolution
     {
         f32 hs = static_cast<f32>(sh) / 720.0f;
-        char floorStr[32];
+        // 64, not 32: the label now carries ZONE NAMES, and the longest ("The Den of Evil
+        // (Franchise Location #2)") is 38 characters — snprintf would have truncated it safely but
+        // visibly, which is a worse bug than the one being fixed because it looks deliberate.
+        char floorStr[64];
+        // In the OVERWORLD the floor byte is a SENTINEL (52-96) that identifies which zone this is,
+        // not a depth — so "Floor 51" (or 57) is meaningless to a player standing in TristRAM. Name
+        // the place instead; the sentinel is an implementation detail of how the world replicates.
+        const Zone::ZoneDef* zdef = m_level.inZone ? Zone::find(m_level.zoneFloor) : nullptr;
         if      (m_level.inArena) std::snprintf(floorStr, sizeof(floorStr), "Arena");
         else if (m_level.inTown)  std::snprintf(floorStr, sizeof(floorStr), "The Town");
+        else if (zdef)            std::snprintf(floorStr, sizeof(floorStr), "%s", zdef->name);
         else                      std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_level.currentFloor);
         FontSystem::drawText(sw, sh, 20.0f * hs, static_cast<f32>(sh) - 22.0f * hs,
                              floorStr, {0.7f, 0.7f, 0.7f}, 2);

@@ -28,8 +28,10 @@ take (use the AskUserQuestion tool) — do not pick for them:
 
 - **(A) No new code** — compose one or more **shipped roles** and/or an **onHitEffect**.
   - Roles (combine freely as a JSON array): `ambush`, `summoner`, `healer`, `aura`,
-    `ranged_caster`, `charger`, `bomber`, `shield_bearer` (see the `engine-reference` skill
-    for what each does). NOTE: `ambush` is the full stone-statue disguise (gargoyle) —
+    `ranged_caster`, `charger`, `bomber`, `shield_bearer`, `rout`, `splitter` (see the
+    `engine-reference` skill for what each does). `rout` breaks and runs below 1/3 health then
+    rallies once; `splitter` dies into two copies of its `spawnEnemy` (which must exist, must not
+    itself be a splitter, and must be in the same act — all three are pinned by test). NOTE: `ambush` is the full stone-statue disguise (gargoyle) —
     spawns DORMANT, **fully invulnerable**, no nameplate, stone-grey tint, wakes only via
     the weeping-angel rule (player in `detectionRange` while NOBODY watches). Only give it
     to an enemy that should be un-damageable until it moves.
@@ -74,6 +76,24 @@ Record the choice. It gates Step 8 (skip Step 8 entirely for pure (A)).
    **The grid MUST match the mesh** from Step 3: `w = max_gx - min_gx + 1`,
    `h = max_gy - min_gy + 1`, and a mesh voxel at `(gx, gy)` reads skin pixel
    `(px, py) = (gx - min_gx, gy - min_gy)`.
+   **MEASURE those extents — do not read them off your own docstring.** `add_voxel_model` derives
+   `tex_w`/`tex_h` from the `filled` set itself (`u = (gx-min_gx+0.5)/grid_w`), so the grid is
+   whatever you ACTUALLY filled, which is routinely smaller than the nominal 7x16 you designed on
+   (a flyer that occupies four rows has `h = 4`). A skin sized to the nominal grid is stretched
+   across the model and every band you placed lands somewhere else. Measure with:
+   ```python
+   import sys; sys.path.insert(0, "tools"); import gen_mesh
+   orig = gen_mesh.add_voxel_model
+   def spy(mb, filled, vs, offset=(0,0,0), uv=None):
+       print("x=[%d,%d] w=%d  y=[%d,%d] h=%d" % (
+           min(p[0] for p in filled), max(p[0] for p in filled),
+           max(p[0] for p in filled) - min(p[0] for p in filled) + 1,
+           min(p[1] for p in filled), max(p[1] for p in filled),
+           max(p[1] for p in filled) - min(p[1] for p in filled) + 1))
+       return orig(mb, filled, vs, offset, uv)
+   gen_mesh.add_voxel_model = spy
+   gen_mesh.MESH_TYPES["<name>"]["func"]()
+   ```
 2. Register in the `SKIN_TYPES` dict (`tools/gen_skin.py`, ~line 3812):
    ```python
    "<name>": ("<name>_skin_42.png", skin_<name>),
@@ -98,7 +118,7 @@ Headroom: `MAX_MATERIALS` in `src/renderer/material.h` (read the real value; bum
 
 ## Step 6 — Register the mesh with the engine
 
-Add a row to the `kMeshes` table in `src/engine/engine_init_assets.cpp`:
+Add a row to the `kMeshAssets` table in `src/engine/asset_manifest.h`:
 ```cpp
 {"<name>", "assets/meshes/<name>.obj"},
 ```
@@ -111,7 +131,17 @@ Append the filled-in `templates/enemy_entry.json` object to the `"enemies"` arra
 `assets/config/enemies.json`. Set `meshName: "<name>"`, `materialName: "<name>_skin"`, the
 `role` (string, or an array of role strings to combine), `aiPreference` (the COMBAT OPENER the enemy aggros into — strafe/flank/surround/retreat/chase; strafe needs attackRange > 5, surround needs grounded melee, or the stat-fit lint in tests/game/test_ai_preference.cpp fails the suite), `onHitEffect`,
 `halfExtents` (≈ the mesh's half-size in metres), `tier`, and stats.
+**Also set `"enemyType": "generic"`** unless the enemy is meant to wear one of the procedural limb
+rigs: `enemyType` is otherwise INFERRED from the mesh name and defaults to SKELETON, which bolts
+humanoid arms and legs onto a voxel model that already has its own. **If it is a named boss placed
+by a zone**, set `"unique": true` (see below). **If it belongs to an overworld act**, set
+`"act": 1` or `"act": 2` — without it the def sits in the DUNGEON's tier pool instead.
 Headroom: `MAX_ENEMY_DEFS` in `src/game/enemy_def.h` (currently 64; ~36 used).
+
+**If this enemy is a NAMED BOSS** (an overworld `ZoneDef::boss`), set `"unique": true`. It is placed
+by name at a fixed spot; without the flag its tier's spawn pool ALSO rolls it, so the zone holds two
+of it and it turns up as trash on deep dungeon floors. `tests/game/test_ai_preference.cpp` enforces
+the pairing in both directions — a `unique` def that no zone places can never spawn at all.
 Loader + the valid `role`/`aiPreference`/`onHitEffect` values: `src/game/enemy_loader.cpp`.
 
 ## Step 8 — Gimmick code (ONLY if Step 2 chose B or Hybrid)
@@ -119,7 +149,8 @@ Loader + the valid `role`/`aiPreference`/`onHitEffect` values: `src/game/enemy_l
 Apply `templates/new_role_snippets.md` — four edits:
 1. **New role constant** in the `EnemyRole` namespace (`src/game/entity.h`, ~line 51). The
    next bit is `0x100`, which **does not fit `u8`** → do edit 2.
-2. **Widen the role type** `u8`→`u16` in three places: `Entity.enemyRole`
+2. **Widen the role type** — ALREADY DONE (`u16` since ROUT/SPLITTER; the next free bit is `0x400`).
+   If a future role overflows `u16`, the same three places widen again: `Entity.enemyRole`
    (`src/game/entity.h`, ~line 147), `EnemyDef.role` (`src/game/enemy_def.h`, ~line 31), and
    `parseRole()`'s return type + its local `u8 mask` (`src/game/enemy_loader.cpp`, ~line 30
    and ~line 129). **`role` is not on the snapshot wire**, so this is a safe local-only change

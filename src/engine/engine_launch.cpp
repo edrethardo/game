@@ -71,6 +71,7 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     // Dev door: force the two-story VERTICAL_HALL layout on every non-boss floor so the feature is
     // playtestable without waiting for its ~12% weighted roll (see startGame). Applied like the net
     // knobs — regardless of game-jump — so `--new warrior --floor 6 --vhall` lands straight in one.
+    m_devPerf           = opt.devPerf;
     m_forceVerticalHall = opt.verticalHall;
 
     // Dev door (--fourstory): force the four-story FOUR_STORY "Descent" layout on every non-boss floor
@@ -260,6 +261,17 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
         enterSourceChamber();
         LOG_INFO("Launch: entered THE SOURCE (--source)");
+        return;
+    }
+    if (opt.zoneFloor != 0) {
+        // Dev door (--zone <52-96>): build a normal run, then walk straight into an OVERWORLD zone.
+        // Needs startGame FIRST for the same reason --source does — enterZone replaces the live
+        // world, so there has to be one and the hero's class/gear must already be set up. Without
+        // this door the only way to see a zone is a full Inferno clear.
+        startGame(mode);
+        if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
+        enterZone(opt.zoneFloor, /*fromFloor=*/0);
+        LOG_INFO("Launch: entered overworld zone %u (--zone)", (u32)opt.zoneFloor);
         return;
     }
     if (opt.victory) {

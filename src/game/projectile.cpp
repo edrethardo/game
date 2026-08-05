@@ -376,13 +376,13 @@ void ProjectileSystem::update(ProjectilePool& pool,
                     : preMovePos + dir * (travel * static_cast<f32>(sw) / static_cast<f32>(sweepSamples));
                 projBox = { samplePos - Vec3{p.radius, p.radius, p.radius},
                             samplePos + Vec3{p.radius, p.radius, p.radius} };
-                u16 nearby[72]; // 3x3 cells × 8 per cell max
+                u16 nearby[SGRID_QUERY_MAX];   // sized from the grid, never a literal
                 u32 nearCount = 0;
                 if (spatialGrid) {
-                    nearCount = SpatialGridSystem::queryNeighbors(*spatialGrid, samplePos, nearby, 72);
+                    nearCount = SpatialGridSystem::queryNeighbors(*spatialGrid, samplePos, nearby, SGRID_QUERY_MAX);
                 } else {
                     // Fallback: scan all active entities (no grid available)
-                    for (u32 a = 0; a < entities.activeCount && nearCount < 72; a++)
+                    for (u32 a = 0; a < entities.activeCount && nearCount < SGRID_QUERY_MAX; a++)
                         nearby[nearCount++] = static_cast<u16>(entities.activeList[a]);
                 }
                 for (u32 n = 0; n < nearCount; n++) {
@@ -446,12 +446,12 @@ void ProjectileSystem::update(ProjectilePool& pool,
             if (hit) {
                 // AoE splash — use spatial grid for neighbor query
                 if ((p.projFlags & PROJ_SPLASH) && p.splashRadius > 0.0f) {
-                    u16 splashNear[72];
+                    u16 splashNear[SGRID_QUERY_MAX];
                     u32 splashCount = 0;
                     if (spatialGrid) {
-                        splashCount = SpatialGridSystem::queryNeighbors(*spatialGrid, p.position, splashNear, 72);
+                        splashCount = SpatialGridSystem::queryNeighbors(*spatialGrid, p.position, splashNear, SGRID_QUERY_MAX);
                     } else {
-                        for (u32 a2 = 0; a2 < entities.activeCount && splashCount < 72; a2++)
+                        for (u32 a2 = 0; a2 < entities.activeCount && splashCount < SGRID_QUERY_MAX; a2++)
                             splashNear[splashCount++] = static_cast<u16>(entities.activeList[a2]);
                     }
                     for (u32 n = 0; n < splashCount; n++) {
@@ -486,12 +486,12 @@ void ProjectileSystem::update(ProjectilePool& pool,
             // projectile entity loop, filtering for ENT_FRIENDLY instead of hostiles.
             bool hitFriendly = false;
             if (!(p.projFlags & PROJ_ORB)) {
-                u16 nearby[72];
+                u16 nearby[SGRID_QUERY_MAX];
                 u32 nearCount = 0;
                 if (spatialGrid) {
-                    nearCount = SpatialGridSystem::queryNeighbors(*spatialGrid, p.position, nearby, 72);
+                    nearCount = SpatialGridSystem::queryNeighbors(*spatialGrid, p.position, nearby, SGRID_QUERY_MAX);
                 } else {
-                    for (u32 a = 0; a < entities.activeCount && nearCount < 72; a++)
+                    for (u32 a = 0; a < entities.activeCount && nearCount < SGRID_QUERY_MAX; a++)
                         nearby[nearCount++] = static_cast<u16>(entities.activeList[a]);
                 }
                 for (u32 n = 0; n < nearCount; n++) {

@@ -45,6 +45,18 @@ inline const char* difficultyName(u8 d) {
     }
 }
 
+// The OVERWORLD (sentinel floors 52-96) is post-INFERNO content: it opens only once a character has
+// beaten the final tier, not merely Hell.
+//
+// Deliberately a SEPARATE predicate from saveCleared rather than a raised threshold inside it.
+// saveCleared's "Hell or deeper" test is what grants every pre-Inferno hero their town, Free-Play
+// select and cleared Continue; raising it would silently take all of that away from them. The two
+// answer different questions — "has this hero finished the game?" and "has this hero earned the
+// overworld?" — and conflating them is how a gate change becomes a regression for old saves.
+inline bool overworldUnlocked(u32 floor, u8 difficulty) {
+    return difficulty >= FINAL_DIFFICULTY && floor > 50u;
+}
+
 // Clamp a (possibly stepped) floor into [MIN_FLOOR, MAX_FLOOR].
 inline u8 clampFloor(s32 floor) {
     if (floor < static_cast<s32>(MIN_FLOOR)) return MIN_FLOOR;

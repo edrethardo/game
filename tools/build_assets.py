@@ -55,6 +55,25 @@ def build_meshes():
     meshes = [
         # Enemy bodies — full body meshes (limbs overlay for animation)
         ["--type", "humanoid", "--height", "1.8", "--out", os.path.join(mesh_dir, "skeleton.obj")],
+        # --- Act 1 overworld bestiary (see gen_mesh.py for each silhouette's intent) ---
+        ["--type", "griswald", "--height", "2.4", "--out", os.path.join(mesh_dir, "griswald.obj")],
+        ["--type", "perpetual_commuter", "--height", "1.9", "--out", os.path.join(mesh_dir, "perpetual_commuter.obj")],
+        ["--type", "mind_the_gap", "--height", "1.2", "--out", os.path.join(mesh_dir, "mind_the_gap.obj")],
+        ["--type", "signal_failure", "--height", "1.6", "--out", os.path.join(mesh_dir, "signal_failure.obj")],
+        ["--type", "zombie_process", "--height", "1.8", "--out", os.path.join(mesh_dir, "zombie_process.obj")],
+        ["--type", "garbage_collector", "--height", "2.0", "--out", os.path.join(mesh_dir, "garbage_collector.obj")],
+        ["--type", "bit_rat", "--height", "0.9", "--out", os.path.join(mesh_dir, "bit_rat.obj")],
+        ["--type", "null_pointer", "--height", "0.9", "--out", os.path.join(mesh_dir, "null_pointer.obj")],
+        ["--type", "hot_reloader", "--height", "1.5", "--out", os.path.join(mesh_dir, "hot_reloader.obj")],
+        ["--type", "core_dump", "--height", "0.8", "--out", os.path.join(mesh_dir, "core_dump.obj")],
+        ["--type", "merge_conflict", "--height", "2.0", "--out", os.path.join(mesh_dir, "merge_conflict.obj")],
+        ["--type", "detached_head", "--height", "0.7", "--out", os.path.join(mesh_dir, "detached_head.obj")],
+        ["--type", "rubber_duck", "--height", "2.0", "--out", os.path.join(mesh_dir, "rubber_duck.obj")],
+        ["--type", "escalator_hound", "--height", "1.1", "--out", os.path.join(mesh_dir, "escalator_hound.obj")],
+        ["--type", "turnstile_wraith", "--height", "1.9", "--out", os.path.join(mesh_dir, "turnstile_wraith.obj")],
+        ["--type", "fare_evader", "--height", "1.2", "--out", os.path.join(mesh_dir, "fare_evader.obj")],
+        ["--type", "rail_replacement", "--height", "2.6", "--out", os.path.join(mesh_dir, "rail_replacement.obj")],
+        ["--type", "legacy_archer", "--height", "1.8", "--out", os.path.join(mesh_dir, "legacy_archer.obj")],
         ["--type", "spider",   "--radius", "0.6", "--out", os.path.join(mesh_dir, "spider.obj")],
         # Floor-event + shrine props. *.obj is gitignored (meshes are BUILT, not committed), so a
         # mesh missing from this list simply does not exist on CI or in a release build — the game
@@ -245,6 +264,31 @@ def build_skins():
 
     skins = [
         ("goblin",                    "goblin_skin_42.png"),   # loot goblin (floor event)
+        ("human",                     "human_skin_42.png"),    # base humanoid body (class + enemy meshes)
+        ("butcher",                   "butcher_skin_42.png"),  # floor-5 boss — shipped PNG was 11x21 vs a 12x21 mesh
+        ("hellhound",                 "hellhound_skin_42.png"),# shipped PNG was 15x7 against a 6x10 mesh
+        ("zombie",                    "zombie_skin_42.png"),   # shipped PNG was 9x17 against a 9x16 body
+        ("cavern_herald",             "cavern_herald_skin_42.png"),
+        ("bat_wing",                  "bat_wing_skin_42.png"), # bat/succubus/pit-fiend wing limb
+        # --- Act 1 overworld bestiary ---
+        ("griswald",                  "griswald_skin_42.png"),
+        ("perpetual_commuter",        "perpetual_commuter_skin_42.png"),
+        ("mind_the_gap",              "mind_the_gap_skin_42.png"),
+        ("signal_failure",            "signal_failure_skin_42.png"),
+        ("zombie_process",            "zombie_process_skin_42.png"),
+        ("garbage_collector",         "garbage_collector_skin_42.png"),
+        ("bit_rat",                   "bit_rat_skin_42.png"),
+        ("null_pointer",            "null_pointer_skin_42.png"),
+        ("hot_reloader",            "hot_reloader_skin_42.png"),
+        ("core_dump",               "core_dump_skin_42.png"),
+        ("merge_conflict",          "merge_conflict_skin_42.png"),
+        ("detached_head",           "detached_head_skin_42.png"),
+        ("rubber_duck",             "rubber_duck_skin_42.png"),
+        ("escalator_hound",         "escalator_hound_skin_42.png"),
+        ("turnstile_wraith",        "turnstile_wraith_skin_42.png"),
+        ("fare_evader",             "fare_evader_skin_42.png"),
+        ("rail_replacement",        "rail_replacement_skin_42.png"),
+        ("legacy_archer",             "legacy_archer_skin_42.png"),
         ("weapon_sword_tex",          "weapon_sword_tex_42.png"),
         ("weapon_dagger_tex",         "weapon_dagger_tex_42.png"),
         ("weapon_axe_tex",            "weapon_axe_tex_42.png"),
@@ -370,6 +414,14 @@ def main():
                         os.remove(wav)
                     else:
                         print(f"  Warning: ffmpeg failed for {wav}, keeping WAV")
+
+    # Skin/mesh grid agreement. A stretched skin renders happily with its bands in the wrong places
+    # and nothing warns, so it is checked mechanically rather than by eye — 11 of 47 pairs were
+    # wrong when this was first run. Verifies the GENERATORS, so it is meaningful even when the PNGs
+    # on disk are stale.
+    if args.all or args.skins:
+        print("\n=== Verifying Skin Grids ===")
+        ok = run([sys.executable, os.path.join(SCRIPT_DIR, "check_skin_grids.py")]) and ok
 
     if ok:
         print("\n=== All assets built successfully ===")

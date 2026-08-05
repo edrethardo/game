@@ -55,6 +55,9 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#ifdef __SWITCH__
+#include <switch.h>   // appletGetOperationMode for the DEVPERF mode field
+#endif
 
 FrameAllocator s_frameAllocator;
 
@@ -826,6 +829,14 @@ void Engine::onLevelSeed(u8 floor, u8 difficulty, u32 seed) {
         s_engine->enterArenaClient();
         return;
     }
+    // Sentinel floors 52-96 = the host walked into an OVERWORLD zone. Same deal as the town: the
+    // floor byte IS the world's identity, so the client rebuilds the identical terrain from
+    // (floor, difficulty, seed) with no geometry on the wire. Unknown ids inside the band are
+    // refused by enterZoneClient rather than building an empty world.
+    if (Zone::isZoneFloor(floor)) {
+        s_engine->enterZoneClient(floor);
+        return;
+    }
     // Ignore stale/duplicate descents (reliable channel shouldn't dup, but be safe).
     // Compare announced (floor, difficulty) against current — only act on a STRICTLY newer
     // descent. This both rejects a dup for the current floor and accepts a genuinely newer
@@ -1184,6 +1195,7 @@ void Engine::run() {
         m_statsTimer += frameTime;
         if (m_statsTimer >= 1.0) {
             if (m_gameState == GameState::IN_GAME) logStats();
+            logDevicePerf();
             checkAchievements();   // 1 Hz poll — catches every equip path incl. loaded saves
             m_displayFps   = m_frameCount;
             m_statsTimer  -= 1.0;
@@ -1784,6 +1796,40 @@ void Engine::checkAchievements() {
 // ---------------------------------------------------------------------------
 // Stats
 // ---------------------------------------------------------------------------
+// Device perf probe — the ONE line a Switch measurement is read from.
+//
+// It deliberately uses printf rather than LOG_INFO: the logger disables console output when
+// NDEBUG && __SWITCH__ and opens no log file on Switch, so on a Release console build every LOG_
+// call returns immediately and the device is completely silent. That is why an nxlink session shows
+// the raw "Switch main() entered" line and then nothing at all.
+//
+// Fields are chosen to answer the questions a desktop cannot:
+//   mode=  DOCKED/HANDHELD — the discriminator. The Switch CPU runs at 1020 MHz in BOTH modes and
+//          only the GPU clock changes (768 -> 307 MHz), so a gap between the two is GPU-bound and no
+//          gap means CPU submission. No amount of desktop profiling can supply this.
+//   fps/ms actual delivered frame rate.
+//   D/V    draw calls submitted / frustum-visible, so a frame-rate change can be attributed to the
+//          occlusion cull actually engaging rather than assumed.
+//   style  layout style, so a sample is known to be on a stacked floor and not a flat one.
+void Engine::logDevicePerf() {
+    if (!m_devPerf) return;                    // opt-in: --devperf, never in a build being played
+    if (m_gameState != GameState::IN_GAME) return;
+#ifdef __SWITCH__
+    const char* mode = (appletGetOperationMode() == AppletOperationMode_Console) ? "DOCKED"
+                                                                                : "HANDHELD";
+#else
+    const char* mode = "DESKTOP";
+#endif
+    const f32 frameMs = (m_displayFps > 0) ? (1000.0f / static_cast<f32>(m_displayFps)) : 0.0f;
+    std::printf("[DEVPERF] mode=%s fps=%u ms=%.1f D=%u V=%u ent=%u style=%u floor=%u\n",
+                mode, m_displayFps, static_cast<double>(frameMs),
+                Renderer::getDrawCallCount(), Renderer::getVisibleCount(),
+                EntitySystem::activeCount(m_entities),
+                static_cast<u32>(m_level.layoutStyle),
+                static_cast<u32>(m_level.currentFloor));
+    std::fflush(stdout);   // nxlink streams stdout; without the flush a crash loses the tail
+}
+
 void Engine::logStats() {
     f64 avgFrameTime = (m_frameCount > 0) ? (1000.0 / m_frameCount) : 0.0;
 

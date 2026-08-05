@@ -60,8 +60,39 @@ void WorldItemSystem::update(WorldItemPool& pool, f32 dt,
     }
 }
 
+namespace {
+// The one slot-value ranking, shared by spawn() and spawnEssential() so "what is the most
+// expendable thing on this floor" cannot be answered two different ways.
+//
+// Returns the pool index of the cheapest evictable item, or -1 if nothing may be taken. Never
+// touches a sentinel (shrine / chest / stash / source shard / waypoint / zone gate), a pet
+// consumable, or anything whose rarity is at least `minRarityToBeat` — so an ordinary drop can
+// never displace something better than itself. Ties break on the shortest remaining lifetime: that
+// item was closest to vanishing on its own anyway.
+s32 findEvictable(WorldItemPool& pool, Rarity minRarityToBeat,
+                  const ItemDef* defs, u32 defCount) {
+    s32  victim = -1;
+    u8   worstRarity = 0xFF;
+    f32  worstLifetime = 1e9f;
+    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+        WorldItem& wi = pool.items[i];
+        if (!wi.active) continue;
+        if (isSentinelItem(wi.item)) continue;
+        if (defs && wi.item.defId < defCount && defs[wi.item.defId].petSummon) continue;
+        if (static_cast<u8>(wi.item.rarity) >= static_cast<u8>(minRarityToBeat)) continue;
+
+        const u8 r = static_cast<u8>(wi.item.rarity);
+        if (r < worstRarity || (r == worstRarity && wi.lifetime < worstLifetime)) {
+            worstRarity = r; worstLifetime = wi.lifetime; victim = static_cast<s32>(i);
+        }
+    }
+    return victim;
+}
+} // namespace
+
 bool WorldItemSystem::spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 position,
-                              const LevelGrid* grid, u8 ownerSlot, f32 exclusiveSeconds) {
+                              const LevelGrid* grid, u8 ownerSlot, f32 exclusiveSeconds,
+                              const ItemDef* defs, u32 defCount) {
     // Nudge item out of walls if grid is provided
     if (grid) {
         Vec3 itemHalf = {0.15f, 0.15f, 0.15f}; // small AABB for item
@@ -103,7 +134,34 @@ bool WorldItemSystem::spawn(WorldItemPool& pool, const ItemInstance& item, Vec3 
         return true;
     }
 
-    LOG_WARN("WorldItemSystem: pool full, cannot spawn item");
+    // POOL FULL. Losing whatever just dropped is the worst possible answer, because legendaries and
+    // mythics NEVER despawn: at Inferno they accumulate on the floor until all 64 slots are taken,
+    // and from then on every new drop was discarded — including the mythics — while sixty commons
+    // sat there waiting out a 60 s timer. Measured: 1448 losses in a 3 h soak, entirely on deep
+    // floors (a class that never got past Normal saw zero).
+    //
+    // So make room by dropping the cheapest thing on the floor, but ONLY if it is strictly worse
+    // than what is arriving. That keeps the exchange a strict upgrade, exactly as the backpack's
+    // autoEvictWorst does — and for the same reason: an exchange that is not an upgrade can churn.
+    // Nothing is re-dropped here (the victim leaves the world outright), so there is no pickup loop
+    // to worry about, only the value ordering.
+    const s32 victim = findEvictable(pool, item.rarity, defs, defCount);
+    if (victim >= 0) {
+        pool.items[victim].active = false;
+        if (pool.activeCount > 0) pool.activeCount--;
+        // Recurse ONCE into the now-guaranteed free slot. Safe: the slot is free, so the loop above
+        // returns before reaching this branch again.
+        return spawn(pool, item, position, grid, ownerSlot, exclusiveSeconds, defs, defCount);
+    }
+
+    // Nothing on the floor is worse than the incoming item, so declining it IS the correct answer —
+    // it is genuinely the least valuable thing in play. Logged with the rarity so a full pool can be
+    // told apart from a pool full of junk, and throttled: the old unconditional line produced 1448
+    // entries in one soak, which is noise rather than signal.
+    static u32 s_declined = 0;
+    if ((s_declined++ % 64) == 0)
+        LOG_WARN("WorldItemSystem: pool full of equal-or-better loot; declined a %s drop (%u so far)",
+                 rarityName(item.rarity), s_declined);
     return false;
 }
 
@@ -116,18 +174,11 @@ bool WorldItemSystem::spawnEssential(WorldItemPool& pool, const ItemInstance& it
                                      const LevelGrid* grid, const ItemDef* defs, u32 defCount) {
     if (spawn(pool, item, position, grid)) return true;
 
-    // Evict the expendable item closest to expiring: it was about to vanish on its own anyway.
-    s32 victim = -1;
-    f32 lowestLifetime = 1e9f;
-    for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
-        WorldItem& wi = pool.items[i];
-        if (!wi.active) continue;
-        if (isSentinelItem(wi.item)) continue;              // never evict a key, shrine or globe
-        if (isLegendaryOrBetter(wi.item.rarity)) continue;  // legendaries never despawn; don't start
-        if (defs && wi.item.defId < defCount && defs[wi.item.defId].petSummon)
-            continue;                                       // a 1-in-10000 companion outranks a key's slot claim
-        if (wi.lifetime < lowestLifetime) { lowestLifetime = wi.lifetime; victim = static_cast<s32>(i); }
-    }
+    // Evict the cheapest expendable drop. Shares findEvictable with spawn() so there is ONE answer
+    // to "what is the most expendable thing here"; LEGENDARY as the bar reproduces this function's
+    // original rule (never evict a legendary or better for a key) while also preferring a common
+    // over a rare, which the old lifetime-only scan did not do.
+    const s32 victim = findEvictable(pool, Rarity::LEGENDARY, defs, defCount);
     if (victim < 0) {
         LOG_ERROR("WorldItemSystem: pool full and nothing evictable — ESSENTIAL item LOST");
         return false;

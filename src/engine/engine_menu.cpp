@@ -1171,6 +1171,43 @@ void Engine::updateMenu(f32 dt) {
         return;
     }
 
+    // Waypoint travel list (subState 25) — opened by touching a waypoint, OVER the live zone. The
+    // world behind it is never torn down, exactly like the town portal's Free-Play select, so BACK
+    // simply flips back to IN_GAME and you are standing where you left off.
+    if (m_menu.subState == 25) {
+        u8 dests[Zone::COUNT + 1];
+        const u32 n = waypointDestinations(dests, Zone::COUNT + 1);
+        if (n == 0) {   // cannot happen (town is always listed), but never trap the player in a menu
+            m_menu.subState = 0;
+            m_gameState = GameState::IN_GAME;
+            Input::setRelativeMouseMode(true);
+            return;
+        }
+        if (m_menu.subSelection >= n) m_menu.subSelection = static_cast<u8>(n - 1);
+
+        if (Input::isActionPressed(GameAction::MENU_UP) || Input::isKeyPressed(SDL_SCANCODE_W))
+            m_menu.subSelection = static_cast<u8>((m_menu.subSelection + n - 1) % n);
+        if (Input::isActionPressed(GameAction::MENU_DOWN) || Input::isKeyPressed(SDL_SCANCODE_S))
+            m_menu.subSelection = static_cast<u8>((m_menu.subSelection + 1) % n);
+
+        if (Input::isActionPressed(GameAction::MENU_CONFIRM)) {
+            const u8 dest = dests[m_menu.subSelection];
+            AudioSystem::play(SfxId::UI_CONFIRM);
+            m_menu.subState = 0;
+            // A waypoint jump has no "came from" edge — arrive at the destination's own anchor.
+            if (dest == Zone::TOWN_FLOOR) enterTown();
+            else                          enterZone(dest, /*fromFloor=*/0);
+            return;
+        }
+        if (Input::isActionPressed(GameAction::MENU_BACK)) {
+            AudioSystem::play(SfxId::UI_BACK);
+            m_menu.subState = 0;
+            m_gameState = GameState::IN_GAME;   // the zone was never torn down
+            Input::setRelativeMouseMode(true);
+        }
+        return;
+    }
+
     // P2 class selection (subState 5) — P2 navigates with their own controller. Reached from the
     // P2 slot screen (subState 12) once a New slot is chosen, so m_playerSaveSlot[1] is already set.
     if (m_menu.subState == 5) {

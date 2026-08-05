@@ -162,7 +162,10 @@ TEST_CASE("mythic drops only in Inferno") {
     }
 
     // In Inferno it appears, and at roughly the carved share of the legendary slice rather than
-    // as a new bucket bolted on: legendary+mythic together must still respect the 7.5% ceiling.
+    // as a new bucket bolted on: legendary+mythic together must still respect the tier's ceiling.
+    // Both figures are DERIVED from ItemGen's own constants — pinning the old literal 7.5 here is
+    // exactly how a rate change leaves a test that still passes while asserting nothing true.
+    const f32 kCeiling = ItemGen::legendaryCeiling(3);
     ItemGen::init(0xBEEF);
     u32 mythic = 0, legendary = 0;
     const u32 kRolls = 200000;
@@ -174,8 +177,8 @@ TEST_CASE("mythic drops only in Inferno") {
     const f32 mythicPct = 100.0f * static_cast<f32>(mythic) / static_cast<f32>(kRolls);
     const f32 topPct    = 100.0f * static_cast<f32>(mythic + legendary) / static_cast<f32>(kRolls);
     CHECK(mythic > 0);
-    CHECK(mythicPct == doctest::Approx(7.5f * ItemGen::MYTHIC_SHARE_OF_LEGENDARY).epsilon(0.15));
-    CHECK(topPct   == doctest::Approx(7.5f).epsilon(0.10));   // the ceiling did NOT rise
+    CHECK(mythicPct == doctest::Approx(kCeiling * ItemGen::MYTHIC_SHARE_OF_LEGENDARY).epsilon(0.15));
+    CHECK(topPct   == doctest::Approx(kCeiling).epsilon(0.10));   // the ceiling did NOT rise
 }
 
 TEST_CASE("a mythic is a real unique, rolled harder") {

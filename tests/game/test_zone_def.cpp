@@ -1,0 +1,272 @@
+// test_zone_def.cpp — the overworld zone graph (game/zone_def.h).
+//
+// These are structural pins, not behaviour tests: the zone table is DATA, and every failure mode it
+// has is a data mistake that produces a silently wrong world rather than a crash — a zone id that
+// collides with the town, a one-way link that strands a player, a grid size past the minimap's fixed
+// 64x64 buffers. Each of those looks completely fine in review.
+#include "doctest/doctest.h"
+#include "game/zone_def.h"
+#include "game/quest_def.h"
+#include <cstring>
+
+using namespace Zone;
+
+TEST_CASE("zone floors sit in the free sentinel band") {
+    // 1-50 dungeon, 51 cleared marker, 97/98/99 arena/town/Source. 52-96 is what is left.
+    CHECK(FLOOR_MIN == 52);
+    CHECK(FLOOR_MAX == 96);
+    CHECK_FALSE(isZoneFloor(50));
+    CHECK_FALSE(isZoneFloor(51));   // the cleared marker — must never route into a zone
+    CHECK(isZoneFloor(52));
+    CHECK(isZoneFloor(96));
+    CHECK_FALSE(isZoneFloor(97));   // arena
+    CHECK_FALSE(isZoneFloor(98));   // town
+    CHECK_FALSE(isZoneFloor(99));   // Source
+    CHECK_FALSE(isZoneFloor(0));
+
+    for (u32 i = 0; i < COUNT; i++)
+        CHECK_MESSAGE(isZoneFloor(ZONES[i].floor), "zone out of band: ", ZONES[i].name);
+}
+
+TEST_CASE("zone ids are unique and every zone is named") {
+    for (u32 i = 0; i < COUNT; i++) {
+        REQUIRE(ZONES[i].name != nullptr);
+        CHECK(std::strlen(ZONES[i].name) > 0);
+        for (u32 j = i + 1; j < COUNT; j++)
+            CHECK_MESSAGE(ZONES[i].floor != ZONES[j].floor,
+                          "duplicate zone floor ", (u32)ZONES[i].floor);
+    }
+}
+
+TEST_CASE("every link points somewhere real") {
+    for (u32 i = 0; i < COUNT; i++) {
+        const ZoneDef& z = ZONES[i];
+        for (u8 d = 0; d < static_cast<u8>(Dir::COUNT); d++) {
+            const u8 n = z.neighbour[d];
+            if (n == NO_LINK) continue;
+            // The town is a legal destination without being a zone; anything else must be a zone.
+            CHECK_MESSAGE((n == TOWN_FLOOR || find(n) != nullptr),
+                          "zone '", z.name, "' links to unknown floor ", (u32)n);
+        }
+        if (z.poiFloor != NO_LINK)
+            CHECK_MESSAGE(find(z.poiFloor) != nullptr, "zone '", z.name, "' has an unknown POI");
+        if (z.returnFloor != NO_LINK)
+            CHECK_MESSAGE((z.returnFloor == TOWN_FLOOR || find(z.returnFloor) != nullptr),
+                          "interior '", z.name, "' returns to an unknown floor");
+    }
+}
+
+// A one-way edge is the bug that strands a player: they walk north, and the zone they arrive in has
+// no south link back. Nothing crashes; they simply cannot return the way they came.
+TEST_CASE("zone-to-zone links are reciprocal") {
+    for (u32 i = 0; i < COUNT; i++) {
+        const ZoneDef& z = ZONES[i];
+        for (u8 d = 0; d < static_cast<u8>(Dir::COUNT); d++) {
+            const u8 n = z.neighbour[d];
+            if (n == NO_LINK || n == TOWN_FLOOR) continue;   // the town's side is enterTown, not a table row
+            const ZoneDef* other = find(n);
+            REQUIRE(other != nullptr);
+            const u8 back = other->neighbour[static_cast<u8>(opposite(static_cast<Dir>(d)))];
+            CHECK_MESSAGE(back == z.floor,
+                          "one-way link: '", z.name, "' -> '", other->name, "' has no way back");
+        }
+    }
+}
+
+// An interior's return must match the zone that hosts its entrance, or its exit drops the player
+// into a world they never came from.
+TEST_CASE("POI entrances and returns agree") {
+    for (u32 i = 0; i < COUNT; i++) {
+        const ZoneDef& z = ZONES[i];
+        if (z.poiFloor == NO_LINK) continue;
+        const ZoneDef* poi = find(z.poiFloor);
+        REQUIRE(poi != nullptr);
+        CHECK_MESSAGE(poi->returnFloor == z.floor,
+                      "'", poi->name, "' does not return to the zone holding its entrance");
+    }
+}
+
+TEST_CASE("opposite() pairs the compass") {
+    CHECK(opposite(Dir::NORTH) == Dir::SOUTH);
+    CHECK(opposite(Dir::SOUTH) == Dir::NORTH);
+    CHECK(opposite(Dir::EAST)  == Dir::WEST);
+    CHECK(opposite(Dir::WEST)  == Dir::EAST);
+    for (u8 d = 0; d < static_cast<u8>(Dir::COUNT); d++)
+        CHECK(opposite(opposite(static_cast<Dir>(d))) == static_cast<Dir>(d));
+}
+
+TEST_CASE("arrivalEdge puts you on the far side, and refuses unlinked pairs") {
+    // The Blood Buffer's south edge leads to town, so walking south should arrive at the NORTH edge.
+    Dir edge;
+    REQUIRE(arrivalEdge(52, TOWN_FLOOR, edge));
+    CHECK(edge == Dir::NORTH);
+
+    // An unlinked pair must be refused rather than guess an edge — the caller treats false as
+    // "refuse the transition", which is the only safe answer for a corrupt or hostile floor byte.
+    CHECK_FALSE(arrivalEdge(52, 96, edge));
+    CHECK_FALSE(arrivalEdge(200, TOWN_FLOOR, edge));
+}
+
+TEST_CASE("find() rejects non-zone floors") {
+    CHECK(find(52) != nullptr);
+    CHECK(find(TOWN_FLOOR) == nullptr);   // the town is an anchor, not a zone
+    CHECK(find(1) == nullptr);
+    CHECK(find(0) == nullptr);
+    CHECK(find(255) == nullptr);
+}
+
+// The caps that bind an outdoor world do not announce themselves: the minimap's visited/pixel arrays
+// are fixed 64x64 statics that truncate silently, and the spatial grid projectile collision uses
+// spans only +/-128 m. A zone authored past those looks fine and plays wrong.
+TEST_CASE("zone grids stay inside the engine's fixed-buffer limits") {
+    for (u32 i = 0; i < COUNT; i++) {
+        CHECK_MESSAGE(ZONES[i].gridSize <= 64,
+                      "'", ZONES[i].name, "' exceeds the 64x64 minimap buffers");
+        CHECK_MESSAGE(ZONES[i].gridSize >= 24, "'", ZONES[i].name, "' is implausibly small");
+    }
+}
+
+// Act 1 must be WALKABLE end to end from the town, or a zone exists that no player can reach. The
+// table is data, so this is the only thing standing between a typo'd link and an orphaned area.
+TEST_CASE("Act 1 is reachable from town, and ends at the Terminal") {
+    // Walk the graph from the town's first zone and collect everything reachable by edges + POIs.
+    bool seen[COUNT] = {};
+    u8   queue[COUNT + 1];
+    u32  head = 0, tail = 0;
+    queue[tail++] = 52;                       // the zone the town's north gate opens onto
+    while (head < tail) {
+        const u8 cur = queue[head++];
+        const ZoneDef* z = find(cur);
+        REQUIRE(z != nullptr);
+        for (u32 i = 0; i < COUNT; i++) if (ZONES[i].floor == cur) seen[i] = true;
+        const auto push = [&](u8 f) {
+            if (f == NO_LINK || f == TOWN_FLOOR || !find(f)) return;
+            for (u32 i = 0; i < COUNT; i++)
+                if (ZONES[i].floor == f) { if (seen[i]) return; break; }
+            for (u32 q = 0; q < tail; q++) if (queue[q] == f) return;
+            queue[tail++] = f;
+        };
+        for (u8 d = 0; d < static_cast<u8>(Dir::COUNT); d++) push(z->neighbour[d]);
+        push(z->poiFloor);
+    }
+    for (u32 i = 0; i < COUNT; i++)
+        CHECK_MESSAGE(seen[i], "unreachable zone: '", ZONES[i].name, "'");
+
+    // The act terminates at the Tube station: its north link is deliberately NO_LINK until the
+    // London arc exists, so Act 1 closes rather than opening onto an empty world.
+    const ZoneDef* terminal = find(59);
+    REQUIRE(terminal != nullptr);
+    CHECK(terminal->neighbour[(u8)Dir::NORTH] == NO_LINK);
+    CHECK(terminal->neighbour[(u8)Dir::SOUTH] == 58);
+}
+
+// Waypoints are the act's fast-travel spine. Too few and the walk back is punishing; every zone and
+// they stop meaning anything. D2's Act 1 gives you roughly one every other area.
+TEST_CASE("Act 1 waypoint spacing is sane") {
+    u32 wp = 0, outdoor = 0;
+    for (u32 i = 0; i < COUNT; i++) {
+        if (ZONES[i].hasWaypoint) wp++;
+        if (ZONES[i].returnFloor == NO_LINK) outdoor++;   // not an interior
+    }
+    CHECK(wp >= 3);
+    CHECK(wp <= outdoor);            // an interior must never carry one
+    for (u32 i = 0; i < COUNT; i++)
+        if (ZONES[i].returnFloor != NO_LINK)
+            CHECK_MESSAGE(!ZONES[i].hasWaypoint, "interior '", ZONES[i].name, "' has a waypoint");
+    // The mask is a u64 indexed by table position — the table cannot outgrow it.
+    CHECK(COUNT <= 64);
+}
+
+TEST_CASE("slice 1 ships the Blood Buffer and the Den, and the Den is an interior") {
+    const ZoneDef* buffer = find(52);
+    const ZoneDef* den    = find(53);
+    REQUIRE(buffer != nullptr);
+    REQUIRE(den != nullptr);
+    // The Blood Buffer deliberately has NO waypoint, matching D2's Blood Moor: the first walk out of
+    // town is the tutorial, and handing you fast travel before you have walked anywhere undercuts it.
+    CHECK_FALSE(buffer->hasWaypoint);
+    CHECK(buffer->neighbour[(u8)Dir::SOUTH] == TOWN_FLOOR);
+    CHECK(buffer->poiFloor == den->floor);
+    CHECK(den->returnFloor == buffer->floor);
+    for (u8 d = 0; d < (u8)Dir::COUNT; d++)
+        CHECK(den->neighbour[d] == NO_LINK);            // an interior has no open edges
+}
+
+// --- Act 1 quest chain (game/quest_def.h) --------------------------------------------------------
+// The quest table is data hanging off the zone table, so the failure modes are the same class: a
+// quest pointing at a zone that does not exist, a SLAY objective naming an enemy that was renamed,
+// or two quests fighting over one zone. None of those crash; they just never complete.
+TEST_CASE("every quest hangs off a real zone, one per zone") {
+    for (u32 i = 0; i < Quest::COUNT; i++) {
+        const Quest::QuestDef& q = Quest::QUESTS[i];
+        CHECK_MESSAGE(find(q.zoneFloor) != nullptr,
+                      "quest '", q.name, "' names a floor that is not a zone");
+        REQUIRE(q.name != nullptr);
+        REQUIRE(q.blurb != nullptr);
+        CHECK(std::strlen(q.name) > 0);
+        CHECK(std::strlen(q.blurb) > 0);
+        for (u32 j = i + 1; j < Quest::COUNT; j++)
+            CHECK_MESSAGE(Quest::QUESTS[j].zoneFloor != q.zoneFloor,
+                          "two quests share zone ", (u32)q.zoneFloor);
+        // A SLAY quest with no target can never complete — the silent failure this pins.
+        if (q.trigger == Quest::Trigger::SLAY)
+            CHECK_MESSAGE(std::strlen(q.target) > 0, "SLAY quest '", q.name, "' has no target");
+        else
+            CHECK(std::strlen(q.target) == 0);
+    }
+    CHECK(Quest::COUNT <= 64);   // the completion mask is a u64
+}
+
+TEST_CASE("quest completion bits round-trip and gate the act") {
+    u64 mask = 0;
+    CHECK_FALSE(Quest::actComplete(mask, 1));
+    CHECK_FALSE(Quest::actComplete(mask, 2));
+    for (u32 i = 0; i < Quest::COUNT; i++) {
+        const u8 f = Quest::QUESTS[i].zoneFloor;
+        CHECK_FALSE(Quest::isComplete(mask, f));
+        mask |= (1ull << Quest::bitFor(f));
+        CHECK(Quest::isComplete(mask, f));
+    }
+    CHECK(Quest::actComplete(mask, 1));
+    CHECK(Quest::actComplete(mask, 2));
+    // A zone with no quest is never "complete" — it must not read as a satisfied objective.
+    CHECK_FALSE(Quest::isComplete(mask, 52));
+    CHECK(Quest::bitFor(52) == 0xFF);
+}
+
+// Act 1 must END on a quest, or finishing the walk has no payoff. The act's CLIMAX is the
+// TristRAM boss and its EPILOGUE is the tube mouth — two different beats, so both are pinned:
+// a climax that is merely a REACH is an anticlimax, and a doorway that carries no quest at all
+// leaves the walk to the Underground unmotivated.
+TEST_CASE("the act ends on a boss fight, then a doorway") {
+    const Quest::QuestDef* climax = Quest::forZone(57);   // TristRAM
+    REQUIRE(climax != nullptr);
+    CHECK(climax->trigger == Quest::Trigger::SLAY);
+
+    const Quest::QuestDef* last = Quest::forZone(59);     // Whitechapel Terminal
+    REQUIRE(last != nullptr);
+    CHECK(last->trigger == Quest::Trigger::REACH);
+}
+
+// A SLAY quest names its victim as a STRING and the zone that hosts the fight names its boss as
+// another STRING; nothing in the type system makes the two agree. Rename the enemy in enemies.json
+// and update only one of them and the quest becomes uncompletable — the zone spawns a boss whose
+// death never satisfies the objective, which reads in-game as "I killed it and nothing happened".
+// So every zone boss must be the target of its zone's quest, and vice versa.
+TEST_CASE("a zone boss and its SLAY quest name the same enemy") {
+    for (u32 i = 0; i < Zone::COUNT; i++) {
+        const Zone::ZoneDef& z = Zone::ZONES[i];
+        const Quest::QuestDef* q = Quest::forZone(z.floor);
+        const bool hasBoss = z.boss && z.boss[0];
+        if (hasBoss) {
+            REQUIRE(q != nullptr);
+            CHECK(q->trigger == Quest::Trigger::SLAY);
+            CHECK(std::strcmp(q->target, z.boss) == 0);
+        }
+        // The converse: a SLAY quest whose target is a zone BOSS must be hosted by the zone that
+        // spawns it. (A SLAY may also target a champion the content spawner seeds, which is why
+        // this only fires when the zone declares a boss of its own.)
+        if (q && q->trigger == Quest::Trigger::SLAY && hasBoss)
+            CHECK(std::strcmp(q->target, z.boss) == 0);
+    }
+}

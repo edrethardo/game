@@ -22,7 +22,7 @@ static f32 medianOf(f32* v, u32 n) {
 EnemyCurve enemyTrashAt(const EnemyDefTable& table, u8 rawFloor, u8 difficulty) {
     EnemyCurve c;
     const EnemyDef* defs[MAX_ENEMY_DEFS];
-    const u32 n = collectTierDefs(table, enemyTierForFloor(rawFloor), defs, MAX_ENEMY_DEFS);
+    const u32 n = collectTierDefs(table, enemyTierForFloor(rawFloor), defs, MAX_ENEMY_DEFS, /*act=*/0);   // the lab models the DUNGEON
     if (n == 0) return c;
 
     // The exact spawn-time scaling path (engine_spawn.cpp): HP compounds via floorHealthMult AND

@@ -161,6 +161,11 @@ struct BotView {
     // Strike, Phase Dash)? The policy casts one to CLOSE the gap to a target beyond reach (it blinks
     // toward the facing), so a melee build teleports onto a far enemy instead of only walking.
     bool skillIsGapClose[4] = {};
+    // How far that gap-close actually MOVES you (SkillDef.distance). "Is a gap-close" is not enough
+    // to decide whether casting one at blade range is sensible: a Paladin's 3 m dash-smite barely
+    // shifts him and is his filler, while a Rogue's 15 m Shadow Step hurls him clean off the enemy
+    // he is mid-fight with. The distance is what separates the two.
+    f32  skillGapDist[4] = {};
     // EQUIPMENT legendary skills (boots = F, helmet = G), same contract as castableSkill: the driver
     // mirrors handleEquipmentSkillActivation's real gates (the slot is bound to a skill at all,
     // the shared energy pool covers the cost, the tick cooldown has elapsed) so a true here means

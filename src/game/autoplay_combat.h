@@ -598,10 +598,21 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
             // and cooldowns self-limit. Only a melee build still CLOSING keeps the cheap filler, so
             // long cooldowns are not burnt before arrival. COUNTER skills (Deflect) are excluded
             // here — they fire on the reactive trigger below, never blind.
+            // A gap-close whose blink is LONGER than our reach is mobility, not damage: casting it
+            // while already in reach throws the bot off the target it is hitting. The equipment rail
+            // has always withheld Phase Dash in range for exactly this reason; class skills never
+            // did, and the Rogue is where it shows — SHADOW_STEP is 15 m on a 3 s cooldown sitting
+            // in slot 1, so once Shadow Dance and Poison Cloud are cooling it becomes the "biggest
+            // castable" every three seconds and the bot teleports away from its own fight, forever.
+            // Judged by DISTANCE rather than by "is a gap-close", because the Paladin's 3 m
+            // dash-smite is his filler and must keep firing at blade range.
+            auto overshoots = [&](s8 s) {
+                return v.skillIsGapClose[s] && v.skillGapDist[s] > v.weaponRange;
+            };
             const bool meleeClosing = (col == 1) && t.dist > v.weaponRange;
             if (!meleeClosing) {
                 for (s8 s = 3; s >= 0; s--)
-                    if (v.castableSkill[s] && !v.skillIsCounter[s]) { slot = s; break; }
+                    if (v.castableSkill[s] && !v.skillIsCounter[s] && !overshoots(s)) { slot = s; break; }
             } else {
                 for (s8 s = 0; s <  4; s++)
                     if (v.castableSkill[s] && !v.skillIsCounter[s]) { slot = s; break; }
