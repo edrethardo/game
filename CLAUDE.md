@@ -469,6 +469,26 @@ DEFAULT, which is the safe direction — the hand-listed set had already been wr
 shrines and Source shards each added retroactively after they evaporated in play. Pinned by a test
 that simulates 120 s per sentinel type; sabotage (restoring the hand-listed rule) fails it by name.
 
+**REVIVED SOMEWHERE ELSE, SOMETIMES OUT OF BOUNDS (2026-08-06).** Every revive path teleports to
+`NetPlayer::spawnPosition`, which `worldSeatNetPlayers` sets to the ARRIVAL point on entry — so a bad
+arrival becomes a bad respawn anchor for as long as you stay in that zone. `buildZoneLevel` clears
+its pads (gate corridors, waypoint, POI, centre) BEFORE the mesh is built, and the fallback arrival
+was not among them: waypoint travel and portal entries land at centre + 10 m south, which on a road
+zone is whatever the generator put there. Land in a rock clump and that is your anchor; reviving into
+geometry shoves the body out through the border.
+The two pads I had added for the portal arrival made it worse in a quieter way — they lived in
+`spawnZoneContents`, which runs AFTER `LevelMeshSystem::buildAll`, so they behaved as floor while
+still RENDERING as rock (the trap the lava exit pad documents). All arrival clearing now happens in
+`buildZoneLevel` ahead of the mesh. Verified across all 15 zones: **0 anchors in rock or out of
+bounds**.
+**The first version of this fix would have DESYNCED co-op.** It keyed the pad on `fromFloor` so it
+could clear the exact arrival — but the grid is rebuilt from the shared seed on every peer, and the
+client is told only WHICH zone, never which side the host came through. Host and guest would have
+carved different geometry from the same seed. The pad set is now arrival-INDEPENDENT: edge arrivals
+are already covered by the gate corridors, and the fallback arrival is a fixed spot per zone, so
+every peer clears the same cells. A rule worth keeping for anything that touches the grid — if it
+varies with how a player got there, it cannot be part of the world.
+
 **THE OVERWORLD EASE (2026-08-06, Aaron: "reduce the overworld difficulty to be a bit easier").**
 Because the acts evaluate the curve at the LADDER END they were, by construction, exactly as hard as
 Inferno floor 50 — 12.0 s to kill one trash mob and 1.68 hits to die. Both ends of that are

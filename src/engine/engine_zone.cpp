@@ -239,7 +239,24 @@ Vec3 Engine::buildZoneLevel(const Zone::ZoneDef& def) {
                      static_cast<u32>(static_cast<f32>(size) * POI_FRAC_Z), 2);
     // An interior's way out is its own landmark; put it at the centre so it is never behind you.
     if (def.returnFloor != Zone::NO_LINK)
-        zoneClearPad(size / 2, size / 2, 2);
+        zoneClearPad(size / 2, size / 2, 3);   // the boss pad — radius 3, matching spawnZoneContents
+
+    // THE ARRIVAL, and the way back out. Both were cleared in spawnZoneContents, which runs AFTER
+    // the mesh is built — so they behaved as floor while still RENDERING as rock — and for a zone
+    // with no return gate the arrival was never cleared at all. That is the reported "I get revived
+    // somewhere else and sometimes out of bounds": waypoint travel arrives at centre+10m south,
+    // which on a road zone is whatever the generator put there. Landing inside geometry makes THAT
+    // the respawn anchor, and reviving into rock shoves the body out through the border.
+    // Cleared UNCONDITIONALLY, never keyed on how the player arrived: the grid is rebuilt from the
+    // shared seed on every peer, and a pad that depends on `fromFloor` would have the host and a
+    // guest carve DIFFERENT geometry from the same seed. Edge arrivals need nothing here — the gate
+    // corridors above already cover them, deterministically. This is the fallback arrival (waypoint
+    // travel, and the portal into an interior), which is a fixed spot per zone.
+    {
+        const Vec3 back = zoneReturnPos(def);
+        zoneClearPad(static_cast<u32>(back.x), static_cast<u32>(back.z), 3);          // the gate
+        zoneClearPad(static_cast<u32>(back.x), static_cast<u32>(back.z + 2.0f), 2);   // and where you land
+    }
 
     m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, zoneSeed,
                                                      m_level.sections, MAX_LEVEL_SECTIONS);
@@ -318,7 +335,6 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
             // simply never fire and the act would have no ending.
             LOG_ERROR("zone '%s' names boss '%s', which is not in enemies.json", def.name, def.boss);
         } else {
-            zoneClearPad(def.gridSize / 2, def.gridSize / 2, 3);   // room to fight it
             const EnemyDef& bd = m_enemyDefs.defs[defIdx];
             const Vec3 bossPos = { center.x, 0.0f, center.z };
             EntityHandle bh = EntitySystem::spawn(m_entities, bossPos, bd.halfExtents, bd.flying,
@@ -393,11 +409,7 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
         gate.defId     = ZONE_GATE_ID;
         gate.itemLevel = def.returnFloor;
         gate.uid       = m_worldItems.nextUid++;
-        const Vec3 rpos = zoneReturnPos(def);
-        // Clear the ground the gate and the arriving player stand on — the generator is free to put
-        // a rock clump here, and spawning inside geometry shoves a body out through the border.
-        zoneClearPad(static_cast<u32>(rpos.x), static_cast<u32>(rpos.z), 3);
-        zoneClearPad(static_cast<u32>(rpos.x), static_cast<u32>(rpos.z + 2.0f), 2);
+        const Vec3 rpos = zoneReturnPos(def);   // ground cleared in buildZoneLevel, before the mesh
         WorldItemSystem::spawn(m_worldItems, gate, rpos, &m_level.grid, 0xFF);
         LOG_INFO("Zone fixture: RETURN GATE -> floor %u", (u32)def.returnFloor);
     }
