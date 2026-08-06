@@ -576,6 +576,7 @@ bool Engine::zoneLinkAllowed(u8 from, u8 to) {
     if (ZoneRoute::linkOpen(from, to, m_questMask[m_localPlayerIndex])) return true;
 
     if (m_zoneGateHintTimer <= 0.0f) {
+        LOG_INFO("[ZONEX] refused %u -> %u (quest gate)", static_cast<u32>(from), static_cast<u32>(to));
         // Name the OUTSTANDING quest rather than a generic refusal: "something is unfinished" sends
         // a player wandering, and the whole point of the chain is that it tells you where to go.
         const Zone::ZoneDef* z = Zone::find(from);
@@ -596,7 +597,6 @@ bool Engine::zoneLinkAllowed(u8 from, u8 to) {
         }
         m_zoneGateHintTimer = 6.0f;
     }
-    LOG_INFO("[ZONEX] refused %u -> %u (quest gate)", static_cast<u32>(from), static_cast<u32>(to));
     return false;
 }
 
@@ -654,12 +654,14 @@ void Engine::updateZoneTransitions() {
     if (dest == Zone::NO_LINK) return;
 
     const u8 from = m_level.zoneFloor;
-    LOG_INFO("[ZONEX] edge crossing %u -> %u  p=(%.1f,%.1f) dir=%u armed=%d hp=%.0f",
-             static_cast<u32>(from), static_cast<u32>(dest),
-             static_cast<f64>(p.x), static_cast<f64>(p.z), static_cast<u32>(dir),
-             static_cast<int>(m_zoneEdgeArmed), static_cast<f64>(m_localPlayer.health));
     if (dest == Zone::TOWN_FLOOR) { enterTown(); return; }
     if (!zoneLinkAllowed(from, dest)) return;
+    // Logged HERE, not at the proximity test: standing in a border band is a per-tick condition, so
+    // logging the attempt produced a dozen identical lines a second in the first live run. What is
+    // worth a line is the world actually changing.
+    LOG_INFO("[ZONEX] crossing %u -> %u  p=(%.1f,%.1f) dir=%u",
+             static_cast<u32>(from), static_cast<u32>(dest),
+             static_cast<f64>(p.x), static_cast<f64>(p.z), static_cast<u32>(dir));
     enterZone(dest, from);
 }
 

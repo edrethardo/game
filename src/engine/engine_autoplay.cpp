@@ -195,13 +195,12 @@ static bool intentActs(const Autoplay::BotIntent& in) {
 void Engine::updateAutoplay(f32 dt) {
     if (!m_autoplayActive) return;
 
-    // THE OVERWORLD ENDS THE RUN (Aaron: the bot's remit stops at Inferno). A zone is post-Inferno
-    // hand-played content with no descent objective, so a bot standing in one would idle forever —
-    // the exact shape of the town and credits strands that each cost a soak to find. End the run
-    // deliberately and loudly instead, the same orderly exit the standard ending uses.
-    if (m_level.inZone) {
-        LOG_INFO("[AUTOPLAY] reached the overworld (zone %u) — ending the run",
-                 static_cast<u32>(m_level.zoneFloor));
+    // THE OVERWORLD IS PLAYED, NOT REFUSED. The bot used to end its run on entering a zone, because
+    // an act has no descent objective and a bot standing in one would idle forever — the town and
+    // credits strands in a new costume. It now has an objective: the quest chain (game/zone_route.h),
+    // presented to the brain as an ordinary floor door (engine_autoplay_zone.cpp). The run ends only
+    // when both acts are finished, or when the route is genuinely stranded — and says which.
+    if (m_level.inZone && zoneAutoplayStep()) {
         exitAutoplayRun();
         return;
     }
@@ -759,8 +758,9 @@ void Engine::updateAutoplay(f32 dt) {
         ap().remedy = "door-walk";
         in = Autoplay::BotIntent{};
         in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
-        const Vec3 h{m_level.floorDoorPos.x - m_localPlayer.position.x, 0.0f,
-                     m_level.floorDoorPos.z - m_localPlayer.position.z};
+        const Vec3 goalPos = autoplayGoalPos();
+        const Vec3 h{goalPos.x - m_localPlayer.position.x, 0.0f,
+                     goalPos.z - m_localPlayer.position.z};
         if (lengthSq(h) > 1e-6f) {
             f32 y, p; Autoplay::dirToAim(h, y, p);
             in.aimYaw = y; in.aimPitch = 0.0f; in.moveFwd = true;   // close the last metre
@@ -834,7 +834,7 @@ void Engine::updateAutoplay(f32 dt) {
                     } else {
                         Vec3 wp[MAX_PATH_WAYPOINTS];
                         const u8 n = Pathfinder::findPath(m_level.grid, m_localPlayer.position,
-                                                          m_level.floorDoorPos, wp, MAX_PATH_WAYPOINTS, 0.3f);
+                                                          autoplayGoalPos(), wp, MAX_PATH_WAYPOINTS, 0.3f);
                         if (n > 0) {
                             const Vec3 to{wp[0].x - m_localPlayer.position.x, 0.0f,
                                           wp[0].z - m_localPlayer.position.z};
@@ -897,7 +897,8 @@ void Engine::updateAutoplay(f32 dt) {
         // ladder never gets to run (measured: 35 s frozen with the bull latched and moveFwd held). The
         // two are naturally exclusive — `stuck` means not moving, the bull means moving-but-not-arriving.
         const Vec3 pos = m_localPlayer.position;
-        Vec3 heading{m_level.floorDoorPos.x - pos.x, 0.0f, m_level.floorDoorPos.z - pos.z};
+        const Vec3 goalPos = autoplayGoalPos();
+        Vec3 heading{goalPos.x - pos.x, 0.0f, goalPos.z - pos.z};
         // On a STACKED floor the door is on ANOTHER STORY (a VHALL balcony, an FS drop below), so a
         // flat A* to its XZ walks the bot UNDER the balcony / away from the hole and wedges it there —
         // measured, the bull dragged the geared paladin to directly beneath the upstairs door and it
@@ -911,7 +912,7 @@ void Engine::updateAutoplay(f32 dt) {
         } else if (v.distToDoor > 3.0f) {   // flat floor, far: a WALL-AWARE route, never the straight line
             bool routed = false;
             Vec3 wp[MAX_PATH_WAYPOINTS];
-            const u8 n = Pathfinder::findPath(m_level.grid, pos, m_level.floorDoorPos, wp,
+            const u8 n = Pathfinder::findPath(m_level.grid, pos, autoplayGoalPos(), wp,
                                               MAX_PATH_WAYPOINTS, 0.3f);
             if (n > 0) {
                 const Vec3 toWp{wp[0].x - pos.x, 0.0f, wp[0].z - pos.z};
@@ -2020,11 +2021,11 @@ Autoplay::BotView Engine::buildBotView() {
     // by construction, so DESCEND stays disarmed), its flow field is seeded at the centre where the
     // Engine stands (so TRAVEL walks toward the fight), and pickTarget already skips an invulnerable
     // target — so while the Engine is shielded the bot fights the adds, which is the intended answer.
-    // A ZONE is not a world the brain can express (no floor door, no descent objective), and per
-    // Aaron the bot's remit ends at Inferno anyway — the overworld is hand-played content. Treated
-    // exactly like the town and the arena here, and the driver ENDS the run on entering one.
-    v.onNormalFloor = !(m_level.inTown || m_level.inArena || m_level.inZone) &&
-                      (m_level.floorDoorActive || m_level.inSourceChamber);
+    // A ZONE now IS a world the brain can express: engine_autoplay_zone.cpp gives it a goal (the
+    // quest chain) and presents that goal as the floor door, so every travel/fight/stall mechanism
+    // works unchanged. The town and the arena are still worlds the bot does not play.
+    v.onNormalFloor = !(m_level.inTown || m_level.inArena) &&
+                      (m_level.floorDoorActive || m_level.inSourceChamber || m_level.inZone);
     // Stacked styles carry walk-on slab storys, so "3 m above me" means "another floor of the
     // building" rather than "up a step" — the policy's cross-story target gate keys off this.
     v.stackedFloor  = (m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL) ||
@@ -2326,6 +2327,11 @@ Autoplay::BotView Engine::buildBotView() {
     v.distToDoor  = length(m_level.floorDoorPos - m_localPlayer.position);
     v.hasBoss     = m_level.floorHasBoss;
     v.bossAlive   = floorBossAlive();
+
+    // An ACT overrides all four of those: its "door" is the next hop on the quest road, and its
+    // "boss" is whatever a SLAY quest is asking for. Applied AFTER the dungeon values so there is
+    // exactly one place the two worlds meet, rather than four conditionals threaded above.
+    if (m_level.inZone) zoneFillBotView(v);
 
     // The one layout where "don't fall to reach an enemy" is a rule (see BotTarget::onlyReachableByFall).
     const bool vhUpperExitFloor = m_level.layoutStyle == LevelGen::LayoutStyle::VERTICAL_HALL &&

@@ -64,6 +64,11 @@ struct LaunchOptions {
     // --zone <floor>: after --load/--new, drop straight into an OVERWORLD zone (52-96). The zones
     // sit behind an Inferno clear, so without this door the only way to see one is a full ladder.
     u8   zoneFloor = 0;   // 0 = not requested
+    // --endgame: gear the hero as if they had just broken Inferno. The overworld spawns TIER 5 at
+    // effective floor 200, so a fresh character is killed in about two seconds and never sees a
+    // zone at all — measured, and it is why every early overworld probe went silent within a second
+    // of arriving. Without this there is no way to soak-test the acts.
+    bool endgame = false;
     bool arenaCouch = false;                   // --arena-couch: local-versus arena, two fresh lanes
     bool autoplayCouch = false;                // --autoplay-couch: split-screen, BOTH lanes bot-driven
     // --devperf: emit the 1 Hz [DEVPERF] measurement line. OFF by default so a build you actually

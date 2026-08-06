@@ -374,6 +374,13 @@ private:
         u16  vhFollowDist    = 0xFFFF;    // remaining route cost at the bot's node ([STALL] vd=)
         f32  bossDist = -1.0f;            // boss floors: XZ distance to the live boss ([STALL] dB=)
         u8   bossLOS  = 0;                //   ...and whether the line to it is clear ([STALL] bL=)
+
+        // --- OVERWORLD (see engine_autoplay_zone.cpp) ---
+        // The act's current goal, and whether the flow field has been built toward it. Per-lane like
+        // everything else here: two couch bots can be in different zones on different objectives.
+        Vec3 zoneGoal      = {};
+        bool zoneGoalValid = false;
+        f32  zoneTelemT    = 0.0f;   // 1 Hz [ZBOT] act telemetry
         // Boss-floor closing commit (autoplay_combat.h bossCommit*): latched when a 20 s window
         // shows the bot not closing on the sealed-exit boss (the soak13 ranged-orbit shape),
         // released when the boss is fightable from here. StartDb < 0 = window unseeded.
@@ -1467,6 +1474,12 @@ private:
     void updateZoneTransitions();
     // Quest gating for both doors (an edge crossing and a portal). Explains its refusals.
     bool zoneLinkAllowed(u8 from, u8 to);
+
+    // --- Autoplay in the overworld (engine_autoplay_zone.cpp) ---
+    bool zoneBotGoal(Vec3& outGoal, bool& outIsHop);   // what the act wants, and where it is
+    void zoneFillBotView(Autoplay::BotView& v);        // the act's answers for buildBotView
+    bool zoneAutoplayStep();                           // true when the run has ended
+    Vec3 autoplayGoalPos() const;                      // the way onward, dungeon or act
     f32  m_zoneGateHintTimer = 0.0f;   // throttles the locked-gate chat line
     // Edge transitions are DISARMED on arrival and re-arm only once the player has stood clear of
     // every border band. Without it, arriving at a gate re-triggers that same gate — which links
@@ -2092,6 +2105,9 @@ private:
     // lane; autoEquipBackpack re-gears a lane after a build-cell change or the mode toggling on.
     void updateAutoLoot(f32 dt);
     void autoEquipBackpack(u8 lane);
+    // Dev door (--endgame): gear a lane as if it had just broken Inferno, so the post-Inferno
+    // overworld can be played and soaked at all. See engine_launch.cpp for why it must exist.
+    void equipEndgameLoadout(u8 lane);
     bool autoEquipIfUpgrade(u8 lane, u8 bpIdx);
     // Make room in a full bag for `incomingScore` (BuildScore::maxCellScore of the item we are
     // about to pick up). Returns false — and evicts NOTHING — unless the swap is a strict upgrade.

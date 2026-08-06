@@ -52,6 +52,49 @@ void Engine::applyClassToLane0(PlayerClass cls) {
     std::memcpy(m_classSkillStatesPerPlayer[0], m_classSkillStates, sizeof(m_classSkillStates));
 }
 
+
+// Gear a lane as if it had just broken Inferno — the dev door (--endgame) that makes the overworld
+// testable at all.
+//
+// WHY THIS HAS TO EXIST. The acts spawn TIER 5 evaluated at effective floor 200 (the ladder end), so
+// a fresh character meets post-Inferno enemies immediately. Measured: a `--new warrior --zone 52` is
+// dead in about two seconds and the run then sits on the death screen, where neither logStats nor the
+// autoplay driver runs — which is why every early overworld probe went silent one second after
+// arriving and looked like a hang. A soak of the acts is impossible without a hero the acts were
+// balanced for.
+//
+// It rolls through the REAL ItemGen and equips through the REAL auto-equip, rather than stamping
+// stats onto the player. That matters: a hand-stamped hero is not a hero the game can produce, so it
+// would test the acts against a fiction. This one is exactly what a drop stream at ilvl 200 gives a
+// build, which is the thing the balance was measured against.
+void Engine::equipEndgameLoadout(u8 lane) {
+    if (lane >= MAX_LOCAL_PLAYERS) return;
+    PlayerInventory& inv = m_inventories[lane];
+
+    // The gear brain does the choosing. Forced on regardless of --autoloot because a bag of loot the
+    // hero never equips is not a loadout.
+    inv.autoMode = 1;
+
+    // ilvl 200 is the overworld's own scaling point (FreePlay::MAX_FLOOR + FINAL_DIFFICULTY * 50),
+    // single-sourced from the same expression the spawner uses so the two cannot drift.
+    const u8 ilvl = static_cast<u8>(200);
+
+    // Enough rolls that every slot and every build column is served. The bag is 48 slots and
+    // autoEquipBackpack keeps only what wins, so a surplus costs nothing but a few hundred rolls.
+    u32 taken = 0;
+    for (u32 i = 0; i < 240; i++) {
+        const ItemInstance it = ItemGen::rollItem(ilvl, m_itemDefs, m_itemDefCount,
+                                                  m_affixDefs, m_affixDefCount, Rarity::RARE);
+        if (isItemEmpty(it)) continue;
+        if (Inventory::addToBackpack(inv, it) < 0) break;   // bag full — plenty already
+        taken++;
+    }
+
+    autoEquipBackpack(lane);
+    LOG_INFO("Launch: --endgame geared lane %u from %u rolled items at ilvl %u",
+             static_cast<u32>(lane), taken, static_cast<u32>(ilvl));
+}
+
 void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     if (!opt.valid) return;  // parse failed → normal menu boot
 
@@ -269,7 +312,11 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         // world, so there has to be one and the hero's class/gear must already be set up. Without
         // this door the only way to see a zone is a full Inferno clear.
         startGame(mode);
+        // Gear BEFORE arming the bot: enterAutoplayRun seeds the build cell from the class, and
+        // autoEquipBackpack should run against that cell rather than re-gearing a moment later.
+        if (opt.endgame) equipEndgameLoadout(0);
         if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
+        if (opt.endgame) autoEquipBackpack(0);   // re-pick under the class's own build cell
         enterZone(opt.zoneFloor, /*fromFloor=*/0);
         LOG_INFO("Launch: entered overworld zone %u (--zone)", (u32)opt.zoneFloor);
         return;

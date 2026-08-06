@@ -158,6 +158,11 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             }
             opt.zoneFloor = (u8)n;
             opt.active    = true;
+        } else if (ieq(a, "--endgame")) {
+            // Gear the hero for post-Inferno content. Pairs with --zone: the acts are balanced
+            // against a hero who has finished the ladder, so anything else is not a test of them.
+            opt.endgame = true;
+            opt.active  = true;
         } else if (ieq(a, "--victory")) {
             // Dev door onto the ENDING screens: builds the world, then rolls the standard ending's
             // credits on the spot. Exercises credits -> victory -> (autoplay) next-run continuation
