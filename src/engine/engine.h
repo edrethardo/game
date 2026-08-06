@@ -1460,6 +1460,7 @@ private:
     void zoneClearPad(u32 cx, u32 cz, u32 radius);
     void zoneOpenGate(Zone::Dir dir);
     Vec3 zoneGatePos(Zone::Dir dir) const;
+    Vec3 zoneReturnPos(const Zone::ZoneDef& def) const;
     Vec3 zoneArrivalPos(const Zone::ZoneDef& def, u8 fromFloor);
     // Walking into a border band with a linked neighbour hands off to the next zone (host decides,
     // clients follow the broadcast) — the town-portal proximity pattern.

@@ -353,9 +353,28 @@ Storage, the Field of Unmerged Branches, the Deadlock Woods and Whitechapel Term
 **the Blood Buffer and TristRAM deliberately do NOT**. D2's Blood Moor has none because the first
 walk out of town is the tutorial, and its Tristram has none because you arrive by portal and leave in
 a hurry. Both hold here for the same reasons.
+**TRISTRAM IS REACHED BY A PORTAL, NOT BY WALKING (2026-08-06, Aaron: "make the map and the quests
+like in act 1 including the Portal in the Stony Field").** D2's Tristram is not a place on the road —
+it is a RED PORTAL raised at the Cairn Stones in the Stony Field, which is why the town is a
+massacre you drop into and hurry out of rather than somewhere you pass through. Ours was an ordinary
+border crossing between the Field of Unmerged Branches and the Deadlock Woods, which flattened the
+whole beat. The Act 1 road is now D2's: Blood Moor -> Cold Plains -> **Stony Field** -> Dark Wood ->
+the Monastery gate, with the Den of Evil, the Burial Grounds and **TristRAM** all hanging OFF it as
+portal-only side areas (`neighbour` all NO_LINK, reached by `poiFloor`/`returnFloor`). The quest in
+the Stony Field is the Cairn Stones beat — *Align the Standing Stones*, whose joke is that monuments
+to abandoned features cannot agree with one another.
+**It exposed a bug that already existed in the dens.** A portal-entered zone has no shared border, so
+`zoneArrivalPos` fell through to the zone CENTRE — and `spawnZoneContents` clears the centre pad for
+the named BOSS and dropped the return gate there too. Entering the Deprecated Graveyard therefore put
+the player ON TOP of The Garbage Collector with the way home underneath them; the map change would
+have done the same to TristRAM. The return gate and the portal arrival now stand
+`RETURN_GATE_OFFSET` (8 m) south of centre with their ground cleared, measured at **10.0 m from the
+boss** in both zones: you step out of the portal, the way back is at your back, and the thing you
+came for is across the ruins.
+
 **QUESTS (`game/quest_def.h`)** are D2's Act 1 chain, beat for beat, renamed: *Free the Allocation*
-(clear the Den), *The Rebaser* (the graveyard keeps bringing its history back), *Restore the
-Toolchain*, ***The Search for Deckard Cache*** (the pun the act was built around, and now the act's
+(clear the Den), *The Rebaser* (the graveyard keeps bringing its history back), *Align the Standing
+Stones* (the Cairn Stones, which open the way to TristRAM), ***The Search for Deckard Cache*** (the pun the act was built around, and now the act's
 CLIMAX — a SLAY on Griswald in the TristRAM ruins), and *Terminal Access* at the station, a REACH
 that is deliberately the EPILOGUE and not a second climax competing with the first. Both halves of
 that ending are pinned by test, because an act whose last beat is "arrive somewhere" has no payoff

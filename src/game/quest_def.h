@@ -53,8 +53,12 @@ inline constexpr QuestDef QUESTS[] = {
           "The graveyard keeps bringing its history back. Stop whatever is rewriting it.",
           Trigger::SLAY, "The Garbage Collector" },
 
-    { 56, "Restore the Toolchain",
-          "The field is littered with abandoned work. Something out here still builds.",
+    // D2's Cairn Stones beat. Deckard Cain is not FOUND by walking to Tristram — the stones in the
+    // Stony Field are what open the way, which is why this quest sits here and the portal stands in
+    // this field. The stones read as monuments to abandoned features, so "getting them to agree" is
+    // the same joke as the zone's name.
+    { 56, "Align the Standing Stones",
+          "Monuments to abandoned features, and none of them agree. Clear the field and they will.",
           Trigger::CLEAR_ZONE, "" },
 
     // ACT 1's CLIMAX. D2 puts Griswold in the ruins of the town he used to serve; the beat lands

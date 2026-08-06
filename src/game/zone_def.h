@@ -146,8 +146,8 @@ inline constexpr ZoneDef ZONES[] = {
     //    abandoned features. The waypoint here is the halfway anchor of the act.
     { /*floor*/      56,
       /*name*/       "The Field of Unmerged Branches",
-      /*neighbour*/  { 57, NO_LINK, 54, NO_LINK },
-      /*poiFloor*/   0,
+      /*neighbour*/  { 58, NO_LINK, 54, NO_LINK },   // the road goes on to the woods
+      /*poiFloor*/   57,   // THE CAIRN STONES: the portal to TristRAM stands in this field
       /*returnFloor*/0,
       /*hasWaypoint*/true,
       /*peaceful*/   false,
@@ -164,9 +164,9 @@ inline constexpr ZoneDef ZONES[] = {
     //    will want to leave in a hurry) but it is desolate, hostile ground, not a refuge.
     { /*floor*/      57,
       /*name*/       "TristRAM (pop. 3, mostly)",
-      /*neighbour*/  { 58, NO_LINK, 56, NO_LINK },
+      /*neighbour*/  { NO_LINK, NO_LINK, NO_LINK, NO_LINK },   // reached ONLY by the portal
       /*poiFloor*/   0,
-      /*returnFloor*/0,
+      /*returnFloor*/56,   // back through the stones to the Stony Field
       /*hasWaypoint*/false,        // D2's Tristram has no waypoint — you arrive by portal and leave fast
       /*peaceful*/   false,         // OVERRUN, like D2's: the village is the ambush, not the rest stop
       /*ruins*/      true,
@@ -179,7 +179,7 @@ inline constexpr ZoneDef ZONES[] = {
     //    country before the gate; no waypoint, so the walk in from TristRAM stays a walk.
     { /*floor*/      58,
       /*name*/       "The Deadlock Woods",
-      /*neighbour*/  { 59, NO_LINK, 57, NO_LINK },
+      /*neighbour*/  { 59, NO_LINK, 56, NO_LINK },
       /*poiFloor*/   0,
       /*returnFloor*/0,
       /*hasWaypoint*/true,         // D2's Dark Wood carries one; the long walk back needs it

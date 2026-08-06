@@ -29,6 +29,7 @@ namespace {
 
 // How wide the walkable opening in a border wall is, and how deep into the zone the trigger band
 // reaches. The gate is generous (5 cells) because an edge you have to hunt for reads as a wall.
+constexpr f32 RETURN_GATE_OFFSET = 8.0f;  // metres SOUTH of centre — clear of the boss pad
 constexpr u32 GATE_HALF = 2;          // gate spans centre-2 .. centre+2
 constexpr f32 EDGE_TRIGGER_BAND = 2.5f;   // metres from the border that count as "leaving"
 // How far INSIDE the border an arriving player is placed. It MUST exceed the trigger band, or
@@ -254,6 +255,19 @@ Vec3 Engine::buildZoneLevel(const Zone::ZoneDef& def) {
 // Where a player entering `def` from `fromFloor` should stand. Arriving through an edge puts them at
 // the OPPOSITE gate so travel reads as continuous; anything else (a waypoint jump, entering a POI)
 // drops them at the zone's own arrival point.
+// Where the RETURN portal stands in a zone you can only reach by portal, and — offset a little
+// further out — where an arriving player is put down.
+//
+// Both used to be the zone CENTRE, and so is the boss: `spawnZoneContents` clears a pad at the
+// centre and puts the named boss on it. So stepping through the portal into the Deprecated
+// Graveyard or (now) TristRAM dropped the player ON TOP of the boss, with the way back underneath
+// them. Standing the pair off to the south makes the arrival read the way it should: you come out
+// of the portal, the way home is at your back, and the thing you came for is across the ruins.
+Vec3 Engine::zoneReturnPos(const Zone::ZoneDef& def) const {
+    const f32 half = static_cast<f32>(def.gridSize) * 0.5f;
+    return { half, 0.0f, half + RETURN_GATE_OFFSET };
+}
+
 Vec3 Engine::zoneArrivalPos(const Zone::ZoneDef& def, u8 fromFloor) {
     Zone::Dir edge;
     if (fromFloor != 0 && Zone::arrivalEdge(fromFloor, def.floor, edge))
@@ -265,7 +279,11 @@ Vec3 Engine::zoneArrivalPos(const Zone::ZoneDef& def, u8 fromFloor) {
             if (def.neighbour[d] == Zone::TOWN_FLOOR) return zoneGatePos(static_cast<Zone::Dir>(d));
     }
     const f32 size = static_cast<f32>(def.gridSize);
-    return { size * 0.5f, 0.0f, size * 0.5f };
+    // Portal arrival (no shared border to come through): stand just outside the return gate rather
+    // than on the zone's centre, which the boss occupies.
+    (void)size;
+    const Vec3 back = zoneReturnPos(def);
+    return { back.x, 0.0f, back.z + 2.0f };
 }
 
 // The zone's fixtures: its waypoint, and the gate into/out of a POI. Both are WORLD ITEMS on
@@ -373,7 +391,12 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
         gate.defId     = ZONE_GATE_ID;
         gate.itemLevel = def.returnFloor;
         gate.uid       = m_worldItems.nextUid++;
-        WorldItemSystem::spawn(m_worldItems, gate, center, &m_level.grid, 0xFF);
+        const Vec3 rpos = zoneReturnPos(def);
+        // Clear the ground the gate and the arriving player stand on — the generator is free to put
+        // a rock clump here, and spawning inside geometry shoves a body out through the border.
+        zoneClearPad(static_cast<u32>(rpos.x), static_cast<u32>(rpos.z), 3);
+        zoneClearPad(static_cast<u32>(rpos.x), static_cast<u32>(rpos.z + 2.0f), 2);
+        WorldItemSystem::spawn(m_worldItems, gate, rpos, &m_level.grid, 0xFF);
         LOG_INFO("Zone fixture: RETURN GATE -> floor %u", (u32)def.returnFloor);
     }
 }
