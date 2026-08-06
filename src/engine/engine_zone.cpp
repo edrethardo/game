@@ -536,6 +536,9 @@ void Engine::enterZoneGate(s32 worldItemIdx) {
         return;
     }
     if (!zoneLinkAllowed(from, dest)) return;
+    // Same reason the edge crossing logs: a world change is the one event worth a line, and a soak
+    // that counts only edge crossings undercounts every interior in both acts.
+    LOG_INFO("[ZONEX] portal %u -> %u", static_cast<u32>(from), static_cast<u32>(dest));
     enterZone(dest, from);
 }
 

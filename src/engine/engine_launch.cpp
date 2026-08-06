@@ -79,18 +79,29 @@ void Engine::equipEndgameLoadout(u8 lane) {
     // single-sourced from the same expression the spawner uses so the two cannot drift.
     const u8 ilvl = static_cast<u8>(200);
 
-    // Enough rolls that every slot and every build column is served. The bag is 48 slots and
-    // autoEquipBackpack keeps only what wins, so a surplus costs nothing but a few hundred rolls.
+    // A DRIP, NOT ONE DUMP. The first version rolled into the bag until it was full and equipped
+    // once — 24 items, which is a couple of hours of play, not a finished ladder. The hero it made
+    // died three times in six minutes in the FIRST zone, so the soak was measuring an under-geared
+    // character rather than the acts.
+    //
+    // Rolling in ROUNDS and re-equipping after each one models what actually produces an endgame
+    // hero: a long drop stream where each upgrade is kept and the rest discarded. The bag is emptied
+    // between rounds so a full bag can never throttle the stream — which is exactly what capped the
+    // first version at 24.
     u32 taken = 0;
-    for (u32 i = 0; i < 240; i++) {
-        const ItemInstance it = ItemGen::rollItem(ilvl, m_itemDefs, m_itemDefCount,
-                                                  m_affixDefs, m_affixDefCount, Rarity::RARE);
-        if (isItemEmpty(it)) continue;
-        if (Inventory::addToBackpack(inv, it) < 0) break;   // bag full — plenty already
-        taken++;
+    for (u32 round = 0; round < 12; round++) {
+        for (u32 i = 0; i < 64; i++) {
+            const ItemInstance it = ItemGen::rollItem(ilvl, m_itemDefs, m_itemDefCount,
+                                                      m_affixDefs, m_affixDefCount, Rarity::RARE);
+            if (isItemEmpty(it)) continue;
+            if (Inventory::addToBackpack(inv, it) < 0) break;
+            taken++;
+        }
+        autoEquipBackpack(lane);
+        // Drop what did not win, so the next round has room. autoEquipBackpack has already moved
+        // every upgrade onto the character, so nothing of value is here.
+        for (u32 sl = 0; sl < MAX_INVENTORY_ITEMS; sl++) inv.backpack[sl] = ItemInstance{};
     }
-
-    autoEquipBackpack(lane);
     LOG_INFO("Launch: --endgame geared lane %u from %u rolled items at ilvl %u",
              static_cast<u32>(lane), taken, static_cast<u32>(ilvl));
 }
