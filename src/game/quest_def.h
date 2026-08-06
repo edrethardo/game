@@ -90,6 +90,13 @@ inline constexpr QuestDef QUESTS[] = {
           "Something has been drawing on Bank for a long time. Settle it.",
           Trigger::SLAY, "The Perpetual Commuter" },
 
+    // The rift-opening beat, and Act 2's answer to the Cairn Stones. Piccadilly is where the gate
+    // is forced; until the circus is cleared there is nothing to force it with. "Buffer Overflow"
+    // is already the zone's joke, so the quest that breaks it open is the obvious escalation.
+    { 65, "Privilege Escalation",
+          "The gate will not open while the circus is this crowded. Make room, then force it.",
+          Trigger::CLEAR_ZONE, "" },
+
     { 66, "Kill -9",
           "The gate is running on this machine. Terminate it.",
           Trigger::SLAY, "Signal Failure" },

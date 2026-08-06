@@ -291,8 +291,8 @@ inline constexpr ZoneDef ZONES[] = {
     // 14. Piccadilly Circus: too many lines meeting in too little space, which is what an overflow is.
     { /*floor*/      65,
       /*name*/       "Piccadilly Circus (Buffer Overflow)",
-      /*neighbour*/  { 66, NO_LINK, 63, NO_LINK },
-      /*poiFloor*/   0,
+      /*neighbour*/  { NO_LINK, NO_LINK, 63, NO_LINK },   // the road ENDS here; the rift is a portal
+      /*poiFloor*/   66,   // THE RIFT: forced open in the circus, exactly as the stones open TristRAM
       /*returnFloor*/0,
       /*hasWaypoint*/true,
       /*peaceful*/   false,
@@ -306,10 +306,10 @@ inline constexpr ZoneDef ZONES[] = {
     //     North stays closed until there is an Act 3, so the act closes cleanly.
     { /*floor*/      66,
       /*name*/       "Hellgate: Localhost",
-      /*neighbour*/  { NO_LINK, NO_LINK, 65, NO_LINK },
+      /*neighbour*/  { NO_LINK, NO_LINK, NO_LINK, NO_LINK },   // reached ONLY through the rift
       /*poiFloor*/   0,
-      /*returnFloor*/0,
-      /*hasWaypoint*/true,
+      /*returnFloor*/65,   // back out through the gate you forced
+      /*hasWaypoint*/false,   // an interior carries none — Piccadilly's is the return hop
       /*peaceful*/   false,
       /*ruins*/      true,
       /*boss*/       "Signal Failure",   // ACT 2's FINAL BOSS — the thing holding the gate open, announced as a service disruption

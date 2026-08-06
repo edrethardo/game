@@ -410,8 +410,21 @@ shipped generators keeps every layout invariant they are already tested for, rat
 (surface: sky + daylight clear colour) or KEPT — after a whole act of open country, the roof coming
 down is the tonal shift into Act 2, and it is what makes the tunnels claustrophobic rather than merely
 dark. Act 2 keeps ONE surface zone (Threadneedle Street) so the contrast still lands.
+**ACT 2 GOT ACT 1'S SHAPE (2026-08-06).** The road is the tunnel line — Northbound Stack -> Null
+Terminus -> Circle Line -> Threadneedle -> Piccadilly — and everything else hangs OFF it through a
+portal: **Bank Station** off the Circle Line, and now **Hellgate: Localhost off Piccadilly Circus**.
+The gate is the one thing in Hellgate London you never simply walk through, so the act's finale is
+no longer a border crossing: Piccadilly's new quest ***Privilege Escalation*** is the rift-opening
+beat, Act 2's answer to Act 1's Cairn Stones, and "Buffer Overflow" was already the zone's joke so
+forcing it open is the obvious escalation.
+**The finale LOST its waypoint, and a test is why.** Making it portal-only turned it into an
+interior, which tripped "an interior must never carry a waypoint" — the rule that keeps fast travel
+meaning something. The right answer was the DATA, not the rule: TristRAM has no waypoint either, and
+in both acts the parent zone carries one, so dying at the boss costs the same single hop (waypoint to
+the parent, portal back in). The two acts now mirror each other exactly.
 **Act 2 quests** follow Hellgate's shape: *Signal Restored* (find the survivors), *Break the Loop*,
-*Insufficient Funds* (Bank), and ***Kill -9*** at the rift. `Quest::actComplete` is now ACT-SCOPED —
+*Insufficient Funds* (Bank), ***Privilege Escalation*** (force the rift at Piccadilly), and ***Kill
+-9*** at the rift itself. `Quest::actComplete` is now ACT-SCOPED —
 a global "all quests done" check would have silently stopped announcing Act 1 the day Act 2's quests
 were added, which is the quiet kind of regression a growing chain invites.
 **Act 2 bestiary**, same wink-not-copy rule: **The Perpetual Commuter** (a demon in the ruin of a
