@@ -372,6 +372,57 @@ have done the same to TristRAM. The return gate and the portal arrival now stand
 boss** in both zones: you step out of the portal, the way back is at your back, and the thing you
 came for is across the ruins.
 
+**THE BOT PLAYS THE OVERWORLD, AND THE QUESTS NOW GATE THE ROAD (2026-08-07).** Autoplay used to
+END its run on entering a zone — an act has no descent objective, so a bot standing in one idles
+forever, which is the town and credits strands in a new costume. Two features needed the same
+answer and would otherwise each have guessed at it: the bot needs "which world am I trying to reach
+and which way is the next hop", and the GATE asks the same question from the other side. Both live
+in **`game/zone_route.h`**, engine-free and unit-tested.
+**THE GATING RULE, and the version of it that was WRONG.** Leaving a zone by its ONWARD link
+requires that zone's quest and its interior's quest. "Onward" is DERIVED — the acts run up the floor
+numbers along the road — so there is no second field to keep in sync, and backtracking is NEVER
+gated (a hero who wanders in under-levelled has to be able to leave). The two onward cases are
+genuinely different, and conflating them is a LOCKED RUN: the first version required an interior's
+own quest to ENTER that interior, putting the key behind its own door, so TristRAM and the Hellgate
+were both permanently shut. The headline test caught it on the first run. Correct: a **portal
+inward** is gated on the HOST's quest only (exactly D2's Cairn Stones — clear the Field of Unmerged
+Branches and TristRAM opens), while the **onward road** needs the interior's too, or the side area
+is skippable and the chain is decoration again. `nextHop` is a reverse BFS from the goal rather than
+"walk toward the higher floor", because the road is not a line — the interiors hang off it, so
+leaving TristRAM means going BACKWARD through a portal first. The reachability invariant is pinned
+across the whole quest order: **a gate must never be able to strand a character**, and nothing in
+play would tell you which of fifteen links was at fault.
+**The bot gains an act without the brain gaining a branch.** The act's objective is presented to it
+AS THE FLOOR DOOR: the flow field is rebuilt toward what the act wants (a quest boss, the nearest
+straggler, the next hop's gate), `doorActive`/`distToDoor` point at the next hop so the DESCEND
+branch walks the last metres and pulses interact, and `hasBoss`/`bossAlive` are set for a SLAY quest
+— which reuses the whole dungeon boss stack and seals the "door" until the quest is done. Travel,
+the hazard veto, the heading commit, the escape ladder and the stall watchdogs all work unchanged.
+**`Engine::autoplayGoalPos()` is load-bearing:** every rescue (exit watchdog, committed bull, A*
+first leg) was written against `m_level.floorDoorPos`, which a zone never sets, so all of them would
+have aimed at a stale DUNGEON coordinate — and the first live run showed exactly that, position
+frozen for twenty seconds while health swung between a fifth and full, pinned by the acts' tier-5
+density. One accessor rather than five conditionals, because missing one fails silently.
+**`--endgame` exists because the acts are otherwise untestable.** Zones spawn tier 5 at effective
+floor 200, so a `--new` hero is dead in ~2 s and the run then sits on the death screen where neither
+`logStats` nor the driver runs — which is why every early overworld probe went silent one second
+after arriving and read as a hang. It rolls through the real `ItemGen` and equips through the real
+auto-equip (a hand-stamped hero is not one the game can produce), in **ROUNDS**: the first version
+filled the bag once and equipped 24 items — a couple of hours of play, not a finished ladder — and
+died 3x in 6 minutes in the FIRST zone, so the soak was measuring an under-geared character rather
+than the acts. Rounds with the bag emptied between them give 288 rolls and 17,002 HP against 5,187,
+in line with the balance lab's ladder-end figure.
+**`tools/overworld_soak.py`** runs all nine classes concurrently and its pass condition is
+completing Act 2's last quest — NOT "it did not crash", which is how a bot parked on a death screen
+looked healthy for three hours. It also checks `deaths == revives`. **`[ZBOT]`** is the acts' 1 Hz
+telemetry (zone / task / objective / goal / distance), **`[ZONEX]`** records every world change and
+every refusal, and the startup line now carries a **build stamp** — three device rounds were spent
+on "is the console even running the fix?".
+**A driver ordering trap worth remembering:** the end-of-run check first read a lane flag that
+`buildBotView` writes LATER in the same tick, so it ended every run the instant it arrived. It
+evaluates now — a cached bool whose correctness depends on call order inside a function ordered for
+other reasons is not worth the recompute it saves.
+
 **QUESTS (`game/quest_def.h`)** are D2's Act 1 chain, beat for beat, renamed: *Free the Allocation*
 (clear the Den), *The Rebaser* (the graveyard keeps bringing its history back), *Align the Standing
 Stones* (the Cairn Stones, which open the way to TristRAM), ***The Search for Deckard Cache*** (the pun the act was built around, and now the act's

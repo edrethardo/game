@@ -43,3 +43,7 @@ logs/
 # Steamworks SDK (proprietary, user-downloaded — not redistributable)
 external/steamworks/
 steamworks_sdk_*.zip
+
+# Soak run logs (tools/overworld_soak.py) — measurements, not source
+soak_*/
+soak_*.out

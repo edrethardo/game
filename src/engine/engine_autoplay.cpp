@@ -1679,6 +1679,23 @@ void Engine::updateAutoplay(f32 dt) {
         }
     }
 
+    // AN ACT'S "DOOR" MUST BE LOOKED AT, not merely stood next to.
+    //
+    // A dungeon floor door is pure proximity (updateFloorDoor), so the brain's descend branch never
+    // had to turn — it just holds interact. A zone gate is a WORLD ITEM, and resolveInteractTargets
+    // only selects one that is inside the AIM CONE beyond the grab radius. So a bot that arrived at
+    // a portal kept whatever heading the last fight left it with and pressed interact at empty air.
+    // Measured in the first act soak: two classes stood 1.9 m from the Den's way out for fifteen
+    // minutes, holding the button, with a valid route and full health.
+    if (m_level.inZone && in.descend) {
+        const Vec3 g = autoplayGoalPos();
+        const Vec3 d{g.x - m_localPlayer.position.x, 0.0f, g.z - m_localPlayer.position.z};
+        if (lengthSq(d) > 0.01f) {
+            f32 y, pt;
+            Autoplay::dirToAim(d, y, pt);
+            in.aimYaw = y;          // pitch is left alone: the cone is judged horizontally
+        }
+    }
     applyBotIntent(in, uiOpen, dt, v.weaponIsMelee);
     updateSidearm(v, dt);
 
