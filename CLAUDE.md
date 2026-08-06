@@ -469,6 +469,26 @@ DEFAULT, which is the safe direction — the hand-listed set had already been wr
 shrines and Source shards each added retroactively after they evaporated in play. Pinned by a test
 that simulates 120 s per sentinel type; sabotage (restoring the hand-listed rule) fails it by name.
 
+**...and the revive itself now VALIDATES the anchor (`Engine::respawnAnchor`).** Fixing the arrival
+fixes today's bad anchor; it does nothing about the next one. Every revive path — the death screen,
+the co-op in-place revive, the autoplay countdown, the client's own prediction, and the server's
+`handleRespawnRequest` — read `spawnPosition` raw and teleported to it, so ANY stale or unseeded
+anchor meant landing outside the world with no recourse but restarting. That has now shipped three
+times (the Source chamber never re-seeded, the overworld's fallback arrival could sit in rock, and
+`enterZoneClient` seated no anchor at all). All six sites go through one helper that checks the
+anchor against the grid it is about to be used in and, when it is unusable, ring-searches out to the
+nearest open cell — from the anchor's own cell when it is at least ON the map (a body buried in a
+rock clump should come back a few metres away, not across the level), from the grid centre when it
+is not, since an off-map anchor has no neighbourhood. It LOGS when it fires, because a guard that
+silently covers for a seeding bug just hides the next one. Sabotage-verified: three poisoned anchors
+(far off-map, the solid border ring, 1e9) across four zones, 12/12 rescued to an in-grid non-solid
+cell.
+**The guard does not excuse seeding correctly** — a wrong-but-in-bounds anchor still revives you in
+the wrong place, and only the seeding can fix that. What it removes is the UNRECOVERABLE half.
+`enterZoneClient` now seats anchors too: a guest predicts its own revive locally and `spawnPosition`
+is not on the wire, so without it the prediction read a coordinate from whatever world the guest was
+in before.
+
 **REVIVED SOMEWHERE ELSE, SOMETIMES OUT OF BOUNDS (2026-08-06).** Every revive path teleports to
 `NetPlayer::spawnPosition`, which `worldSeatNetPlayers` sets to the ARRIVAL point on entry — so a bad
 arrival becomes a bad respawn anchor for as long as you stay in that zone. `buildZoneLevel` clears

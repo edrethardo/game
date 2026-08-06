@@ -167,7 +167,7 @@ void Engine::update(f32 dt) {
             if (m_autoplayRespawnTimer <= 0.0f) {
                 m_autoplayRespawnTimer = 0.0f;
                 m_localPlayer.health   = m_localPlayer.maxHealth;
-                m_localPlayer.position = m_players[activeNetSlot()].spawnPosition; // entrance spawn
+                m_localPlayer.position = respawnAnchor(activeNetSlot()); // entrance spawn
                 m_localPlayer.velocity = {0, 0, 0};
                 m_localPlayer.invulnTimer = 1.5f;
                 m_inventoryOpen = false;
@@ -234,7 +234,7 @@ void Engine::update(f32 dt) {
                 || Input::isKeyPressed(SDL_SCANCODE_KP_ENTER)
                 || (dclick && hov == 0)) {
                 m_localPlayer.health = m_localPlayer.maxHealth;
-                m_localPlayer.position = m_players[activeNetSlot()].spawnPosition; // local player's net slot
+                m_localPlayer.position = respawnAnchor(activeNetSlot()); // local player's net slot
                 m_localPlayer.velocity = {0, 0, 0};
                 m_localPlayer.invulnTimer = 1.5f;
                 m_inventoryOpen = false;
@@ -246,7 +246,7 @@ void Engine::update(f32 dt) {
                     // Host: directly update authoritative NetPlayer
                     NetPlayer& np = m_players[m_localPlayerIndex];
                     np.health = np.maxHealth;
-                    np.position = np.spawnPosition;
+                    np.position = respawnAnchor(m_localPlayerIndex);
                     np.velocity = {0, 0, 0};
                     np.invulnTimer = 1.5f;
                     np.isDead = false;
@@ -754,7 +754,7 @@ void Engine::update(f32 dt) {
                         {
                             NetPlayer& np = m_players[activeNetSlot()];
                             m_localPlayer.health        = np.maxHealth;
-                            m_localPlayer.position      = np.spawnPosition;
+                            m_localPlayer.position      = respawnAnchor(activeNetSlot());
                             m_localPlayer.velocity      = {0, 0, 0};
                             m_localPlayer.invulnTimer   = 1.5f;  // matches server's handleRespawnRequest
                             m_localPlayer.damageFlashTimer = 0.0f;
@@ -768,7 +768,7 @@ void Engine::update(f32 dt) {
                     } else {
                         // SERVER + split-screen: direct local revive (authoritative locally).
                         m_localPlayer.health = m_localPlayer.maxHealth;
-                        m_localPlayer.position = m_players[activeNetSlot()].spawnPosition; // local net slot (sp is the lane)
+                        m_localPlayer.position = respawnAnchor(activeNetSlot()); // local net slot (sp is the lane)
                         m_localPlayer.velocity = {0, 0, 0};
                         m_localPlayer.invulnTimer = 2.0f;
                         m_localPlayer.hurtVignette = 0.0f; // no red lingering on co-op respawn
@@ -777,7 +777,7 @@ void Engine::update(f32 dt) {
                         if (m_netRole == NetRole::SERVER) {
                             NetPlayer& np = m_players[m_localPlayerIndex];
                             np.health = np.maxHealth;
-                            np.position = np.spawnPosition;
+                            np.position = respawnAnchor(m_localPlayerIndex);
                             np.velocity = {0, 0, 0};
                             np.invulnTimer = 2.0f;
                             np.isDead = false;
@@ -2822,7 +2822,7 @@ void Engine::handleRespawnRequest(u8 playerSlot) {
     NetPlayer& np = m_players[playerSlot];
     if (!np.active || !np.isDead) return;
     np.health     = np.maxHealth;
-    np.position   = np.spawnPosition;
+    np.position   = respawnAnchor(playerSlot);
     np.velocity   = {0, 0, 0};
     np.invulnTimer = 1.5f;
     np.isDead     = false;
@@ -3231,7 +3231,7 @@ void Engine::enterSourceChamber() {
     // The LOCAL slot is seeded separately: in singleplayer m_players[0] is not "active" in the
     // networked sense, so the loop above skips it — and singleplayer is exactly where the autoplay
     // revive reads it.
-    m_players[activeNetSlot()].spawnPosition = m_localPlayer.position;
+    respawnAnchor(activeNetSlot()) = m_localPlayer.position;
 
     spawnSourceBoss(center);
     AudioSystem::play(SfxId::BOSS_ROAR);
@@ -3268,7 +3268,7 @@ void Engine::enterSourceChamberClient() {
     // Re-seed the respawn anchor too — see the host twin. A client's own revive prediction reads
     // this slot, so without it a guest who dies in The Source predicts a respawn at the stale
     // floor-50 entrance and rubber-bands from outside the chamber.
-    m_players[activeNetSlot()].spawnPosition = m_localPlayer.position;
+    respawnAnchor(activeNetSlot()) = m_localPlayer.position;
     snapCameraToPlayer();
     addChatMessage("\?\?\?", "So. You assembled me. Then meet the others.", Vec3{0.62f, 0.30f, 0.95f});
     LOG_INFO("Entered The Source (client).");

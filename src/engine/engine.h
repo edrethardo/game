@@ -1493,6 +1493,8 @@ private:
     void worldSeedHostSlot();                                // 3. the host's own NetPlayer slot
     void worldPlaceLocalPlayers(Vec3 base, f32 yaw);         // 4. placement + the lane-alias persist
     void worldSeatNetPlayers(Vec3 base);                     // 5. seats + respawn anchors
+    // The revive backstop — see engine_world.cpp. Never read spawnPosition directly on a revive.
+    Vec3 respawnAnchor(u32 slot);
     void worldFinishEntry(u8 sentinelFloor, bool peaceful);  // 6. mode, state, net wiring, seed
 
     // SERVER net-callback wiring + Server::init, extracted from startGame so hosts that build

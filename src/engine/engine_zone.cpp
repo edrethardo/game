@@ -666,7 +666,14 @@ void Engine::enterZoneClient(u8 zoneFloor) {
 
     // The client does not know which edge the host came through; the server's snapshot moves it to
     // the right place on the first tick, so any in-bounds spot will do until then.
-    worldPlaceLocalPlayers(zoneArrivalPos(*def, 0), 0.0f);
+    const Vec3 arrive = zoneArrivalPos(*def, 0);
+    worldPlaceLocalPlayers(arrive, 0.0f);
+    // Seat the anchors too, even though the server owns respawns. A guest PREDICTS its own revive
+    // (sendRespawnRequest + an immediate local teleport), and spawnPosition is not on the wire — so
+    // without this the prediction reads an anchor left over from the world the guest was in BEFORE,
+    // i.e. a coordinate from a different grid. The server corrects it a tick later, but a frame
+    // spent inside rock or off the map is exactly the artefact players report as a bad respawn.
+    worldSeatNetPlayers(arrive);
     spawnZoneContents(*def, center);
     worldFinishEntry(zoneFloor, def->peaceful);
     questOnZoneEnter(zoneFloor);

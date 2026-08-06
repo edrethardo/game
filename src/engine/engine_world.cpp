@@ -31,6 +31,8 @@
 #include "core/log.h"
 #include "world/level_gen.h"
 
+#include <cstdlib>   // std::abs, for the anchor ring search
+
 // Step 1 — every world entry starts from empty pools. Entities, projectiles and world items all
 // belong to the world being left; carrying any of them across is how a boss's minion or a stale loot
 // drop ends up standing in the town square.
@@ -148,6 +150,57 @@ void Engine::worldSeatNetPlayers(Vec3 base) {
         m_players[pi].invulnTimer   = 1.0f;
         m_players[pi].isDead        = false;
     }
+}
+
+// The revive backstop: validate the anchor against the grid it is about to be used in.
+//
+// Every revive path teleports to NetPlayer::spawnPosition and nothing checked it. That is fine while
+// the anchor was seeded by the world you are standing in, and catastrophic the moment it was not — a
+// stale anchor is a coordinate from a DIFFERENT grid, so the player lands inside rock or off the map
+// with no way back and no recourse but restarting. It has shipped twice already: the Source chamber
+// never re-seeded its anchor, and the overworld's fallback arrival could sit in a rock clump.
+//
+// A guard here does not excuse seeding the anchor correctly — a wrong-but-in-bounds anchor still
+// revives you in the wrong place. What it buys is that no future world, entry path or stale client
+// mirror can put a player OUTSIDE the level, which is the unrecoverable half of the failure.
+//
+// One grid lookup on a death is free; this is not a hot path.
+Vec3 Engine::respawnAnchor(u32 slot) {
+    const Vec3 anchor = m_players[slot].spawnPosition;
+    u32 gx = 0, gz = 0;
+    const bool inGrid = LevelGridSystem::worldToGrid(m_level.grid, anchor, gx, gz);
+    if (inGrid && !LevelGridSystem::isSolid(m_level.grid, gx, gz)) return anchor;
+
+    // Ring-search outward for the nearest open cell. Start from the anchor's own cell when it is at
+    // least ON the map (an anchor buried in a rock clump should come back a few metres away, not
+    // across the level); an off-map anchor has no meaningful neighbourhood, so start at the centre,
+    // which is open in every style the game ships — a room, the town plaza, a zone's boss pad.
+    const u32 sx = inGrid ? gx : m_level.grid.width / 2;
+    const u32 sz = inGrid ? gz : m_level.grid.depth / 2;
+    const u32 maxR = m_level.grid.width > m_level.grid.depth ? m_level.grid.width : m_level.grid.depth;
+    for (u32 r = 0; r < maxR; r++) {
+        for (s32 dz = -static_cast<s32>(r); dz <= static_cast<s32>(r); dz++) {
+            for (s32 dx = -static_cast<s32>(r); dx <= static_cast<s32>(r); dx++) {
+                // Only the ring's PERIMETER — the interior was covered by a smaller r.
+                if (r > 0 && std::abs(dx) != static_cast<s32>(r) && std::abs(dz) != static_cast<s32>(r))
+                    continue;
+                const s32 tx = static_cast<s32>(sx) + dx, tz = static_cast<s32>(sz) + dz;
+                if (tx < 1 || tz < 1) continue;                              // the border ring is solid
+                if (tx >= static_cast<s32>(m_level.grid.width) - 1) continue;
+                if (tz >= static_cast<s32>(m_level.grid.depth) - 1) continue;
+                const u32 ux = static_cast<u32>(tx), uz = static_cast<u32>(tz);
+                if (LevelGridSystem::isSolid(m_level.grid, ux, uz)) continue;
+                Vec3 out = LevelGridSystem::gridToWorld(m_level.grid, ux, uz);
+                out.y = LevelGridSystem::getFloorHeight(m_level.grid, ux, uz);
+                LOG_WARN("respawn anchor for slot %u was unusable (%.1f,%.1f, inGrid=%d) — "
+                         "reviving at the nearest open cell (%.1f,%.1f)",
+                         slot, static_cast<f64>(anchor.x), static_cast<f64>(anchor.z),
+                         static_cast<int>(inGrid), static_cast<f64>(out.x), static_cast<f64>(out.z));
+                return out;
+            }
+        }
+    }
+    return anchor;   // a grid with no open cell at all cannot be revived into; nothing better to say
 }
 
 // Step 6 — finish the entry: peace/hostility mode, game state, and the net wiring + seed broadcast.
