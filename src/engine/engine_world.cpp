@@ -170,6 +170,10 @@ Vec3 Engine::respawnAnchor(u32 slot) {
     const Vec3 anchor = m_players[slot].spawnPosition;
     u32 gx = 0, gz = 0;
     const bool inGrid = LevelGridSystem::worldToGrid(m_level.grid, anchor, gx, gz);
+    LOG_INFO("[REVIVE] slot %u -> (%.1f,%.1f) zone=%u floor=%u inGrid=%d", slot,
+             static_cast<f64>(anchor.x), static_cast<f64>(anchor.z),
+             static_cast<u32>(m_level.zoneFloor), static_cast<u32>(m_level.currentFloor),
+             static_cast<int>(inGrid));
     if (inGrid && !LevelGridSystem::isSolid(m_level.grid, gx, gz)) return anchor;
 
     // Ring-search outward for the nearest open cell. Start from the anchor's own cell when it is at

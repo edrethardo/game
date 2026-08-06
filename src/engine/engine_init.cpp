@@ -91,7 +91,7 @@ void Engine::init() {
     static char s_logPath[512];
     Log::init(Platform::userDataPath("DungeonEngine.log", s_logPath, sizeof(s_logPath)));
 #endif
-    LOG_INFO("Engine initializing...");
+    LOG_INFO("Engine initializing... [build %s %s]", __DATE__, __TIME__);
 
     // Seed the global RNG once from wall-clock entropy so gameplay RNG (loot/procs/
     // particles) varies between runs. The dungeon uses a dedicated per-run seed

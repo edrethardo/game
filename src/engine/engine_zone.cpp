@@ -617,6 +617,10 @@ void Engine::updateZoneTransitions() {
     if (dest == Zone::NO_LINK) return;
 
     const u8 from = m_level.zoneFloor;
+    LOG_INFO("[ZONEX] edge crossing %u -> %u  p=(%.1f,%.1f) dir=%u armed=%d hp=%.0f",
+             static_cast<u32>(from), static_cast<u32>(dest),
+             static_cast<f64>(p.x), static_cast<f64>(p.z), static_cast<u32>(dir),
+             static_cast<int>(m_zoneEdgeArmed), static_cast<f64>(m_localPlayer.health));
     if (dest == Zone::TOWN_FLOOR) { enterTown(); return; }
     enterZone(dest, from);
 }
