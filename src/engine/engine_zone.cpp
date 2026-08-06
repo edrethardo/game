@@ -347,9 +347,11 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
                 // absolute number never was.
                 const u32 effFloor = scalingEffectiveFloor();
                 const f32 bHp  = GameConst::floorHealthMult(effFloor)
-                               * GameConst::difficultyHealthBump(m_difficulty);
+                               * GameConst::difficultyHealthBump(m_difficulty)
+                               * GameConst::overworldHpMult(true);
                 const f32 bDmg = GameConst::floorDamageMult(effFloor)
-                               * GameConst::difficultyDamageBump(m_difficulty);
+                               * GameConst::difficultyDamageBump(m_difficulty)
+                               * GameConst::overworldDamageMult(true);
                 be->health    *= bHp;
                 be->maxHealth  = be->health;
                 be->damage    *= bDmg;

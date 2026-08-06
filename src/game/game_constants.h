@@ -383,6 +383,22 @@ namespace GameConst {
     // — a no-op — on every non-lava floor, and one source for the two numbers so they can't drift.
     static constexpr f32 HELLFORGE_HP_BOOST     = 1.5f;   // +50% HP
     static constexpr f32 HELLFORGE_DAMAGE_BOOST = 1.3f;   // +30% damage
+    // --- OVERWORLD EASE (2026-08-06, Aaron: "reduce the overworld difficulty to be a bit easier") --
+    // The acts evaluate the difficulty curve at the LADDER END, so before this they were exactly as
+    // hard as Inferno floor 50 — measured at 12.0 s to kill one trash mob and 1.7 hits to die. Both
+    // ends of that are punishing: 12 s per mob is a slog, and 1.7 hits is a hair from a one-shot.
+    //
+    // Applied as a MULTIPLIER at spawn rather than by editing enemies.json, deliberately. The
+    // authored act stats stay at parity with the dungeon's tier-5 roster, which is what makes them
+    // comparable — and what the roster-band test actually checks. This is a single dial for how the
+    // overworld sits RELATIVE to the endgame it follows, and it reads as one.
+    // Damage is eased slightly harder than HP: being one-shot reads as unfair in a way that a long
+    // fight does not.
+    static constexpr f32 OVERWORLD_HP_EASE     = 0.75f;
+    static constexpr f32 OVERWORLD_DAMAGE_EASE = 0.70f;
+    inline f32 overworldHpMult(bool inZone)     { return inZone ? OVERWORLD_HP_EASE     : 1.0f; }
+    inline f32 overworldDamageMult(bool inZone) { return inZone ? OVERWORLD_DAMAGE_EASE : 1.0f; }
+
     inline f32 hellforgeHpMult(bool lavaFloor)     { return lavaFloor ? HELLFORGE_HP_BOOST     : 1.0f; }
     inline f32 hellforgeDamageMult(bool lavaFloor) { return lavaFloor ? HELLFORGE_DAMAGE_BOOST : 1.0f; }
 

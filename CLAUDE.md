@@ -469,6 +469,28 @@ DEFAULT, which is the safe direction — the hand-listed set had already been wr
 shrines and Source shards each added retroactively after they evaporated in play. Pinned by a test
 that simulates 120 s per sentinel type; sabotage (restoring the hand-listed rule) fails it by name.
 
+**THE OVERWORLD EASE (2026-08-06, Aaron: "reduce the overworld difficulty to be a bit easier").**
+Because the acts evaluate the curve at the LADDER END they were, by construction, exactly as hard as
+Inferno floor 50 — 12.0 s to kill one trash mob and 1.68 hits to die. Both ends of that are
+punishing: 12 s a mob is a slog, and 1.68 hits is a hair from a one-shot.
+`GameConst::OVERWORLD_HP_EASE` (0.75) and `OVERWORLD_DAMAGE_EASE` (0.70) are a spawn-time MULTIPLIER,
+applied in the same product the Hellforge surcharge already rides — five HP sites, five damage sites,
+plus the zone-boss path. Deliberately NOT an edit to enemies.json: the authored act stats stay at
+parity with the dungeon's tier-5 roster, which is what makes them comparable and is exactly what the
+roster-band tests check. This is one dial for how the overworld sits RELATIVE to the endgame it
+follows, and it reads as one. Damage eases harder than HP because being one-shot reads as unfair in a
+way that a long fight does not.
+Measured at the ladder end (player DPS 23,262 / EHP 56,327): trash TTK **12.0 -> 9.0 s** and
+hits-to-die **1.68 -> 2.41**; Garbage Collector 159 -> 119 s / 2.53 -> 3.61, Perpetual Commuter
+238 -> 179 s / 2.33 -> 3.33, Griswald 330 -> 247 s / 2.02 -> 2.89, Signal Failure 379 -> 284 s /
+1.84 -> 2.62. The shipped Grim Reaper sits at 305 s / 2.02 for comparison, so the acts now read as
+slightly gentler than the dungeon they follow, which is the intent.
+Pinned by test in both directions: the dial must be INERT outside a zone (a leak would re-tune the
+whole game), must never exceed 1.0 (an "ease" that buffs), must stay within 0.5-0.9 (below that
+post-Inferno content stops being endgame; above it the player cannot feel it), and damage must ease
+at least as hard as HP. The ratio tests above cannot catch any of this — they compare AUTHORED
+numbers, which the dial does not touch.
+
 **OVERWORLD BALANCE, MEASURED AGAINST THE LAB (2026-08-06).** Aaron asked whether the overworld's
 balance is fine. Trash is: zones evaluate the curve at exactly Inferno floor 50 (effective floor
 200), and the act rosters were rebalanced to the dungeon tier-5 baseline, so the lab's ladder-end row

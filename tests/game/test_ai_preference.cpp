@@ -9,6 +9,7 @@
 #include <doctest/doctest.h>
 #include "game/entity.h"
 #include "game/enemy_def.h"
+#include "game/game_constants.h"
 #include "game/zone_def.h"
 #include "game/quest_def.h"
 
@@ -344,4 +345,36 @@ TEST_CASE("zone bosses hit like bosses, not like a one-shot") {
         CHECK(hpRatio  <= 40.0f);   // The Dungeon Engine, the final superboss, is 37.4x
         CHECK(hpRatio  >= 8.0f);    // must still read as a boss
     }
+}
+
+// The overworld ease is a DIAL, and it must stay one ---------------------------------------------
+//
+// The acts evaluate the difficulty curve at the ladder end, so without an ease they are exactly as
+// hard as Inferno floor 50 (measured: 12.0 s to kill one trash mob, 1.7 hits to die). The ease is
+// applied as a spawn-time multiplier rather than by editing enemies.json, which is what keeps the
+// authored act stats comparable to the dungeon roster the tests above check them against.
+//
+// Pinned because the failure is silent in both directions: at 1.0 the ease quietly does nothing and
+// the acts are back at full Inferno weight, and a very low value makes post-Inferno content trivial
+// while every ratio test above still passes — they compare authored numbers, which the dial does
+// not touch.
+TEST_CASE("the overworld ease is applied, and only in the overworld") {
+    // Inert in the dungeon: a zone-only dial that leaked would re-tune the whole game.
+    CHECK(GameConst::overworldHpMult(false)     == doctest::Approx(1.0f));
+    CHECK(GameConst::overworldDamageMult(false) == doctest::Approx(1.0f));
+
+    // Live in a zone, and genuinely EASIER — never a buff.
+    CHECK(GameConst::overworldHpMult(true)     < 1.0f);
+    CHECK(GameConst::overworldDamageMult(true) < 1.0f);
+
+    // "A bit easier", not a different game. Below half and post-Inferno content stops being
+    // endgame at all; above ~0.9 the player cannot feel it and the dial is decoration.
+    CHECK(GameConst::overworldHpMult(true)     >= 0.5f);
+    CHECK(GameConst::overworldHpMult(true)     <= 0.9f);
+    CHECK(GameConst::overworldDamageMult(true) >= 0.5f);
+    CHECK(GameConst::overworldDamageMult(true) <= 0.9f);
+
+    // Damage is eased at least as hard as HP: being one-shot reads as unfair in a way that a long
+    // fight does not, so survivability is the half that must never be the stingier of the two.
+    CHECK(GameConst::overworldDamageMult(true) <= GameConst::overworldHpMult(true));
 }
