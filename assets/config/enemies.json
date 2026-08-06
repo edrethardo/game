@@ -978,7 +978,7 @@
       "detectionRange": 18,
       "attackRange": 9.0,
       "attackCooldown": 1.6,
-      "damage": 54,
+      "damage": 24,
       "flying": false,
       "halfExtents": [
         0.5,
@@ -1061,7 +1061,7 @@
       "detectionRange": 16,
       "attackRange": 2.8,
       "attackCooldown": 1.2,
-      "damage": 58,
+      "damage": 26,
       "flying": false,
       "halfExtents": [
         0.5,
@@ -1109,12 +1109,12 @@
       "tier": 5,
       "meshName": "signal_failure",
       "materialName": "signal_failure_skin",
-      "health": 3750,
+      "health": 3100,
       "moveSpeed": 3.0,
       "detectionRange": 22,
       "attackRange": 12.0,
       "attackCooldown": 1.4,
-      "damage": 72,
+      "damage": 33,
       "flying": true,
       "halfExtents": [
         0.45,
@@ -1144,7 +1144,7 @@
       "detectionRange": 26,
       "attackRange": 3.4,
       "attackCooldown": 1.5,
-      "damage": 65,
+      "damage": 30,
       "flying": false,
       "halfExtents": [
         0.85,

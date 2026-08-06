@@ -469,6 +469,27 @@ DEFAULT, which is the safe direction — the hand-listed set had already been wr
 shrines and Source shards each added retroactively after they evaporated in play. Pinned by a test
 that simulates 120 s per sentinel type; sabotage (restoring the hand-listed rule) fails it by name.
 
+**OVERWORLD BALANCE, MEASURED AGAINST THE LAB (2026-08-06).** Aaron asked whether the overworld's
+balance is fine. Trash is: zones evaluate the curve at exactly Inferno floor 50 (effective floor
+200), and the act rosters were rebalanced to the dungeon tier-5 baseline, so the lab's ladder-end row
+IS the overworld's — player DPS **23,262** median / EHP **56,327**, trash 278k HP hitting for 33k,
+**TTK 12.0 s** and **1.7 hits-to-die**, which is the documented ~1.8 target.
+**The BOSSES were not fine, and the ratio guard I had written did not catch it.** Put on the same
+scale, Griswald and Signal Failure came out at **0.93 and 0.84 hits-to-die — an outright one-shot** —
+against the shipped Grim Reaper's 2.02 at the same effective floor. The guard passed them because its
+band was the WHOLE boss roster's, and that band's top (2.22x trash damage) comes from **The Butcher,
+a FLOOR 5 boss**, where trash is weak and player DPS is tiny. It does not generalise to the ladder
+end. Every dungeon boss from floor 25 on sits at **20-35 base damage — BELOW trash's 36** — which is
+precisely what makes the Grim Reaper survivable.
+Retuned to that band and re-measured: Garbage Collector **2.53** hits-to-die / 159 s, Perpetual
+Commuter **2.33** / 238 s, Griswald **2.02** / 330 s (level with the Grim Reaper by construction),
+Signal Failure **1.84** / 379 s — a clean ramp, with the act finale the hardest fight and still
+shorter than the game's superboss. Signal Failure's HP came down too (3750 -> 3100): at 458 s it was
+a longer fight than The Dungeon Engine. The test band is now the LATE roster's (0.5-1.1x), and
+sabotage with the old damage fails it by name.
+**The lesson is about the reference class, not the numbers:** a ratio taken across a whole roster is
+meaningless when the roster spans floor 5 to floor 99 and the player's power grows 20x between them.
+
 **ADVERSARIAL REVIEW OF THE OVERWORLD WORK (2026-08-05) — three real defects, all the same shape.**
 Aaron asked for a review of the uncommitted work; attacking it found one severe bug and two leaks,
 and every one of them was a value that lived in two places instead of being derived from one.

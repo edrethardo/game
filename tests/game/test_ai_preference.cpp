@@ -333,9 +333,14 @@ TEST_CASE("zone bosses hit like bosses, not like a one-shot") {
         const f32 hpRatio  = e.value("health", 0.0f) / trashHp;
         const f32 dmgRatio = e.value("damage", 0.0f) / trashDmg;
         CAPTURE(name); CAPTURE(hpRatio); CAPTURE(dmgRatio);
-        // The bands are the dungeon roster's own, with a little headroom.
-        CHECK(dmgRatio <= 2.3f);    // above this a boss one-shots at the balanced hits-to-die
-        CHECK(dmgRatio >= 0.7f);    // below it the fight has no teeth at all
+        // The band is the LATE dungeon bosses' (floor 25+), not the whole roster's. That distinction
+        // is the whole finding: the first cut used the full range, whose top (2.22x) comes from The
+        // Butcher on FLOOR 5, where trash is weak and the player's DPS is tiny. Applied at the
+        // ladder end it let zone bosses hit for 50-67k against a 56k player pool — 0.84-1.12 hits
+        // to die, an outright one-shot. Every boss from floor 25 on is 20-35 base damage, BELOW
+        // trash's 36, which is what puts the Grim Reaper at a survivable 2.02 hits-to-die.
+        CHECK(dmgRatio <= 1.1f);    // above this a zone boss one-shots at the balanced hits-to-die
+        CHECK(dmgRatio >= 0.5f);    // below it the fight has no teeth at all
         CHECK(hpRatio  <= 40.0f);   // The Dungeon Engine, the final superboss, is 37.4x
         CHECK(hpRatio  >= 8.0f);    // must still read as a boss
     }
