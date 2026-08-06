@@ -469,6 +469,32 @@ DEFAULT, which is the safe direction — the hand-listed set had already been wr
 shrines and Source shards each added retroactively after they evaporated in play. Pinned by a test
 that simulates 120 s per sentinel type; sabotage (restoring the hand-listed rule) fails it by name.
 
+**RESPAWNING BOUNCED YOU BETWEEN ZONES — the anchor was the DOORWAY (2026-08-06).** Aaron: "I
+still get teleported from Zone to Zone when respawning after death." `spawnPosition` answered two
+different questions with one value. ARRIVING wants continuity of travel, so an edge crossing puts
+you in the gate you walked through — `EDGE_ARRIVE_INSET` (5 m) from a border whose transition band
+starts at `EDGE_TRIGGER_BAND` (2.5 m). That is fine to walk out of and a terrible place to be
+dropped by a DEATH: you come back in the doorway with whatever killed you still there, two steps the
+wrong way crosses back, and the neighbour's gate is also 5 m from the same seam — so it bounces
+again. **The two zones are only 2.5 m of walking apart at a seam, and a respawn put you exactly
+there.** `worldSeatNetPlayers` now takes the respawn base SEPARATELY from the arrival, and a zone
+passes its own INTERIOR arrival point (the one waypoint travel uses, a deterministic cleared pad).
+Measured across all 15 zones: clearance from the nearest transition band **2.5 m -> 9.5-13.5 m**,
+0 anchors in rock or out of bounds.
+**Note what did NOT fix it.** Disarming `m_zoneEdgeArmed` on respawn looks like the obvious answer
+and is a no-op: the latch only suppresses transitions while the player is INSIDE a band, and a gate
+arrival at 5 m is not — it re-arms on the next tick. A fix aimed at the latch would have measured
+"no change" and read as the bug being elsewhere.
+The zone geometry constants moved to `game/zone_def.h` for this: the load-bearing part is the
+RELATIONSHIPS between them (an arrival clears the band; a respawn clears it by a lot more), and a
+relationship asserted only where it is used cannot be pinned. `test_zone_def.cpp` now requires every
+zone's respawn clearance to beat 5 m — which the gate arrival's own 2.5 m deliberately fails —
+sabotage-verified by moving the anchor back onto the gate.
+**Repro note for the next person:** a `--new` character cannot test the overworld at all. Tier-5
+post-Inferno enemies kill a fresh warrior in ~2 s, and the run then sits on the death screen, where
+`logStats`/`gameUpdate` do not run — so the log goes silent and any probe placed inside `gameUpdate`
+never fires. That silence is the documented non-gameplay-screen signature, not a hang.
+
 **...and the revive itself now VALIDATES the anchor (`Engine::respawnAnchor`).** Fixing the arrival
 fixes today's bad anchor; it does nothing about the next one. Every revive path — the death screen,
 the co-op in-place revive, the autoplay countdown, the client's own prediction, and the server's

@@ -142,11 +142,12 @@ void Engine::worldPlaceLocalPlayers(Vec3 base, f32 yaw) {
 // spawnPosition matters as much as position: it is where every revive path teleports to, and it is
 // otherwise written only by startGame. The Source shipped without it, which meant dying in the secret
 // boss fight put a player outside the world with no way back.
-void Engine::worldSeatNetPlayers(Vec3 base) {
+void Engine::worldSeatNetPlayers(Vec3 base, Vec3 respawnBase) {
     for (u32 pi = 0; pi < MAX_PLAYERS; pi++) {
         if (!m_players[pi].active) continue;
-        m_players[pi].position      = base + Vec3{static_cast<f32>(pi) * 1.2f - 0.6f, 0.0f, 0.0f};
-        m_players[pi].spawnPosition = m_players[pi].position;
+        const Vec3 spread{static_cast<f32>(pi) * 1.2f - 0.6f, 0.0f, 0.0f};
+        m_players[pi].position      = base + spread;
+        m_players[pi].spawnPosition = respawnBase + spread;
         m_players[pi].invulnTimer   = 1.0f;
         m_players[pi].isDead        = false;
     }

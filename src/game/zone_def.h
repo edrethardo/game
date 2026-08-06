@@ -349,4 +349,44 @@ inline bool arrivalEdge(u8 from, u8 to, Dir& outEdge) {
     return false;
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Zone GEOMETRY. These live here rather than in engine_zone.cpp because the relationships between
+// them are the load-bearing part — an arrival must clear the band that sent you there, and a
+// RESPAWN must clear it by a lot more — and a relationship that is only asserted where it is used
+// cannot be pinned by a test.
+// ---------------------------------------------------------------------------------------------
+
+// How deep into the zone a border's "you are leaving" band reaches.
+constexpr f32 EDGE_TRIGGER_BAND = 2.5f;
+
+// How far INSIDE the border an arriving player is placed. It MUST exceed the trigger band, or
+// arrival lands inside the band that sent you there and the transition re-fires immediately — the
+// gate you came through links back where you came from, so the world ping-pongs. Measured at 1290
+// transitions in 25 s (52 world rebuilds a second) when these two were equal.
+constexpr f32 EDGE_ARRIVE_INSET = EDGE_TRIGGER_BAND * 2.0f;
+static_assert(EDGE_ARRIVE_INSET > EDGE_TRIGGER_BAND,
+              "an arriving player must land clear of the band that would send them back");
+
+// Where the return portal stands in a portal-only zone: south of centre, so it is not on the boss.
+constexpr f32 RETURN_GATE_OFFSET = 8.0f;
+// ...and how far past it an arriving player is put down, so they face the zone with the way home
+// at their back.
+constexpr f32 ARRIVAL_BACKOFF = 2.0f;
+
+// The smallest square grid any zone may use. The respawn-clearance test below is derived from it.
+constexpr u8 MIN_GRID_SIZE = 44;
+
+// How far a zone's RESPAWN anchor sits from the nearest transition band, on the smallest grid.
+//
+// This is the number the "respawning teleports me between zones" bug was about. spawnPosition used
+// to be the ARRIVAL point, so dying after an edge crossing put you back in the gate you walked
+// through — EDGE_ARRIVE_INSET (5 m) from a border whose band starts at 2.5 m. Two steps the wrong
+// way under whatever killed you and you crossed back, arriving at the neighbour's gate, also 5 m
+// from the same seam. A death now returns you to the zone's own INTERIOR arrival point instead.
+constexpr f32 respawnBandClearance(u8 gridSize) {
+    return static_cast<f32>(gridSize) * 0.5f - RETURN_GATE_OFFSET - ARRIVAL_BACKOFF
+         - EDGE_TRIGGER_BAND;
+}
+
 } // namespace Zone

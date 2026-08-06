@@ -1492,7 +1492,10 @@ private:
     void worldClearLevelFlags();                             // 2. all "which world" flags off
     void worldSeedHostSlot();                                // 3. the host's own NetPlayer slot
     void worldPlaceLocalPlayers(Vec3 base, f32 yaw);         // 4. placement + the lane-alias persist
-    void worldSeatNetPlayers(Vec3 base);                     // 5. seats + respawn anchors
+    // 5. seats every active slot at `base`. `respawnBase` is where a DEATH puts them — the two
+    // differ wherever arriving somewhere and reviving there are different questions (a zone).
+    void worldSeatNetPlayers(Vec3 base, Vec3 respawnBase);
+    void worldSeatNetPlayers(Vec3 base) { worldSeatNetPlayers(base, base); }
     // The revive backstop — see engine_world.cpp. Never read spawnPosition directly on a revive.
     Vec3 respawnAnchor(u32 slot);
     void worldFinishEntry(u8 sentinelFloor, bool peaceful);  // 6. mode, state, net wiring, seed

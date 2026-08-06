@@ -319,3 +319,52 @@ TEST_CASE("every POI gate has a matching return gate") {
     }
     CHECK(pairs >= 3);      // the two Act 1 dens and Bank Station
 }
+
+// ---------------------------------------------------------------------------------------------
+// RESPAWN CLEARANCE — "respawning teleports me from zone to zone".
+//
+// spawnPosition is both where a zone entry PUTS you and where a death RETURNS you, and those are
+// different questions. Arriving wants continuity of travel, so an edge crossing lands you in the
+// gate you walked through: EDGE_ARRIVE_INSET (5 m) from a border whose transition band starts at
+// 2.5 m. Fine to walk out of, and a terrible place to be dropped by a death — you come back in the
+// doorway, take two steps the wrong way under whatever killed you, cross back, and land at the
+// neighbour's gate 5 m from the same seam, which bounces you again.
+//
+// A death now returns you to the zone's own INTERIOR arrival point. These pin the geometry that
+// makes that safe, because the margin is what the bug was about — not the mechanism.
+// ---------------------------------------------------------------------------------------------
+
+TEST_CASE("an arriving player lands clear of the band that would send them back") {
+    // The ping-pong bug in its original form: these two were equal, so arrival satisfied the
+    // trigger on its first tick and the world rebuilt 52 times a second.
+    CHECK(Zone::EDGE_ARRIVE_INSET > Zone::EDGE_TRIGGER_BAND);
+}
+
+TEST_CASE("every zone's RESPAWN anchor clears the transition band by a wide margin") {
+    // Wide, not merely positive. A respawn is involuntary and usually happens with enemies on top
+    // of you, so "a couple of steps from a world change" is exactly what must not be true. The gate
+    // arrival's own margin is EDGE_ARRIVE_INSET - EDGE_TRIGGER_BAND = 2.5 m, which is what this
+    // deliberately beats.
+    constexpr f32 MIN_MARGIN = 5.0f;
+    CHECK(Zone::EDGE_ARRIVE_INSET - Zone::EDGE_TRIGGER_BAND < MIN_MARGIN);   // the old behaviour failed it
+
+    for (u32 i = 0; i < Zone::COUNT; i++) {
+        const Zone::ZoneDef& z = Zone::ZONES[i];
+        CAPTURE(z.name);
+        CHECK(z.gridSize >= Zone::MIN_GRID_SIZE);            // the clearance is derived from this
+        CHECK(Zone::respawnBandClearance(z.gridSize) >= MIN_MARGIN);
+    }
+}
+
+TEST_CASE("the respawn anchor stays inside the world it belongs to") {
+    // The anchor is offset SOUTH of centre; on a small enough grid that walks off the map, which
+    // would put a death outside the world — the failure this whole pass exists to remove.
+    for (u32 i = 0; i < Zone::COUNT; i++) {
+        const Zone::ZoneDef& z = Zone::ZONES[i];
+        CAPTURE(z.name);
+        const f32 anchorZ = static_cast<f32>(z.gridSize) * 0.5f
+                          + Zone::RETURN_GATE_OFFSET + Zone::ARRIVAL_BACKOFF;
+        CHECK(anchorZ > 1.0f);                                   // not in the border ring
+        CHECK(anchorZ < static_cast<f32>(z.gridSize) - 1.0f);
+    }
+}

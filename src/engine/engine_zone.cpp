@@ -29,17 +29,14 @@ namespace {
 
 // How wide the walkable opening in a border wall is, and how deep into the zone the trigger band
 // reaches. The gate is generous (5 cells) because an edge you have to hunt for reads as a wall.
-constexpr f32 RETURN_GATE_OFFSET = 8.0f;  // metres SOUTH of centre — clear of the boss pad
+// The geometry constants themselves live in game/zone_def.h — see the block there for why the
+// RELATIONSHIPS between them (arrival clears the band; a respawn clears it by a lot more) are the
+// load-bearing part and are pinned by test.
+using Zone::RETURN_GATE_OFFSET;
+using Zone::EDGE_TRIGGER_BAND;
+using Zone::EDGE_ARRIVE_INSET;
+using Zone::ARRIVAL_BACKOFF;
 constexpr u32 GATE_HALF = 2;          // gate spans centre-2 .. centre+2
-constexpr f32 EDGE_TRIGGER_BAND = 2.5f;   // metres from the border that count as "leaving"
-// How far INSIDE the border an arriving player is placed. It MUST exceed the trigger band, or
-// arrival lands inside the band that sent you there and the transition re-fires immediately — the
-// gate you came through links back where you came from, so the world ping-pongs. Measured at 1290
-// transitions in 25 s (52 world rebuilds a second) when these two were equal.
-constexpr f32 EDGE_ARRIVE_INSET = EDGE_TRIGGER_BAND * 2.0f;
-static_assert(EDGE_ARRIVE_INSET > EDGE_TRIGGER_BAND,
-              "arrival must land clear of the trigger band or edge transitions loop");
-
 // Where a zone's fixtures sit, in cells, as a fraction of the grid. Deterministic so a player who
 // learns a zone keeps their bearings, and so co-op peers agree without any traffic.
 constexpr f32 WAYPOINT_FRAC_X = 0.5f, WAYPOINT_FRAC_Z = 0.62f;
@@ -255,7 +252,7 @@ Vec3 Engine::buildZoneLevel(const Zone::ZoneDef& def) {
     {
         const Vec3 back = zoneReturnPos(def);
         zoneClearPad(static_cast<u32>(back.x), static_cast<u32>(back.z), 3);          // the gate
-        zoneClearPad(static_cast<u32>(back.x), static_cast<u32>(back.z + 2.0f), 2);   // and where you land
+        zoneClearPad(static_cast<u32>(back.x), static_cast<u32>(back.z + ARRIVAL_BACKOFF), 2);   // and where you land
     }
 
     m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, zoneSeed,
@@ -300,7 +297,7 @@ Vec3 Engine::zoneArrivalPos(const Zone::ZoneDef& def, u8 fromFloor) {
     // than on the zone's centre, which the boss occupies.
     (void)size;
     const Vec3 back = zoneReturnPos(def);
-    return { back.x, 0.0f, back.z + 2.0f };
+    return { back.x, 0.0f, back.z + ARRIVAL_BACKOFF };
 }
 
 // The zone's fixtures: its waypoint, and the gate into/out of a POI. Both are WORLD ITEMS on
@@ -642,7 +639,16 @@ void Engine::enterZone(u8 zoneFloor, u8 fromFloor) {
     const Vec3 arrive = zoneArrivalPos(*def, fromFloor);
     worldPlaceLocalPlayers(arrive, 0.0f);
     worldSeedHostSlot();      // never omit — see engine_world.cpp
-    worldSeatNetPlayers(arrive);
+    // ARRIVING somewhere and REVIVING there are different questions, and spawnPosition used to
+    // answer both with the arrival point. Arriving wants continuity of travel, so an edge crossing
+    // puts you in the gate you walked through — 5 m from a border whose transition band is 2.5 m.
+    // That is fine to walk out of, and a terrible place to be dropped by a death: you come back in
+    // the doorway, take two steps the wrong way under whatever killed you, and cross straight back —
+    // landing at the neighbour's gate, also 5 m from the same seam, which bounces you again. That is
+    // the "respawning teleports me from zone to zone" report.
+    // So a death always returns you to the zone's OWN interior arrival point (the one waypoint
+    // travel uses), which is a deterministic cleared pad 12-16 m from the nearest border.
+    worldSeatNetPlayers(arrive, zoneArrivalPos(*def, /*fromFloor=*/0));
 
     spawnZoneContents(*def, center);
     worldFinishEntry(zoneFloor, def->peaceful);
