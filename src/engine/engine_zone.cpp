@@ -15,6 +15,7 @@
 #include "engine/engine.h"
 #include "game/game_constants.h"
 #include "game/zone_def.h"
+#include "game/zone_route.h"
 #include "game/free_play.h"   // overworldUnlocked — the Inferno gate on the town's north road
 #include "world/level_gen.h"
 #include "world/level_mesh.h"
@@ -534,6 +535,7 @@ void Engine::enterZoneGate(s32 worldItemIdx) {
         LOG_WARN("zone gate points at floor %u, which is not a zone", static_cast<u32>(dest));
         return;
     }
+    if (!zoneLinkAllowed(from, dest)) return;
     enterZone(dest, from);
 }
 
@@ -561,6 +563,41 @@ u32 Engine::waypointDestinations(u8* outFloors, u32 maxOut) const {
         outFloors[n++] = Zone::ZONES[i].floor;
     }
     return n;
+}
+
+
+// May the player cross from `from` to `to` right now, and if not, say so.
+//
+// The acts' road is gated on their quests (see game/zone_route.h for the rule and why the two
+// onward cases differ). A gate that simply refuses is indistinguishable from a bug — that lesson is
+// already written into the town's north gate — so a refusal always explains itself, throttled by the
+// same timer that gate uses.
+bool Engine::zoneLinkAllowed(u8 from, u8 to) {
+    if (ZoneRoute::linkOpen(from, to, m_questMask[m_localPlayerIndex])) return true;
+
+    if (m_zoneGateHintTimer <= 0.0f) {
+        // Name the OUTSTANDING quest rather than a generic refusal: "something is unfinished" sends
+        // a player wandering, and the whole point of the chain is that it tells you where to go.
+        const Zone::ZoneDef* z = Zone::find(from);
+        const Quest::QuestDef* blocking = nullptr;
+        if (z) {
+            if (!ZoneRoute::zoneSettled(from, m_questMask[m_localPlayerIndex]))
+                blocking = Quest::forZone(from);
+            else if (z->poiFloor != Zone::NO_LINK
+                     && !ZoneRoute::zoneSettled(z->poiFloor, m_questMask[m_localPlayerIndex]))
+                blocking = Quest::forZone(z->poiFloor);
+        }
+        if (blocking) {
+            char line[128];
+            snprintf(line, sizeof(line), "Unfinished business: %s", blocking->name);
+            addChatMessage("", line, Vec3{0.85f, 0.7f, 0.4f});
+        } else {
+            addChatMessage("", "The way onward is not open yet.", Vec3{0.85f, 0.7f, 0.4f});
+        }
+        m_zoneGateHintTimer = 6.0f;
+    }
+    LOG_INFO("[ZONEX] refused %u -> %u (quest gate)", static_cast<u32>(from), static_cast<u32>(to));
+    return false;
 }
 
 // Walking into a border band with a linked neighbour hands off to the next world. Host/SP only —
@@ -622,6 +659,7 @@ void Engine::updateZoneTransitions() {
              static_cast<f64>(p.x), static_cast<f64>(p.z), static_cast<u32>(dir),
              static_cast<int>(m_zoneEdgeArmed), static_cast<f64>(m_localPlayer.health));
     if (dest == Zone::TOWN_FLOOR) { enterTown(); return; }
+    if (!zoneLinkAllowed(from, dest)) return;
     enterZone(dest, from);
 }
 

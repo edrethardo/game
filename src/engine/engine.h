@@ -1465,6 +1465,8 @@ private:
     // Walking into a border band with a linked neighbour hands off to the next zone (host decides,
     // clients follow the broadcast) — the town-portal proximity pattern.
     void updateZoneTransitions();
+    // Quest gating for both doors (an edge crossing and a portal). Explains its refusals.
+    bool zoneLinkAllowed(u8 from, u8 to);
     f32  m_zoneGateHintTimer = 0.0f;   // throttles the locked-gate chat line
     // Edge transitions are DISARMED on arrival and re-arm only once the player has stood clear of
     // every border band. Without it, arriving at a gate re-triggers that same gate — which links
