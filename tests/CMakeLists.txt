@@ -34,6 +34,7 @@ add_executable(dungeon_tests
     game/test_zone_def.cpp
     game/test_zone_route.cpp
     game/test_minion_scale.cpp
+    game/test_entity_ground.cpp
     game/test_free_play.cpp
     game/test_engine_shield.cpp
     game/test_audio_settings.cpp

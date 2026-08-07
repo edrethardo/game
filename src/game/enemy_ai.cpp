@@ -7,6 +7,7 @@
 
 #include "game/enemy_ai.h"
 #include "game/enemy_ai_internal.h"
+#include "game/entity_ground.h"
 #include "game/player.h"
 #include "net/net_player.h"  // for NetPlayer in N4 friendly-tether resolution
 #include "world/level_gen.h"
@@ -72,25 +73,8 @@ bool entityOverlapsGrid(Vec3 centre, Vec3 halfExtents,
     return false;
 }
 
-// Snap a ground entity's Y to the floor height of its current grid cell.
-// Called after XZ movement to keep entities from floating or sinking.
-void snapEntityToFloor(Entity& e, const LevelGrid& grid) {
-    // An AIRBORNE ground enemy — one riding a jump-pad launch — must not be yanked back down. This
-    // is the single choke point: snapEntityToFloor is called from half a dozen places every frame,
-    // and any one of them cancelling the arc would make pads silently useless to enemies. Only
-    // non-flying entities use velocity.y this way (the flying branch owns it otherwise, and
-    // knockback is XZ-only), so a non-zero Y velocity here means "mid-flight, leave me alone".
-    if (!(e.flags & ENT_FLYING) && e.velocity.y != 0.0f) return;
-    u32 gx, gz;
-    if (LevelGridSystem::worldToGrid(grid, e.position, gx, gz) &&
-        !LevelGridSystem::isSolid(grid, gx, gz)) {
-        // Story-aware (see Collision::snapEntityToFloor): select the slab top vs the ground floor
-        // from the entity's FEET, so enemies can climb ramps onto a balcony, stand under one, and
-        // drop off its edge — the foundation of two-story chase. Identity off platform cells.
-        const f32 feetY = e.position.y - e.halfExtents.y;
-        e.position.y = LevelGridSystem::effectiveFloorHeight(grid, gx, gz, feetY) + e.halfExtents.y;
-    }
-}
+// snapEntityToFloor now lives in game/entity_ground.h so it can be unit-tested — it is the rule
+// every enemy's position depends on and it had no test at all while it sat in this file.
 
 // Checks whether an entity AABB overlaps the player AABB in the XZ plane.
 bool entityOverlapsPlayer(const Vec3& entPos, const Vec3& halfExt,

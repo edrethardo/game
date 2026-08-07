@@ -5,6 +5,7 @@
 
 #include "core/types.h"
 #include "game/entity.h"
+#include "game/entity_ground.h"
 #include "game/enemy_ai.h"   // MAX_AI_TARGETS (sizes the watch set) + inViewCone
 #include "game/player.h"
 #include "game/projectile.h"
@@ -95,8 +96,7 @@ inline Vec3 navExtents(const Entity& e) {
     return { r, e.halfExtents.y, r };
 }
 
-// Snaps a ground entity's Y to the floor height of its current grid cell.
-void snapEntityToFloor(Entity& e, const LevelGrid& grid);
+// snapEntityToFloor is defined in game/entity_ground.h (header-only, so it is testable).
 
 // Returns true if entity AABB overlaps the player AABB in the XZ plane.
 bool entityOverlapsPlayer(const Vec3& entPos, const Vec3& halfExt,

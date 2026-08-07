@@ -754,6 +754,20 @@ void Engine::updateZoneTransitions() {
     if (m_netRole == NetRole::CLIENT) return;   // the host owns world changes; guests follow the seed
 
     zoneRememberState();   // survivors + boss, so re-entering does not undo the fight
+    {   // TEMP: count hostiles whose FEET are below their cell floor.
+        static f32 t=0.0f; t+=1.0f/60.0f;
+        if (t>2.0f) { t=0.0f; u32 sunk=0, tot=0;
+            for (u32 a=0;a<m_entities.activeCount;a++){
+                const Entity& e=m_entities.entities[m_entities.activeList[a]];
+                if ((e.flags&ENT_DEAD)||(e.flags&ENT_FRIENDLY)||(e.flags&ENT_FLYING)) continue;
+                u32 gx,gz; if(!LevelGridSystem::worldToGrid(m_level.grid,e.position,gx,gz)) continue;
+                tot++;
+                const f32 feet=e.position.y-e.halfExtents.y;
+                if (feet < LevelGridSystem::effectiveFloorHeight(m_level.grid,gx,gz,feet)-0.05f) sunk++;
+            }
+            if (tot) LOG_INFO("SUNKPROBE %u/%u hostiles below their floor", sunk, tot);
+        }
+    }
 
     // THE TOWN'S NORTH GATE — the front door to Act 1, and the only way into the overworld in normal
     // play (the --zone dev door aside). Gated on the INFERNO clear here rather than in the town's
