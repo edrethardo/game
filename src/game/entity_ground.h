@@ -50,7 +50,39 @@ inline void snapEntityToFloor(Entity& e, const LevelGrid& grid) {
     // wall-press are untouched, and it is the only thing standing between a shoved enemy and the
     // inside of the map.
     const bool airborne = !(e.flags & ENT_FLYING) && e.velocity.y != 0.0f;
-    if (airborne || LevelGridSystem::isSolid(grid, gx, gz)) {
+    const bool inRock   = LevelGridSystem::isSolid(grid, gx, gz);
+
+    if (inRock) {
+        // A CENTRE INSIDE ROCK IS NOT A HEIGHT. The cell's own floorHeight is the height of the
+        // ground under a wall, which is not the surface the body is standing on — and a big body
+        // (The Merge Conflict is the widest hitbox in the acts) sits with its centre over a clump
+        // while most of it is still on open floor. Clamping to the wall's own floor left exactly
+        // those enemies embedded: sunk, and out of attack range in Y, so they stopped dealing damage
+        // as well — reported as "the merge conflicts are just sinking in and not even doing damage".
+        //
+        // Take the HIGHEST floor among the orthogonal neighbours that are actually walkable: that is
+        // the surface the body is overhanging, and highest is the safe direction (a body pushed up
+        // is visible and falls back, a body left low is inside the map).
+        f32 best = -1e9f;
+        const s32 dx[4] = {1, -1, 0, 0}, dz[4] = {0, 0, 1, -1};
+        for (u32 i = 0; i < 4; i++) {
+            const s32 nx = static_cast<s32>(gx) + dx[i], nz = static_cast<s32>(gz) + dz[i];
+            if (nx < 0 || nz < 0) continue;
+            const u32 ux = static_cast<u32>(nx), uz = static_cast<u32>(nz);
+            if (ux >= grid.width || uz >= grid.depth) continue;
+            if (LevelGridSystem::isSolid(grid, ux, uz)) continue;
+            const f32 h = LevelGridSystem::effectiveFloorHeight(grid, ux, uz, feetY);
+            if (h > best) best = h;
+        }
+        // Walled in on all four sides: nothing to stand on, so only refuse to sink further.
+        const f32 target = (best > -1e8f) ? best + e.halfExtents.y : restY;
+        if (e.position.y < target) e.position.y = target;
+        return;
+    }
+
+    if (airborne) {
+        // Keep the arc — a pad launch or a vault must not be yanked down — but never below the
+        // floor. Clamping is the weakest correction that still holds the invariant.
         if (e.position.y < restY) e.position.y = restY;
         return;
     }

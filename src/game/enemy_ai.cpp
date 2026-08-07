@@ -194,6 +194,9 @@ void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
     // (effectiveFloorHeight picks the STORY, so they land on the balcony/slab they were launched
     // onto, not the ground). Landing zeroes velocity.y, which hands control back to the floor snap.
     if (!(e.flags & ENT_FLYING) && e.velocity.y != 0.0f) {
+        // Remember where the arc was BEFORE gravity moves it. The abort path below needs it: it used
+        // to zero the velocity and leave the position wherever this tick's fall had already put it.
+        const f32 preArcY = e.position.y;
         e.velocity.y += GRAVITY * dt;
         e.position.y += e.velocity.y * dt;
         u32 lgx, lgz;
@@ -218,7 +221,21 @@ void entityMoveAndSlide(Entity& e, const LevelGrid& grid, f32 dt,
                 e.velocity.z *= StoryNav::VAULT_SPEED / hSp;
             }
         } else {
-            e.velocity.y = 0.0f;   // left the grid — abort the arc rather than fly off
+            // ABORTING THE ARC — off the grid, or over a SOLID cell. This is the root of "enemies
+            // sometimes drive inside the ground when attacking and moving towards the player".
+            //
+            // Gravity has ALREADY moved position.y down a tick by the time we get here, and the
+            // landing test that would have caught the floor sits inside the `!isSolid` branch we
+            // just failed. Zeroing the velocity alone therefore froze the body at whatever depth the
+            // fall had reached — and left it in the one state nothing can recover from: velocity.y
+            // is now 0 so it reads as grounded, while its centre is in a solid cell so
+            // snapEntityToFloor skips it too. Every tick spent drifting over rock sank it further.
+            //
+            // A crowd converging on the player is exactly what puts a centre over rock, which is why
+            // it looked tied to attacking. Undoing this tick's fall keeps the body where it was
+            // standing instead, so there is nothing to recover from.
+            e.position.y = preArcY;
+            e.velocity.y = 0.0f;
         }
     }
     // Grounded ground-enemy verticality — PAD LAUNCH first, then GAP VAULT. Deliberately NOT an
