@@ -1475,6 +1475,11 @@ private:
     void updateZoneTransitions();
     // Quest gating for both doors (an edge crossing and a portal). Explains its refusals.
     Vec3 zoneEdgeCrossPos(Zone::Dir dir) const;   // walk HERE to leave; see zone_def.h
+    // Fixture anchors, resolved onto carved ROOMS so a landmark can never generate walled in.
+    u32  zoneAnchorRoom(const DungeonResult& gen, u32 seed, f32 fracX, f32 fracZ) const;
+    Vec3 zoneRoomCentre(const DungeonResult& gen, u32 idx) const;
+    Vec3 m_zoneWaypointPos = {};   // where buildZoneLevel put them; spawnZoneContents reads these,
+    Vec3 m_zonePoiPos      = {};   // so the cleared pad and the fixture can never disagree
     bool zoneLinkAllowed(u8 from, u8 to);
 
     // --- Autoplay in the overworld (engine_autoplay_zone.cpp) ---

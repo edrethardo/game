@@ -113,6 +113,47 @@ void Engine::zoneOpenGate(Zone::Dir dir) {
 
 // World position of a zone's gate mouth, one step INSIDE the wall — where a player arriving from the
 // neighbouring zone is placed.
+
+// Snap a fixture anchor onto a ROOM the generator actually carved.
+//
+// WHY. The waypoint and POI mouths used to be stamped at fixed FRACTIONS of the grid, with a pad
+// cleared around them. That is safe on WILDERNESS, whose interior starts open — but zones now choose
+// their terrain, and a GAUNTLET tunnel or a HUB concourse is mostly solid. Clearing a 5x5 pad in the
+// middle of solid rock does not make a landmark reachable; it makes an isolated POCKET with the
+// landmark inside it. The Bank Station portal generated exactly like that: the act soak found a
+// wanderer eight metres from it for twenty-one minutes with NO flow direction at all and a wall
+// ahead — the quest, and therefore the rest of Act 2, was unreachable. A human would have been just
+// as stuck.
+//
+// Room centres are the fix because every layout style guarantees them open and connected — it is the
+// contract every other placement consumer (enemies, chests, bosses, lights) already relies on. The
+// room is picked by SEED so host and client agree without a byte on the wire, and biased toward the
+// requested fraction so a zone's landmarks still sit roughly where they were authored to.
+u32 Engine::zoneAnchorRoom(const DungeonResult& gen, u32 seed, f32 fracX, f32 fracZ) const {
+    if (gen.roomCount == 0) return 0;
+    const f32 want = fracX * static_cast<f32>(m_level.grid.width);
+    const f32 wantZ = fracZ * static_cast<f32>(m_level.grid.depth);
+    u32 best = 0; f32 bestD2 = 1e18f;
+    for (u32 i = 0; i < gen.roomCount; i++) {
+        const f32 cx = static_cast<f32>(gen.rooms[i].x) + static_cast<f32>(gen.rooms[i].w) * 0.5f;
+        const f32 cz = static_cast<f32>(gen.rooms[i].z) + static_cast<f32>(gen.rooms[i].d) * 0.5f;
+        const f32 dx = cx - want, dz = cz - wantZ;
+        const f32 d2 = dx * dx + dz * dz;
+        if (d2 < bestD2) { bestD2 = d2; best = i; }
+    }
+    (void)seed;   // deterministic by geometry alone; no roll needed, so no seed to disagree about
+    return best;
+}
+
+// The world position of a room's centre.
+Vec3 Engine::zoneRoomCentre(const DungeonResult& gen, u32 idx) const {
+    if (gen.roomCount == 0) return { static_cast<f32>(m_level.grid.width) * 0.5f, 0.0f,
+                                     static_cast<f32>(m_level.grid.depth) * 0.5f };
+    const DungeonRoom& r = gen.rooms[idx < gen.roomCount ? idx : 0];
+    return { static_cast<f32>(r.x) + static_cast<f32>(r.w) * 0.5f, 0.0f,
+             static_cast<f32>(r.z) + static_cast<f32>(r.d) * 0.5f };
+}
+
 Vec3 Engine::zoneGatePos(Zone::Dir dir) const {
     const f32 W = static_cast<f32>(m_level.grid.width), D = static_cast<f32>(m_level.grid.depth);
     const f32 cx = W * 0.5f, cz = D * 0.5f;
@@ -229,12 +270,18 @@ Vec3 Engine::buildZoneLevel(const Zone::ZoneDef& def) {
     for (u8 d = 0; d < static_cast<u8>(Zone::Dir::COUNT); d++)
         if (def.neighbour[d] != Zone::NO_LINK) zoneOpenGate(static_cast<Zone::Dir>(d));
 
-    if (def.hasWaypoint)
-        zoneClearPad(static_cast<u32>(static_cast<f32>(size) * WAYPOINT_FRAC_X),
-                     static_cast<u32>(static_cast<f32>(size) * WAYPOINT_FRAC_Z), 2);
-    if (def.poiFloor != Zone::NO_LINK)
-        zoneClearPad(static_cast<u32>(static_cast<f32>(size) * POI_FRAC_X),
-                     static_cast<u32>(static_cast<f32>(size) * POI_FRAC_Z), 2);
+    // Both fixtures ride ROOM CENTRES (see zoneAnchorRoom) rather than raw grid fractions: a pad
+    // cleared in the middle of a tunnel wall is an isolated pocket, not a reachable landmark.
+    if (def.hasWaypoint) {
+        const Vec3 c = zoneRoomCentre(gen, zoneAnchorRoom(gen, zoneSeed, WAYPOINT_FRAC_X, WAYPOINT_FRAC_Z));
+        m_zoneWaypointPos = c;
+        zoneClearPad(static_cast<u32>(c.x), static_cast<u32>(c.z), 2);
+    }
+    if (def.poiFloor != Zone::NO_LINK) {
+        const Vec3 c = zoneRoomCentre(gen, zoneAnchorRoom(gen, zoneSeed, POI_FRAC_X, POI_FRAC_Z));
+        m_zonePoiPos = c;
+        zoneClearPad(static_cast<u32>(c.x), static_cast<u32>(c.z), 2);
+    }
     // An interior's way out is its own landmark; put it at the centre so it is never behind you.
     if (def.returnFloor != Zone::NO_LINK)
         zoneClearPad(size / 2, size / 2, 3);   // the boss pad — radius 3, matching spawnZoneContents
@@ -400,7 +447,7 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
         wp.defId     = WAYPOINT_ID;
         wp.itemLevel = def.floor;          // which zone this waypoint belongs to
         wp.uid       = m_worldItems.nextUid++;
-        const Vec3 pos = { size * WAYPOINT_FRAC_X, 0.0f, size * WAYPOINT_FRAC_Z };
+        const Vec3 pos = m_zoneWaypointPos;   // the room centre buildZoneLevel cleared
         WorldItemSystem::spawn(m_worldItems, wp, pos, &m_level.grid, 0xFF);
         LOG_INFO("Zone fixture: WAYPOINT at (%.1f, %.1f)", (double)pos.x, (double)pos.z);
     }
@@ -412,7 +459,7 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
         gate.defId     = ZONE_GATE_ID;
         gate.itemLevel = def.poiFloor;
         gate.uid       = m_worldItems.nextUid++;
-        const Vec3 pos = { size * POI_FRAC_X, 0.0f, size * POI_FRAC_Z };
+        const Vec3 pos = m_zonePoiPos;        // the room centre buildZoneLevel cleared
         WorldItemSystem::spawn(m_worldItems, gate, pos, &m_level.grid, 0xFF);
         LOG_INFO("Zone fixture: POI GATE -> floor %u at (%.1f, %.1f)",
                  (u32)def.poiFloor, (double)pos.x, (double)pos.z);

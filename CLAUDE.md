@@ -372,6 +372,24 @@ have done the same to TristRAM. The return gate and the portal arrival now stand
 boss** in both zones: you step out of the portal, the way back is at your back, and the thing you
 came for is across the ruins.
 
+**A ZONE FIXTURE COULD GENERATE WALLED IN — the Bank portal was (found by the act soak, fixed
+2026-08-07).** The waypoint and POI mouths were stamped at fixed FRACTIONS of the grid with a 5x5 pad
+cleared around them. That is safe on WILDERNESS, whose interior starts OPEN — and zones now choose
+their terrain, so a GAUNTLET tunnel or a HUB concourse is mostly solid. Clearing a pad in the middle
+of rock does not make a landmark reachable; it makes an isolated POCKET with the landmark inside it.
+**The Circle Line's portal into Bank Station generated exactly like that**, which puts *Insufficient
+Funds* — and therefore the rest of Act 2 — behind a wall. A human would have been just as stuck; the
+soak found it because a wanderer sat 8 m from it for 21 minutes with `flow=0.00` and `WALL` ahead.
+Both fixtures now ride **ROOM CENTRES**, which every layout style guarantees open and connected —
+the contract every other placement consumer (enemies, chests, bosses, lights) already relies on —
+picked as the room nearest the authored fraction so the landmarks still sit roughly where they were
+designed to. `buildZoneLevel` records the chosen position and `spawnZoneContents` reads it, so the
+cleared pad and the fixture it exists for can never disagree. Verified 0/37 unreachable across all 15
+zones, and sabotage-verified: restoring the fraction anchors makes zone 62's POI unreachable again.
+This is the same lesson as VERTICAL_HALL's cover pillar and FOUR_STORY's maze walls, one layer up —
+**a landmark's anchor must be derived from the geometry that was actually carved, never from a
+fraction of the grid.**
+
 **THE BOT PLAYS THE OVERWORLD, AND THE QUESTS NOW GATE THE ROAD (2026-08-07).** Autoplay used to
 END its run on entering a zone — an act has no descent objective, so a bot standing in one idles
 forever, which is the town and credits strands in a new costume. Two features needed the same
