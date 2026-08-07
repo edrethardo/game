@@ -71,6 +71,15 @@ void Engine::equipEndgameLoadout(u8 lane) {
     if (lane >= MAX_LOCAL_PLAYERS) return;
     PlayerInventory& inv = m_inventories[lane];
 
+    // "As if they had just broken Inferno" is a PROGRESSION claim as much as a gear one. Without it
+    // the hero is a fresh Normal character wearing endgame loot, and FreePlay::overworldUnlocked is
+    // false — so the town's north gate refuses them. That matters the moment a bot drifts out of the
+    // Blood Buffer's south edge into the town: it would be locked out of the acts it was playing,
+    // with the only way onward being a dungeon run.
+    m_difficulty       = FreePlay::FINAL_DIFFICULTY;
+    m_highestUnlocked  = FreePlay::FINAL_DIFFICULTY;
+    m_level.savedFloor = FreePlay::MAX_FLOOR + 1;   // the "cleared" marker floor
+
     // The gear brain does the choosing. Forced on regardless of --autoloot because a bag of loot the
     // hero never equips is not a loadout.
     inv.autoMode = 1;
@@ -292,6 +301,7 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         // below, so `--autoplay --town` used to land an UNARMED hero in the hub — the one dev door
         // for the town's autoplay behaviour was the one place the bot was never switched on.
         // NEW_GAME = a fresh hero (seed its build cell from the class); a --load keeps its own.
+        if (opt.endgame) equipEndgameLoadout(0);
         if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
         LOG_INFO("Launch: entered the TOWN hub (--town)");
         return;
@@ -312,6 +322,7 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         // transition for the same reason --town arms it early: this branch returns before the
         // arming below, and an unarmed hero in the one world we are here to test is useless.
         startGame(mode);
+        if (opt.endgame) equipEndgameLoadout(0);
         if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
         enterSourceChamber();
         LOG_INFO("Launch: entered THE SOURCE (--source)");
@@ -326,6 +337,7 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         // Gear BEFORE arming the bot: enterAutoplayRun seeds the build cell from the class, and
         // autoEquipBackpack should run against that cell rather than re-gearing a moment later.
         if (opt.endgame) equipEndgameLoadout(0);
+        if (opt.endgame) equipEndgameLoadout(0);
         if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
         if (opt.endgame) autoEquipBackpack(0);   // re-pick under the class's own build cell
         enterZone(opt.zoneFloor, /*fromFloor=*/0);
@@ -339,6 +351,7 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         // clear, which is why the credits park (and the run continuation after it) went unnoticed
         // until a 3 h soak happened to produce exactly one victory.
         startGame(mode);
+        if (opt.endgame) equipEndgameLoadout(0);
         if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
         beginCreditsSequence(/*engineSlain=*/false);
         LOG_INFO("Launch: rolled the STANDARD ending (--victory)");
@@ -349,6 +362,7 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     // stamps the saved autoMode); no-op unless --autoplay. See enterAutoplayRun().
     // NEW_GAME = a fresh hero, so its build cell is seeded from the class; a CONTINUE keeps the
     // cell it saved (which may be a build the player deliberately picked).
+    if (opt.endgame) equipEndgameLoadout(0);
     if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
     LOG_INFO("Launch: entered game (%s, %s)",
              opt.role == LaunchOptions::Role::HOST ? "host" : "single-player",

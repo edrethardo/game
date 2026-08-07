@@ -63,6 +63,8 @@
 // live runs: mean |per-tick change of the desired yaw| 5.0 deg -> 1.9, applied-yaw direction reversals
 // 4.5/s -> 1.2 (marksman); 2.8 -> 2.2 and 1.6/s -> 0.9 (warrior).
 #include "engine/engine.h"
+#include "game/zone_route.h"
+#include "game/free_play.h"
 #include "core/log.h"            // LOG_INFO — the [TELEM] metrics; included explicitly, not via a
                                  // transitive header (that only compiled locally; CI's chain lacks it)
 #include "platform/input.h"
@@ -1723,8 +1725,29 @@ void Engine::autoplayTownStep(f32 dt, bool uiOpen) {
     ap().lookBehindTimer = 0.0f;
     ap().lookBehindDone  = false;
 
+    // THE ACTS OUTRANK THE PORTAL. A bot that wanders out of the Blood Buffer's SOUTH edge lands in
+    // the town — correct game behaviour, that edge IS the way home — and the town step would then
+    // take the dungeon portal and start a fresh RUN, abandoning an act it was halfway through. The
+    // soak caught two classes doing exactly that: their [STALL] lines read `fl=32` and `fl=8`, i.e.
+    // deep dungeon floors, after twenty minutes with zero act progress.
+    //
+    // So while any quest is outstanding, the town's goal is its NORTH GATE, not its portal. Nothing
+    // else changes: walking into the gate band hands off to zone 52 through the ordinary
+    // host-authoritative transition, which re-checks the Inferno unlock for itself.
+    Vec3 townGoal = m_level.townPortalPos;
+    bool townPortalIsGoal = true;
+    if (ZoneRoute::objectiveZone(m_questMask[m_localPlayerIndex]) != 0 &&
+        FreePlay::overworldUnlocked(m_level.savedFloor, m_difficulty)) {
+        // Aimed AT the border line, not at the crossing depth. planTownPortal deliberately stops
+        // 1.5 m short of its target — a portal is a HOLD target you stand next to — so aiming at
+        // the crossing depth parks the bot just OUTSIDE the trigger band, walking nowhere. Targeting
+        // the line puts the stopping point inside it. The step veto still refuses the wall itself,
+        // so this cannot walk the bot into geometry.
+        townGoal = Vec3{ static_cast<f32>(m_level.grid.width) * 0.5f, 0.0f, 0.0f };
+        townPortalIsGoal = false;
+    }
     const Autoplay::TownPortalPlan plan =
-        Autoplay::planTownPortal(m_localPlayer.position, m_level.townPortalPos);
+        Autoplay::planTownPortal(m_localPlayer.position, townGoal);
 
     if (lengthSq(plan.heading) > 1e-6f) {
         // Same hazard veto + widening detour fan the travel heading rides in buildBotView. The
@@ -1753,6 +1776,10 @@ void Engine::autoplayTownStep(f32 dt, bool uiOpen) {
             in.moveFwd  = plan.walk;
         }
     }
+
+    // Heading for the north gate instead? Then there is nothing to press — walk in and the border
+    // hands off, exactly as an overworld edge does.
+    if (!townPortalIsGoal) { applyBotIntent(in, uiOpen, dt, /*melee=*/false); return; }
 
     // Taking the portal rides the SAME pulsed interact the floor exit uses, for the same reason: the
     // portal is an EXIT-class HOLD target, and a continuously-held PICKUP makes Interact::poll fire
