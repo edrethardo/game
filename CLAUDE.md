@@ -372,6 +372,33 @@ have done the same to TristRAM. The return gate and the portal arrival now stand
 boss** in both zones: you step out of the portal, the way back is at your back, and the thing you
 came for is across the ruins.
 
+**MINIONS NOW HIT WITH THEIR SUMMONER'S WEAPON (2026-08-07, Aaron's call).** The Tinkerer's drones
+and the Combat Engineer's turret were authored as FLAT numbers (6/7/8/3 damage) scaled only by a
+floor ramp — nothing about them read the player's gear. So the two classes whose damage is meant to
+COME from their minions were the only two whose damage did not improve when they found a better
+weapon: a Tinkerer in full mythics summoned the same drones as one in starting kit. That is exactly
+the class-power gap the soaks keep measuring (3 h all-class dungeon soak: the two SUMMON classes
+finished last and second-last, **Tinkerer 367 wdps against a Wanderer's 38,371**).
+**The rule is `max(authored x floorMult, weaponDamage x share)`** (`game/minion_scale.h`, pure +
+tested). Two properties are deliberate: the authored value is a **FLOOR, not a base to multiply**,
+so early game is byte-identical and this can only lift the top end where the gap is; and the share
+is taken against **per-hit** weapon damage, not DPS, because a minion has its own attack cooldown
+and scaling by DPS would double-count attack-speed rolls the minion does not have. Shares are sized
+by how many of each a build fields at once (swarm 0.16 < spider 0.25 <= turret 0.30 < queen 0.35),
+because an equal share would make the numerous swarm strictly best at every gear level.
+**Measured** at the ladder end (effective weapon damage 6878): spider 60 -> **1719**, swarm
+70 -> **1100**, queen 80 -> **2407**, turret 3 -> **2063**; on a fresh floor-1 hero (weapon 18) the
+drones are **unchanged at 6/7/8** exactly as intended.
+**The TURRET was carrying a real pre-existing bug** and is the one minion that also changes at low
+level (3 -> 5.4): unlike every other minion the floor ramp was **never applied to its damage at
+all** — its HP scaled with depth and its damage stayed 3 on floor 1 and floor 50 alike. That is an
+omission, not a balance choice, which is why the test pins it as the deliberate exception rather
+than asserting a blanket "early game is unchanged" that was simply false.
+**Both callback rails were converted**, including the one `EnemyAI` uses for the Swarm Queen's
+auto-spawned minis — missing it would have left the Tinkerer's biggest cooldown producing the only
+drones in the build that ignore its gear. Indexed by the CASTING net slot, not the local lane, so a
+remote co-op caster's minions use their own gear.
+
 **ALL NINE CLASSES NOW FINISH BOTH ACTS UNATTENDED (2026-08-07).** `tools/overworld_soak.py`, nine
 classes concurrently from the Blood Buffer: **9/9 completed Act 2's last quest**, 9 quests and 18-34
 world changes each, `deaths == revives` throughout, zero crashes and zero routing strands. The acts

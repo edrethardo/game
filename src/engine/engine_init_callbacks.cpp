@@ -7,6 +7,7 @@
 #include "audio/audio.h"
 
 #include "engine/engine.h"
+#include "game/minion_scale.h"
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
@@ -606,12 +607,24 @@ void Engine::initCallbacks() {
 
         f32 floorMult = 1.0f + (s_engine->m_level.currentFloor + s_engine->m_difficulty * 50 - 1) * 0.06f;
 
+        // THE SUMMONER'S WEAPON is what a minion hits with (see game/minion_scale.h). Without this
+        // the Tinkerer and the Combat Engineer are the only classes whose damage does not improve
+        // when they find a better weapon — the two classes whose damage is supposed to COME from
+        // their minions. Indexed by the CASTING net slot, not the local lane: a remote co-op caster
+        // must get their own gear, and m_inventories is slot-indexed.
+        const u8 casterSlot = SkillSystem::getCastingPlayer();
+        const PlayerInventory& casterInv =
+            s_engine->m_inventories[casterSlot < MAX_PLAYERS ? casterSlot : 0];
+        const f32 wpnDmg = Inventory::getEffectiveWeapon(casterInv, s_engine->m_itemDefs,
+                                                         s_engine->m_weaponDefs[0]).damage;
+
         if (type == 0) {
             // Spider drone — melee ground unit. Swarm Overlord spawns many of these.
             // halfExtents drive mesh size + hitbox; bumped up so the swarm reads clearly
             // and is easier to hit ({0.3,0.2,0.3} -> {0.4,0.28,0.4}).
             EntityHandle h = EntitySystem::spawn(pool, position,
-                {0.4f, 0.28f, 0.4f}, false, 30.0f * floorMult, 6.0f * floorMult,
+                {0.4f, 0.28f, 0.4f}, false, 30.0f * floorMult,
+                MinionScale::damage(6.0f, floorMult, wpnDmg, MinionScale::SHARE_SPIDER_DRONE),
                 12.0f, 4.0f, 0.5f, 8.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
@@ -633,7 +646,8 @@ void Engine::initCallbacks() {
             // Bat drone — flying melee swarm unit. Fast, closes distance to attack.
             // Enlarged for visibility/hittability ({0.15,0.1,0.15} -> {0.22,0.15,0.22}).
             EntityHandle h = EntitySystem::spawn(pool, position,
-                {0.22f, 0.15f, 0.22f}, true, 20.0f * floorMult, 7.0f * floorMult,
+                {0.22f, 0.15f, 0.22f}, true, 20.0f * floorMult,
+                MinionScale::damage(7.0f, floorMult, wpnDmg, MinionScale::SHARE_SWARM_DRONE),
                 12.0f, 3.0f, 0.5f, 6.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
@@ -654,7 +668,8 @@ void Engine::initCallbacks() {
         } else if (type == 3) {
             // Swarm Queen — large tanky spider that auto-spawns minis every 2s for 20s
             EntityHandle h = EntitySystem::spawn(pool, position,
-                {0.5f, 0.4f, 0.5f}, false, 200.0f * floorMult, 8.0f * floorMult,
+                {0.5f, 0.4f, 0.5f}, false, 200.0f * floorMult,
+                MinionScale::damage(8.0f, floorMult, wpnDmg, MinionScale::SHARE_SWARM_QUEEN),
                 15.0f, 3.0f, 1.0f, 10.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
@@ -685,7 +700,9 @@ void Engine::initCallbacks() {
             // (engine_render_entities.cpp scales the mesh by halfExtents), so larger
             // extents make the turret easier to see and to hit at once.
             EntityHandle h = EntitySystem::spawn(pool, position,
-                {0.3f, 0.45f, 0.3f}, false, baseHp * floorMult, 3.0f, 20.0f, 15.0f, 1.5f, 12.0f);
+                {0.3f, 0.45f, 0.3f}, false, baseHp * floorMult,
+                MinionScale::damage(3.0f, floorMult, wpnDmg, MinionScale::SHARE_TURRET),
+                20.0f, 15.0f, 1.5f, 12.0f);
             Entity* e = handleGet(pool, h);
             if (e) {
                 e->ownerLocalPlayer = s_engine->m_localPlayerIndex; // split-screen lane (host-only path)
@@ -716,8 +733,16 @@ void Engine::initCallbacks() {
         // Simplest: just inline the spawn for type 0 (spider mini drone)
         EntityPool& pool = s_engine->m_entities;
         f32 fm = 1.0f + (s_engine->m_level.currentFloor + s_engine->m_difficulty * 50 - 1) * 0.06f;
+        // The queen's minis scale off the summoner's weapon exactly like the ones she was summoned
+        // beside. Missing this rail would leave the Swarm Queen — the Tinkerer's biggest cooldown —
+        // producing the only drones in the build that ignore its gear.
+        const u8 qSlot = SkillSystem::getCastingPlayer();
+        const PlayerInventory& qInv = s_engine->m_inventories[qSlot < MAX_PLAYERS ? qSlot : 0];
+        const f32 qWpn = Inventory::getEffectiveWeapon(qInv, s_engine->m_itemDefs,
+                                                       s_engine->m_weaponDefs[0]).damage;
         EntityHandle h = EntitySystem::spawn(pool, pos,
-            {0.4f, 0.28f, 0.4f}, false, 30.0f * fm, 6.0f * fm,  // match the type-0 spider size
+            {0.4f, 0.28f, 0.4f}, false, 30.0f * fm,             // match the type-0 spider size
+            MinionScale::damage(6.0f, fm, qWpn, MinionScale::SHARE_SPIDER_DRONE),
             12.0f, 4.0f, 0.5f, 8.0f);
         Entity* e = handleGet(pool, h);
         if (e) {
