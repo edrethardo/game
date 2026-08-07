@@ -93,6 +93,10 @@ void Engine::init() {
 #endif
     LOG_INFO("Engine initializing... [build %s %s]", __DATE__, __TIME__);
 
+    // 0xFF = "never visited" for every zone, which is what makes a first entry spawn a full roster.
+    // Zero-initialising would read as "you cleared all of them" and the overworld would be empty.
+    for (u32 i = 0; i < ZONE_SLOTS; i++) m_zoneHostilesLeft[i] = 0xFF;
+
     // Seed the global RNG once from wall-clock entropy so gameplay RNG (loot/procs/
     // particles) varies between runs. The dungeon uses a dedicated per-run seed
     // (m_level.levelSeed), so multiplayer determinism is unaffected by this.

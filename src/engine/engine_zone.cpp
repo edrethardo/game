@@ -363,6 +363,83 @@ Vec3 Engine::zoneArrivalPos(const Zone::ZoneDef& def, u8 fromFloor) {
     return { back.x, 0.0f, back.z + ARRIVAL_BACKOFF };
 }
 
+
+// Record what is left alive here, so coming back does not undo the fight.
+//
+// Called every frame the player is in a zone rather than on the way out: there is no single "leaving
+// a zone" choke (an edge crossing, a portal, a waypoint jump and a town exit are four different
+// paths), and a rule that has to be remembered at four call sites is one that will be missed at a
+// fifth. Counting the active list is a few dozen iterations — cheaper than the bookkeeping to avoid
+// it.
+void Engine::zoneRememberState() {
+    if (!m_level.inZone || m_netRole == NetRole::CLIENT) return;
+    const u32 slot = static_cast<u32>(m_level.zoneFloor) - Zone::FLOOR_MIN;
+    if (slot >= ZONE_SLOTS) return;
+
+    u32 hostiles = 0;
+    bool bossAlive = false;
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        const Entity& e = m_entities.entities[m_entities.activeList[a]];
+        if (e.flags & ENT_DEAD)     continue;
+        if (e.flags & ENT_FRIENDLY) continue;
+        if (e.enemyType == EnemyType::PROP) continue;
+        hostiles++;
+        if (e.isBoss) bossAlive = true;
+    }
+    m_zoneHostilesLeft[slot] = static_cast<u8>(hostiles > 254 ? 254 : hostiles);
+
+    // The boss bit LATCHES on the transition from spawned-and-alive to gone, so it can only be set
+    // by the boss actually dying. Setting it from "no boss present" alone would mark every zone
+    // whose boss has not spawned yet — including, on the first frame after entry, the one we just
+    // walked into.
+    const Zone::ZoneDef* def = Zone::find(m_level.zoneFloor);
+    if (def && def->boss && def->boss[0]) {
+        if (bossAlive) m_zoneBossSeenAlive |= (1ull << slot);
+        else if (m_zoneBossSeenAlive & (1ull << slot)) m_zoneBossDead |= (1ull << slot);
+    }
+}
+
+// Cull a freshly generated roster back to what the player left behind.
+//
+// The zone is regenerated from its seed, so the SAME enemies cannot be restored — only how many.
+// That is the honest limit of a seed-rebuilt world without a per-zone roster in the save, and it is
+// enough for what reads as broken: ground you cleared stays clear, and a half-fought zone does not
+// come back at full strength.
+void Engine::zoneApplyRemembered(const Zone::ZoneDef& def) {
+    if (m_netRole == NetRole::CLIENT) return;
+    const u32 slot = static_cast<u32>(def.floor) - Zone::FLOOR_MIN;
+    if (slot >= ZONE_SLOTS) return;
+    const u8 remembered = m_zoneHostilesLeft[slot];
+    if (remembered == 0xFF) return;                     // never been here — a full roster is right
+
+    // Walk the pool backwards and despawn ordinary hostiles until the count matches. The BOSS is
+    // never culled here: it is handled by its own bit, and losing it to a cull would silently make a
+    // SLAY quest uncompletable.
+    u32 live = 0;
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        const Entity& e = m_entities.entities[m_entities.activeList[a]];
+        if ((e.flags & ENT_DEAD) || (e.flags & ENT_FRIENDLY)) continue;
+        if (e.enemyType == EnemyType::PROP) continue;
+        live++;
+    }
+    for (u32 a = m_entities.activeCount; a-- > 0 && live > remembered; ) {
+        const u32 idx = m_entities.activeList[a];
+        Entity& e = m_entities.entities[idx];
+        if ((e.flags & ENT_DEAD) || (e.flags & ENT_FRIENDLY)) continue;
+        if (e.enemyType == EnemyType::PROP) continue;
+        if (e.isBoss) continue;
+        // Marked DEAD rather than hard-despawned: ENT_DEAD is the state every consumer already
+        // understands (targeting, counting, the corpse-raise scan), and it goes through the same
+        // path an ordinary kill does instead of tearing an entity out from under the pool.
+        e.flags |= ENT_DEAD;
+        e.health = 0.0f;
+        live--;
+    }
+    LOG_INFO("[ZONEX] zone %u remembered: %u hostiles kept (boss %s)",
+             static_cast<u32>(def.floor), live,
+             (m_zoneBossDead & (1ull << slot)) ? "already dead" : "alive/none");
+}
+
 // The zone's fixtures: its waypoint, and the gate into/out of a POI. Both are WORLD ITEMS on
 // sentinel defIds, which buys spawning, snapshot replication and server-authoritative interaction
 // for free — the alternative was a parallel object system, which is exactly the trade the shrine and
@@ -381,12 +458,17 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
     if (!def.peaceful && m_netRole != NetRole::CLIENT)
         spawnFloorEnemies(m_zoneGen, /*tier=*/5, Quest::actOf(def.floor));
 
+    // ...then cull it back to what the player left here last time (see zoneApplyRemembered).
+    if (!def.peaceful) zoneApplyRemembered(def);
+
     // THE ZONE BOSS. Spawned by NAME from the enemy table rather than through the dungeon's
     // spawnFloorBoss path, which keys off bosses.json by FLOOR and expands a room into an arena —
     // neither of which a zone has. A named lookup keeps the boss a piece of zone DATA (one field in
     // ZoneDef) instead of a second table that has to agree with the first about which floor is which.
     // Placed at the zone centre: it is the thing the place is about, and it must not be missable.
-    if (def.boss && def.boss[0] && m_netRole != NetRole::CLIENT) {
+    const u32 bossSlot = static_cast<u32>(def.floor) - Zone::FLOOR_MIN;
+    const bool bossAlreadyDead = bossSlot < ZONE_SLOTS && (m_zoneBossDead & (1ull << bossSlot));
+    if (def.boss && def.boss[0] && !bossAlreadyDead && m_netRole != NetRole::CLIENT) {
         s32 defIdx = -1;
         for (u32 i = 0; i < m_enemyDefs.count; i++)
             if (std::strcmp(m_enemyDefs.defs[i].name, def.boss) == 0) { defIdx = static_cast<s32>(i); break; }
@@ -670,6 +752,8 @@ bool Engine::zoneLinkAllowed(u8 from, u8 to) {
 // travels together and no client can move itself between worlds unilaterally.
 void Engine::updateZoneTransitions() {
     if (m_netRole == NetRole::CLIENT) return;   // the host owns world changes; guests follow the seed
+
+    zoneRememberState();   // survivors + boss, so re-entering does not undo the fight
 
     // THE TOWN'S NORTH GATE — the front door to Act 1, and the only way into the overworld in normal
     // play (the --zone dev door aside). Gated on the INFERNO clear here rather than in the town's

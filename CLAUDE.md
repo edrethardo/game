@@ -372,6 +372,32 @@ have done the same to TristRAM. The return gate and the portal arrival now stand
 boss** in both zones: you step out of the portal, the way back is at your back, and the thing you
 came for is across the ruins.
 
+**ZONES REMEMBER WHAT YOU KILLED, AND THE OVERWORLD'S FIXTURES ARE VISIBLE AT LAST (2026-08-07,
+Aaron: "when I enter another Zone the other one gets reset. I don't like it" / "I couldn't find the
+den of evil in the blood buffer").** Two reports, two unrelated causes, both about the acts feeling
+like scenery rather than a place.
+**(1) THE RESET.** A zone is rebuilt from its seed on every entry, so nothing survived leaving it —
+clear the Den, step into the Blood Buffer, come back and it is full again. `m_zoneHostilesLeft[]`
+records the survivor count per zone and `zoneApplyRemembered` culls a freshly generated roster back
+to it; `m_zoneBossDead` keeps a killed zone boss dead. Recorded EVERY FRAME rather than on the way
+out, because there is no single "leaving a zone" choke — an edge crossing, a portal, a waypoint jump
+and a town exit are four paths, and a rule needed at four sites will be missed at a fifth. The cull
+never touches the BOSS (losing it would make a SLAY quest uncompletable) and marks `ENT_DEAD` rather
+than hard-despawning, so it goes through the state every consumer already understands. Measured:
+re-entering the Blood Buffer keeps 4 of its hostiles, and a fully cleared Cold Storage comes back
+with 0. **Session-scoped ON PURPOSE** — the save format is only changed with Aaron's say-so, and a
+persisted per-zone roster wants a real design (do bodies persist? loot? for how long?). What it fixes
+is the case that actually reads as broken: backtracking through ground you already cleared.
+**(2) THE INVISIBLE DEN.** Its mouth had **no render branch at all** — zone gates and waypoints fell
+through to the generic loot path and drew as a small cube, bobbing and spinning like a dropped item,
+and the fixture-anchor change had put it on a room centre in a far corner. A spinning trinket in open
+country is not findable. Both are FIXTURES now (feet on the floor, no bob, no spin, on the shrine's
+standing-pillar mesh at 2.2x/1.8x scale) and both draw on the MINIMAP, which previously showed
+neither. A shrine still hides until you have been there — it is a reward you find — but a gate and a
+waypoint are the map's furniture and only DIM while unexplored. **Cave destinations use GREY**
+(Aaron's call), keyed off the DESTINATION's terrain so a gate always advertises what is on the other
+side rather than where it stands.
+
 **SHIELD BEARERS FACED THEIR BACKS TO YOU — one wrong sign, and it read as "it only attacks once"
 (Aaron's report, fixed 2026-08-07).** Forward is `(-sin(yaw), _, -cos(yaw))` — BOTH horizontal
 components negated — so the yaw that faces a direction is `atan2f(-x, -z)`. Every one of the twelve

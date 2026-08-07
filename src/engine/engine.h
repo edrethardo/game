@@ -1480,6 +1480,22 @@ private:
     Vec3 zoneRoomCentre(const DungeonResult& gen, u32 idx) const;
     Vec3 m_zoneWaypointPos = {};   // where buildZoneLevel put them; spawnZoneContents reads these,
     Vec3 m_zonePoiPos      = {};   // so the cleared pad and the fixture can never disagree
+
+    // --- ZONE MEMORY (session-scoped) ---
+    // A zone is rebuilt from its seed on every entry, so without this it repopulates completely the
+    // moment you step out and back — clear the Den, walk to the Blood Buffer, come back and it is
+    // full again. Reported as "when I enter another Zone the other one gets reset".
+    //
+    // Deliberately NOT in the save file: the save format is only changed with Aaron's say-so, and a
+    // per-zone roster would want a real design (do bodies persist? loot? for how long?). This is the
+    // session-scoped version, which fixes the case that actually reads as broken — backtracking
+    // through ground you have already cleared.
+    static constexpr u32 ZONE_SLOTS = Zone::FLOOR_MAX - Zone::FLOOR_MIN + 1;
+    u8  m_zoneHostilesLeft[ZONE_SLOTS];   // init'd to 0xFF in Engine::init   // 0xFF = never visited; else survivors at last exit
+    u64 m_zoneBossSeenAlive = 0;               // latch: the boss WAS present, so its absence is a kill
+    u64 m_zoneBossDead = 0;                    // bit per zone slot — a killed zone boss stays dead
+    void zoneRememberState();                  // called while in a zone; records survivors + boss
+    void zoneApplyRemembered(const Zone::ZoneDef& def);   // culls a fresh spawn back to what is left
     bool zoneLinkAllowed(u8 from, u8 to);
 
     // --- Autoplay in the overworld (engine_autoplay_zone.cpp) ---

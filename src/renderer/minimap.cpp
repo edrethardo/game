@@ -533,7 +533,7 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
     if (worldItems) {
         static constexpr f32 SHRINE_R    = 4.5f;   // outer diamond half-extent, px
         static constexpr f32 SHRINE_CORE = 1.6f;   // white centre pip half-extent, px
-        static constexpr u32 MAX_SHRINE_ICONS = 16;   // Shrine::MAX_PER_FLOOR is 2 — pure headroom
+        static constexpr u32 MAX_SHRINE_ICONS = 16;   // shrines (2/floor) + a zone's waypoint + its gates
 
         // Emit the two triangles of a diamond centred on (cx, cy).
         //
@@ -564,7 +564,14 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
         u32 drawn = 0;
         for (u32 i = 0; i < MAX_WORLD_ITEMS && drawn < MAX_SHRINE_ICONS; i++) {
             const WorldItem& wi = worldItems->items[i];
-            if (!wi.active || !isShrine(wi.item)) continue;
+            // Shrines, plus the overworld's two permanent FIXTURES. The acts put a zone's POI mouth
+            // on a room centre that can be a long way from where you walk in — the Den of Evil's
+            // gate generates in a far corner of the Blood Buffer — and with nothing on the map it is
+            // simply not findable in open terrain. Reported as "I couldn't find the Den of Evil".
+            const bool shrine  = isShrine(wi.item);
+            const bool waypnt  = isWaypoint(wi.item);
+            const bool zgate   = isZoneGate(wi.item);
+            if (!wi.active || !(shrine || waypnt || zgate)) continue;
 
             u32 sx, sz;
             if (!LevelGridSystem::worldToGrid(grid, wi.position, sx, sz)) continue;
@@ -572,8 +579,13 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
             const u32 cellIdx = sz * s_gridW + sx;
             if (cellIdx >= MAX_MINIMAP_CELLS) continue;
             const u8 vis = s_visited[cellIdx];
-            if (vis == 0) continue;                 // unexplored — the player has not found it yet
-            const f32 alpha = (vis == 1) ? 0.55f : 1.0f;
+            // A SHRINE stays hidden until you have been there — it is a reward you find. A FIXTURE
+            // does not: a gate and a waypoint are the map's furniture, the things a zone is FOR, and
+            // hiding them turns "where is the Den" into a search of open ground with no cue at all.
+            // They still dim while unexplored, so the map keeps saying what you have and have not
+            // walked, which is the same convention second-hand knowledge already uses here.
+            if (vis == 0 && shrine) continue;
+            const f32 alpha = (vis == 0) ? 0.40f : (vis == 1) ? 0.55f : 1.0f;
 
             f32 normX = (static_cast<f32>(sx) + 0.5f) / static_cast<f32>(s_gridW);
             f32 normZ = (static_cast<f32>(sz) + 0.5f) / static_cast<f32>(s_gridD);
@@ -582,7 +594,12 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
 
             // Outer diamond: one draw per shrine, because each carries its own colour uniform.
             // MAX_PER_FLOOR is 2, so this is at most 2 extra draw calls against a 300-500 budget.
-            const Vec3 c = Shrine::colorOf(Shrine::buffOf(wi.item));
+            // Colour carries WHICH, shape carries WHAT — the rule this icon block already follows.
+            // A gate is the warm orange of a way through; a waypoint the same blue its travel list
+            // and its discovery message use, so the three readings agree.
+            const Vec3 c = zgate  ? Vec3{0.95f, 0.55f, 0.20f}
+                         : waypnt ? Vec3{0.55f, 0.85f, 1.00f}
+                                  : Shrine::colorOf(Shrine::buffOf(wi.item));
             MinimapVertex diamond[6];
             emitDiamond(diamond, icoX, icoY, SHRINE_R);
             glBufferSubData(GL_ARRAY_BUFFER, 0, 6 * sizeof(MinimapVertex), diamond);

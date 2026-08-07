@@ -3,6 +3,7 @@
 #include <SDL.h>
 
 #include "engine/engine.h"
+#include "game/zone_def.h"
 #include "platform/window.h"
 #include "platform/clock.h"
 #include "platform/input.h"
@@ -132,8 +133,18 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         bool isShrineObj = isShrine(wi.item);        // walk-up buff shrine — architecture, not loot
         bool isChestObj  = isChest(wi.item);         // closed treasure chest — the mimic's twin
         bool isStashObj  = isStash(wi.item);         // the town's account stash — oversized + gold
-        bool isFixture   = isShrineObj || isChestObj || isStashObj;
-        f32 renderScale = isGlobeItem ? 0.4f : (isShard ? 0.9f : (isShrineObj ? 1.6f : ITEM_SCALE));
+        // The overworld's two fixtures. These had NO render branch at all, so they fell through to
+        // the generic loot path: a small cube, bobbing and spinning like a dropped item. That is the
+        // whole of "I couldn't find the Den of Evil" — its mouth was a spinning trinket in a corner
+        // of open country, indistinguishable from litter.
+        bool isGateObj   = isZoneGate(wi.item);
+        bool isWayObj    = isWaypoint(wi.item);
+        bool isFixture   = isShrineObj || isChestObj || isStashObj || isGateObj || isWayObj;
+        f32 renderScale = isGlobeItem ? 0.4f
+                        : isShard     ? 0.9f
+                        : isGateObj   ? 2.2f     // a doorway between worlds should read from range
+                        : isWayObj    ? 1.8f
+                        : isShrineObj ? 1.6f : ITEM_SCALE;
         // Shrines and chests are FIXTURES: no bob, no spin, feet on the floor. Loot hovers and
         // turns to catch the eye; a fixture that did the same would read as a pickup — and a
         // bobbing "chest" next to a stone-still mimic would be a free mimic detector.
@@ -164,6 +175,24 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             // in the room and the diamond on the map can never disagree about which shrine this is.
             const Vec3 sc = Shrine::colorOf(Shrine::buffOf(wi.item));
             tint = {sc.x, sc.y, sc.z, 1.0f};
+        } else if (isGateObj || isWayObj) {
+            // Both stand as pillars rather than lying about as loot — the shrine mesh is the tall
+            // standing form this project already has, and a standing stone is what a way through
+            // ought to look like.
+            if (m_shrineMeshId > 0 && m_shrineMeshId < m_meshDefCount)
+                itemMesh = &m_meshDefs[m_shrineMeshId].mesh;
+            if (isWayObj) {
+                tint = {0.55f, 0.85f, 1.00f, 1.0f};   // the blue its travel list and map icon use
+            } else {
+                // GREY FOR CAVES (Aaron's call). The destination's own terrain decides it, so a
+                // gate always advertises what is on the other side rather than where it stands:
+                // the Den's mouth is grey stone from either side of it. Everything else keeps the
+                // warm orange of a way onward, matching its minimap diamond.
+                const Zone::ZoneDef* dst = Zone::find(static_cast<u8>(wi.item.itemLevel));
+                const bool cave = dst && dst->terrain == Zone::Terrain::CAVE;
+                tint = cave ? Vec4{0.58f, 0.58f, 0.62f, 1.0f}
+                            : Vec4{0.95f, 0.55f, 0.20f, 1.0f};
+            }
         } else if (isChestObj) {
             // The dormant mimic's EXACT presentation — chest mesh, default texture, the same
             // chest-brown the mimic tint branch uses in engine_render_entities.cpp. Any visual
