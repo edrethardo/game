@@ -182,3 +182,16 @@ inline Vec4 operator*(const Mat4& m, Vec4 v) {
         m.m[3]*v.x + m.m[7]*v.y + m.m[11]*v.z + m.m[15]*v.w
     };
 }
+
+// The yaw that FACES a world direction, in the engine's convention.
+//
+// Forward is (-sin(yaw)*cos(pitch), sin(pitch), -cos(yaw)*cos(pitch)) — both horizontal components
+// are NEGATED — so the inverse is atan2(-x, -z). Writing atan2(x, z) instead is off by exactly pi,
+// which does not look like a bug in code review: it is a plausible-looking atan2 of a direction
+// vector, and the result is an enemy calmly facing the opposite way.
+//
+// That shipped twice. The SHIELD_BEARER role's "always face toward target for maximum frontal
+// coverage" faced its BACK to the player (The Merge Conflict, Rail Replacement), and the rout/flee
+// state's "faces the way it is running" faced its runners backwards. Both had a comment stating the
+// intent directly above the line that did the opposite.
+inline f32 yawToward(Vec3 dir) { return atan2f(-dir.x, -dir.z); }

@@ -372,6 +372,28 @@ have done the same to TristRAM. The return gate and the portal arrival now stand
 boss** in both zones: you step out of the portal, the way back is at your back, and the thing you
 came for is across the ruins.
 
+**SHIELD BEARERS FACED THEIR BACKS TO YOU — one wrong sign, and it read as "it only attacks once"
+(Aaron's report, fixed 2026-08-07).** Forward is `(-sin(yaw), _, -cos(yaw))` — BOTH horizontal
+components negated — so the yaw that faces a direction is `atan2f(-x, -z)`. Every one of the twelve
+yaw writes in the enemy AI uses that form except two, which used `atan2f(+x, +z)` and are therefore
+**exactly pi out**:
+* `SHIELD_BEARER` ("Always face toward target for maximum frontal coverage") faced **AWAY** from the
+  player — The Merge Conflict and Rail Replacement, permanently showing you their backs.
+* the rout/flee state ("faces the way it is running") faced its runners **backwards**.
+Both had a comment stating the intent directly above the line that did the opposite, which is why
+neither survived review as a suspicious line: an `atan2f` of a direction vector looks completely
+ordinary and the result is an enemy calmly facing the wrong way.
+**The reported symptom was NOT the damage.** Instrumenting the Merge Conflict showed it reaching
+`ATTACK` and cycling its `attackTimer` normally (1.40 -> 0.88 -> 0.80) — enemy melee is distance-
+gated, not facing-gated, so it was hitting the whole time. What the player sees is a monster with its
+back turned playing a swing animation away from them, and `shield_bearer` additionally pushes it into
+`SURROUND`, so it orbits between swings. Turned back-to-front, that reads exactly as "it attacked
+once and then wandered off". Worth remembering when a report is about what an enemy LOOKS like it is
+doing: measure the facing, not just the damage.
+Fixed by deriving it — **`yawToward(dir)` in `core/math.h`** is now the single answer to "what yaw
+faces this direction". Measured live: facing error **180 deg -> 0 deg**, sabotage-verified by
+restoring the old expression (180 deg returns immediately).
+
 **MINIONS NOW HIT WITH THEIR SUMMONER'S WEAPON (2026-08-07, Aaron's call).** The Tinkerer's drones
 and the Combat Engineer's turret were authored as FLAT numbers (6/7/8/3 damage) scaled only by a
 floor ramp — nothing about them read the player's gear. So the two classes whose damage is meant to

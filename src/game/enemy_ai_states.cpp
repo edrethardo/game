@@ -1032,7 +1032,7 @@ void updateHostileStates(Entity& e, u32 i,
 
         e.velocity.x = bestDir.x * effectiveSpeed;
         e.velocity.z = bestDir.z * effectiveSpeed;
-        e.yaw = atan2f(bestDir.x, bestDir.z);   // faces the way it is running
+        e.yaw = yawToward(bestDir);   // faces the way it is running (was pi out, facing back)
         entityMoveAndSlide(e, grid, dt, fleeFrom, PLAYER_HALF_WIDTH);
         if (!(e.flags & ENT_FLYING)) snapEntityToFloor(e, grid);
         e.animTimer += dt;

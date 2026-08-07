@@ -253,7 +253,7 @@ AIStep applyRoleModifiers(Entity& e, u32 i,
     if (e.enemyRole & EnemyRole::SHIELD_BEARER) {
         // Always face toward target for maximum frontal coverage
         Vec3 toTarget = playerEye - e.position;
-        e.yaw = atan2f(toTarget.x, toTarget.z);
+        e.yaw = yawToward(toTarget);   // was atan2f(+x,+z): pi out, so it faced AWAY from the player
         // Prefer surround state to spread out with other melee
         if (e.aiState == AIState::CHASE && dist < e.attackRange * 2.0f) {
             e.aiState = AIState::SURROUND;
