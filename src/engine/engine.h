@@ -379,6 +379,7 @@ private:
         // The act's current goal, and whether the flow field has been built toward it. Per-lane like
         // everything else here: two couch bots can be in different zones on different objectives.
         Vec3 zoneGoal      = {};
+        u8   zoneGoalFloor = 0;      // which WORLD the field was built for — see the rebuild
         bool zoneGoalValid = false;
         f32  zoneTelemT    = 0.0f;   // 1 Hz [ZBOT] act telemetry
         // Boss-floor closing commit (autoplay_combat.h bossCommit*): latched when a 20 s window

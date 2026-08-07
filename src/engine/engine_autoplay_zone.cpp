@@ -159,10 +159,24 @@ void Engine::zoneFillBotView(Autoplay::BotView& v) {
     const bool haveGoal = zoneBotGoal(goal, needsInteract);
     if (!haveGoal) { v.onNormalFloor = false; return; }   // acts finished; the driver ends the run
 
-    // Rebuild the field only when the goal has actually moved. buildFlowField is a full BFS.
-    if (!ap().zoneGoalValid || lengthSq(goal - ap().zoneGoal) > GOAL_REBUILD_DIST * GOAL_REBUILD_DIST) {
+    // Rebuild the field when the goal moves — OR when the WORLD changed under it.
+    //
+    // The world half is not optional and is not obvious. buildZoneLevel re-seeds the grid's flow
+    // field at the zone CENTRE on every entry, and zone goals are frequently at IDENTICAL
+    // coordinates in different worlds — "the north crossing point" is (26, 1.5) in every 52-grid
+    // zone on the road. So a distance-only check saw no movement, skipped the rebuild, and left the
+    // bot following a field aimed at the middle of the map: it walked to the centre and stopped.
+    // Measured as a rogue that did four quests correctly, reached the Deadlock Woods, then wandered
+    // back down the entire act to the first zone and parked dead centre.
+    //
+    // This is the same trap the Descent field documents — a staleness check must key on the WORLD's
+    // identity, not on a value that repeats between worlds.
+    const bool worldChanged = (ap().zoneGoalFloor != m_level.zoneFloor);
+    if (worldChanged || !ap().zoneGoalValid ||
+        lengthSq(goal - ap().zoneGoal) > GOAL_REBUILD_DIST * GOAL_REBUILD_DIST) {
         LevelGridSystem::buildFlowField(m_level.grid, goal);
         ap().zoneGoal      = goal;
+        ap().zoneGoalFloor = m_level.zoneFloor;
         ap().zoneGoalValid = true;
     }
 
