@@ -1473,6 +1473,7 @@ private:
     // clients follow the broadcast) — the town-portal proximity pattern.
     void updateZoneTransitions();
     // Quest gating for both doors (an edge crossing and a portal). Explains its refusals.
+    Vec3 zoneEdgeCrossPos(Zone::Dir dir) const;   // walk HERE to leave; see zone_def.h
     bool zoneLinkAllowed(u8 from, u8 to);
 
     // --- Autoplay in the overworld (engine_autoplay_zone.cpp) ---

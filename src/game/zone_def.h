@@ -364,9 +364,30 @@ constexpr f32 EDGE_TRIGGER_BAND = 2.5f;
 // arrival lands inside the band that sent you there and the transition re-fires immediately — the
 // gate you came through links back where you came from, so the world ping-pongs. Measured at 1290
 // transitions in 25 s (52 world rebuilds a second) when these two were equal.
-constexpr f32 EDGE_ARRIVE_INSET = EDGE_TRIGGER_BAND * 2.0f;
-static_assert(EDGE_ARRIVE_INSET > EDGE_TRIGGER_BAND,
-              "an arriving player must land clear of the band that would send them back");
+// x4, not x2. Clearing the band by a hair is enough for a player who walks in deliberately and
+// nothing else: at x2 the margin is EDGE_TRIGGER_BAND itself (2.5 m), so any push inward-of-nothing
+// — a kite step, a knockback, a strafe — puts you straight back through the gate you came in by, and
+// the neighbour's arrival is 2.5 m from the SAME seam, so it bounces. Measured in the act soak as a
+// bot crossing 52->54->52->54 in ten seconds while under attack, each time with a correct route to
+// somewhere else entirely. The gate corridor is carved from this constant (+1 cell), so widening it
+// widens the cleared ground with it — the rule that a position and the geometry it depends on must
+// come from one number.
+constexpr f32 EDGE_ARRIVE_INSET = EDGE_TRIGGER_BAND * 4.0f;
+static_assert(EDGE_ARRIVE_INSET > EDGE_TRIGGER_BAND * 2.0f,
+              "an arrival must clear the band by more than the band itself, or combat drift re-crosses");
+
+// How deep into a zone the point is that a traveller must REACH to cross its border.
+//
+// The arrival inset (above) is deliberately CLEAR of the trigger band — that is what stops a new
+// arrival bouncing straight back out. It is therefore the wrong place to walk TO: standing on it
+// never crosses anything. A bot aimed at the arrival inset stopped 5 m short of the border and held
+// its interact button at empty grass for ten minutes.
+//
+// Half the band, so the target is unambiguously inside it while staying off the solid border ring.
+constexpr f32 EDGE_CROSS_DEPTH = EDGE_TRIGGER_BAND * 0.6f;
+static_assert(EDGE_CROSS_DEPTH < EDGE_TRIGGER_BAND,
+              "the point you walk to in order to cross must be INSIDE the band that triggers it");
+static_assert(EDGE_CROSS_DEPTH > 1.0f, "...and outside the solid border ring");
 
 // Where the return portal stands in a portal-only zone: south of centre, so it is not on the boss.
 constexpr f32 RETURN_GATE_OFFSET = 8.0f;

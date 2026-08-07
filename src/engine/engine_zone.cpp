@@ -278,6 +278,21 @@ Vec3 Engine::buildZoneLevel(const Zone::ZoneDef& def) {
 // Graveyard or (now) TristRAM dropped the player ON TOP of the boss, with the way back underneath
 // them. Standing the pair off to the south makes the arrival read the way it should: you come out
 // of the portal, the way home is at your back, and the thing you came for is across the ruins.
+// The point a traveller must WALK TO in order to leave by `dir` — inside the trigger band, unlike
+// zoneGatePos, which is where an ARRIVING player is put down and is deliberately clear of it.
+Vec3 Engine::zoneEdgeCrossPos(Zone::Dir dir) const {
+    const f32 W = static_cast<f32>(m_level.grid.width), D = static_cast<f32>(m_level.grid.depth);
+    const f32 cx = W * 0.5f, cz = D * 0.5f;
+    const f32 in = Zone::EDGE_CROSS_DEPTH;
+    switch (dir) {
+        case Zone::Dir::NORTH: return { cx,     0.0f, in };
+        case Zone::Dir::SOUTH: return { cx,     0.0f, D - in };
+        case Zone::Dir::WEST:  return { in,     0.0f, cz };
+        case Zone::Dir::EAST:  return { W - in, 0.0f, cz };
+        default:               return { cx,     0.0f, cz };
+    }
+}
+
 Vec3 Engine::zoneReturnPos(const Zone::ZoneDef& def) const {
     const f32 half = static_cast<f32>(def.gridSize) * 0.5f;
     return { half, 0.0f, half + RETURN_GATE_OFFSET };
@@ -638,8 +653,14 @@ void Engine::updateZoneTransitions() {
     // DISARMED until the player stands clear of every border band. Placing the arrival deeper (above)
     // fixes the arithmetic, but only this makes the rule robust: any future gate position, grid size
     // or knockback that leaves a player inside a band on arrival would otherwise re-open the loop.
-    const bool inAnyBand = (p.z <= EDGE_TRIGGER_BAND) || (p.z >= D - EDGE_TRIGGER_BAND) ||
-                           (p.x <= EDGE_TRIGGER_BAND) || (p.x >= W - EDGE_TRIGGER_BAND);
+    // The RE-ARM test uses a wider band than the trigger. Re-arming the moment you are technically
+    // out of the trigger band leaves you one step from being sent back, which is how a fight next to
+    // a border turns into a world rebuild. Arming only once genuinely clear means a transition is
+    // always something you travelled to.
+    constexpr f32 REARM_BAND = EDGE_TRIGGER_BAND * 2.0f;
+    const f32 armBand = m_zoneEdgeArmed ? EDGE_TRIGGER_BAND : REARM_BAND;
+    const bool inAnyBand = (p.z <= armBand) || (p.z >= D - armBand) ||
+                           (p.x <= armBand) || (p.x >= W - armBand);
     if (!m_zoneEdgeArmed) {
         if (inAnyBand) return;          // still standing where we arrived — do not re-fire
         m_zoneEdgeArmed = true;         // clear of the border: transitions are live again

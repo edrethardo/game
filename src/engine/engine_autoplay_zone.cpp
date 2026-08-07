@@ -65,12 +65,12 @@ Vec3 Engine::autoplayGoalPos() const {
 //
 // Returns false when there is nothing to head for — the acts are finished, or this is a world the
 // route does not describe — which is what ends the run.
-bool Engine::zoneBotGoal(Vec3& outGoal, bool& outIsHop) {
+bool Engine::zoneBotGoal(Vec3& outGoal, bool& outNeedsInteract) {
     const Zone::ZoneDef* def = Zone::find(m_level.zoneFloor);
     if (!def) return false;
 
     const u64 mask = m_questMask[m_localPlayerIndex];
-    outIsHop = false;
+    outNeedsInteract = false;
 
     // 1. Is there unfinished business HERE? A quest zone is not left until its quest is done — which
     //    is also what the gate would enforce, but a bot that walks to a door it cannot open reads as
@@ -120,11 +120,17 @@ bool Engine::zoneBotGoal(Vec3& outGoal, bool& outIsHop) {
     const ZoneRoute::Hop hop = ZoneRoute::nextHop(m_level.zoneFloor, goalZone, mask);
     if (hop.kind == ZoneRoute::HopKind::NONE) return false;
 
-    outIsHop = true;
+    // AN EDGE IS WALKED INTO; ONLY A PORTAL IS PRESSED. This distinction is the whole difference
+    // between a bot that travels and one that stands at a border holding a button — which is what
+    // the first act soak measured: five classes frozen 1.9 m from an OPEN gate for ten minutes,
+    // `rem=descend mv=0`, because the goal was flagged interactable so the brain stopped at the
+    // descend radius and pressed. A border has nothing to press, and the crossing fires on
+    // proximity, so the bot must keep walking until it does.
     if (hop.kind == ZoneRoute::HopKind::EDGE) {
-        outGoal = zoneGatePos(hop.dir);
+        outGoal = zoneEdgeCrossPos(hop.dir);   // INSIDE the trigger band, not the arrival inset
         return true;
     }
+    outNeedsInteract = true;
 
     // A PORTAL hop: aim at the fixture itself. Its destination rides in the item's itemLevel byte,
     // which is what makes one object serve both directions — so match on that rather than on
@@ -149,8 +155,8 @@ bool Engine::zoneBotGoal(Vec3& outGoal, bool& outIsHop) {
 void Engine::zoneFillBotView(Autoplay::BotView& v) {
     v.onNormalFloor = true;                 // an act IS a world the brain can express, now
 
-    Vec3 goal{}; bool isHop = false;
-    const bool haveGoal = zoneBotGoal(goal, isHop);
+    Vec3 goal{}; bool needsInteract = false;
+    const bool haveGoal = zoneBotGoal(goal, needsInteract);
     if (!haveGoal) { v.onNormalFloor = false; return; }   // acts finished; the driver ends the run
 
     // Rebuild the field only when the goal has actually moved. buildFlowField is a full BFS.
@@ -173,7 +179,7 @@ void Engine::zoneFillBotView(Autoplay::BotView& v) {
                  static_cast<u32>(ZoneRoute::objectiveZone(mask)),
                  static_cast<f64>(goal.x), static_cast<f64>(goal.z),
                  static_cast<f64>(length(goal - m_localPlayer.position)),
-                 static_cast<int>(isHop),
+                 static_cast<int>(needsInteract),
                  static_cast<f64>(m_localPlayer.position.x),
                  static_cast<f64>(m_localPlayer.position.z),
                  static_cast<f64>(m_localPlayer.health));
@@ -181,7 +187,7 @@ void Engine::zoneFillBotView(Autoplay::BotView& v) {
 
     // The "door" is the next hop. During a quest there is no door at all, which is what keeps the bot
     // in the zone doing the work instead of drifting toward the exit it is not allowed through yet.
-    v.doorActive  = isHop;
+    v.doorActive  = needsInteract;
     v.distToDoor  = length(goal - m_localPlayer.position);
 
     // A SLAY quest is a boss floor in every way that matters to the bot: the way onward is sealed
@@ -205,8 +211,8 @@ bool Engine::zoneAutoplayStep() {
     // and ended every run the instant it arrived. A cheap recompute is worth more than a cached bool
     // whose correctness depends on call order inside a function that is itself ordered for other
     // reasons.
-    Vec3 goal{}; bool isHop = false;
-    if (zoneBotGoal(goal, isHop)) return false;
+    Vec3 goal{}; bool needsInteract = false;
+    if (zoneBotGoal(goal, needsInteract)) return false;
 
     if (ZoneRoute::objectiveZone(m_questMask[m_localPlayerIndex]) == 0) {
         LOG_INFO("[AUTOPLAY] ACTS COMPLETE — both acts finished in zone %u; ending the run",

@@ -346,7 +346,11 @@ TEST_CASE("every zone's RESPAWN anchor clears the transition band by a wide marg
     // arrival's own margin is EDGE_ARRIVE_INSET - EDGE_TRIGGER_BAND = 2.5 m, which is what this
     // deliberately beats.
     constexpr f32 MIN_MARGIN = 5.0f;
-    CHECK(Zone::EDGE_ARRIVE_INSET - Zone::EDGE_TRIGGER_BAND < MIN_MARGIN);   // the old behaviour failed it
+    // NOTE: this used to also assert that the GATE arrival's own margin fell short of MIN_MARGIN,
+    // as a way of showing the respawn point beat it. That stopped being true when EDGE_ARRIVE_INSET
+    // was widened x2 -> x4 (combat drift was bouncing bots back through the gate they arrived by),
+    // and an assertion that only holds because a neighbouring constant is small is a trap. What
+    // still matters — and is what this pins — is that a respawn is not in a doorway at all.
 
     for (u32 i = 0; i < Zone::COUNT; i++) {
         const Zone::ZoneDef& z = Zone::ZONES[i];
