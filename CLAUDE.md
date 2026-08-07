@@ -372,6 +372,20 @@ have done the same to TristRAM. The return gate and the portal arrival now stand
 boss** in both zones: you step out of the portal, the way back is at your back, and the thing you
 came for is across the ruins.
 
+**ALL NINE CLASSES NOW FINISH BOTH ACTS UNATTENDED (2026-08-07).** `tools/overworld_soak.py`, nine
+classes concurrently from the Blood Buffer: **9/9 completed Act 2's last quest**, 9 quests and 18-34
+world changes each, `deaths == revives` throughout, zero crashes and zero routing strands. The acts
+are the first content in this project that was bot-verified end to end BEFORE being called done.
+Four defects had to be fixed to get there and every one of them would have hit a human player too:
+the Bank portal generating walled in (above), an arrival that ping-ponged under fire, a flow field
+left stale across a world change, and a drifting bot falling into the town and being handed a
+DUNGEON RUN instead of the act it was halfway through. Only the last is bot-specific.
+**Read the class SPREAD, not just the pass count.** Marksman/rogue/ranger finish in ~10 minutes and
+18 crossings; the paladin took 34 crossings and twice as long, and in an earlier run sat 15 minutes
+on The Garbage Collector while dealing damage the whole time. That is the SUMMON/low-DPS class gap
+the dungeon soaks already flagged, now visible in the acts — a gating SLAY quest has no time limit,
+so a weak build does not fail, it just takes a very long time. Worth tuning, not a blocker.
+
 **A ZONE FIXTURE COULD GENERATE WALLED IN — the Bank portal was (found by the act soak, fixed
 2026-08-07).** The waypoint and POI mouths were stamped at fixed FRACTIONS of the grid with a 5x5 pad
 cleared around them. That is safe on WILDERNESS, whose interior starts OPEN — and zones now choose
