@@ -700,7 +700,13 @@ void Engine::updateAutoplay(f32 dt) {
     // an unkillable statue the bot pins asleep by staring at it — and those appear on the early floors.
     // Off the early floors the spin-around reads as odd and the escape ladder handles other wedges, so
     // the one watchdog whose whole job is "shooting an untriggered gargoyle forever" is early-floor only.
-    if (m_level.currentFloor <= 10 &&
+    // The floor gate is the DUNGEON's early floors, where the stone gargoyles live — plus zones,
+    // which field their own ambush body (Mind The Gap, Act 2). Written explicitly: a zone leaves
+    // m_level.currentFloor at whatever dungeon floor preceded it (it is never re-assigned on zone
+    // entry — the world's identity there is zoneFloor), so `currentFloor <= 10` happens to pass in
+    // the overworld today by accident. Anyone who later makes currentFloor honest would silently
+    // switch this remedy off in the acts; saying `|| inZone` means the intent survives that fix.
+    if ((m_level.currentFloor <= 10 || m_level.inZone) &&
         Autoplay::lookBehindDue(ap().noProgressTimer, ap().lookBehindDone)) {
         ap().lookBehindDone  = true;
         ap().lookBehindTimer = Autoplay::LOOK_BEHIND_HOLD;
@@ -2099,6 +2105,7 @@ Autoplay::BotView Engine::buildBotView() {
             v.skillIsCounter[s] = (id == SkillId::DEFLECT);
             // Spends the swarm to deal damage and kills it. Last resort only — see autoplay_combat.h.
             v.skillIsMinionSacrifice[s] = (id == SkillId::DETONATE_SWARM);
+            v.skillIsMinionBuff[s]      = (id == SkillId::OVERCLOCK);
             // Recorded for EVERY unlocked slot, castable or not: the reserve rule below has to know
             // what a summon costs precisely when the pool cannot yet afford it.
             v.skillCost[s] = def->energyCost;
@@ -2642,6 +2649,18 @@ Autoplay::BotView Engine::buildBotView() {
 
     v.targets     = s_targets;
     v.targetCount = n;
+
+    // Minions a buff would actually reach. The predicate MIRRORS SkillSystem::fireOverclock exactly
+    // (friendly, alive, npcClass NONE — class NPCs like the cleric are skipped there, so counting
+    // them here would fire the buff on an empty swarm and waste the pool the reserve just protected).
+    // Counted in the driver rather than passed as a flag because the pure policy must stay engine-free.
+    v.minionCount = 0;
+    for (u32 a2 = 0; a2 < m_entities.activeCount; a2++) {
+        const Entity& e = m_entities.entities[m_entities.activeList[a2]];
+        if (!(e.flags & ENT_FRIENDLY) || (e.flags & ENT_DEAD)) continue;
+        if (e.npcClass != NpcClass::NONE) continue;
+        v.minionCount++;
+    }
 
     // TARGET STICKINESS: resolve the remembered entity identity back to a slot in THIS tick's array
     // (it is re-sorted by distance every tick, so the index from last tick means nothing). Not found

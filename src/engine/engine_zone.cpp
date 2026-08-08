@@ -829,8 +829,14 @@ void Engine::enterZone(u8 zoneFloor, u8 fromFloor) {
     }
 
     worldResetPools();
-    const Vec3 center = buildZoneLevel(*def);
+    // CLEAR BEFORE BUILDING. worldClearLevelFlags() resets m_level.layoutStyle to BSP_ROOMS (it is
+    // the shared "which special world am I in" reset), so running it AFTER buildZoneLevel threw away
+    // the style the zone had just recorded — every zone reported `rooms` for the rest of its life.
+    // Harmless by luck (wilderness and rooms are both FLAT, so every consumer that branches on style
+    // — the AI's open-floor bubble, the bot's stacked-floor tests — happened to want the same answer)
+    // but wrong, and it made the stall telemetry lie about which floor you were looking at.
     worldClearLevelFlags();
+    const Vec3 center = buildZoneLevel(*def);
     m_level.inZone    = true;
     m_level.zoneFloor = zoneFloor;
     m_zoneEdgeArmed   = false;   // re-arms once the player steps clear of the border
@@ -863,8 +869,14 @@ void Engine::enterZoneClient(u8 zoneFloor) {
         return;
     }
     worldResetPools();
-    const Vec3 center = buildZoneLevel(*def);
+    // CLEAR BEFORE BUILDING. worldClearLevelFlags() resets m_level.layoutStyle to BSP_ROOMS (it is
+    // the shared "which special world am I in" reset), so running it AFTER buildZoneLevel threw away
+    // the style the zone had just recorded — every zone reported `rooms` for the rest of its life.
+    // Harmless by luck (wilderness and rooms are both FLAT, so every consumer that branches on style
+    // — the AI's open-floor bubble, the bot's stacked-floor tests — happened to want the same answer)
+    // but wrong, and it made the stall telemetry lie about which floor you were looking at.
     worldClearLevelFlags();
+    const Vec3 center = buildZoneLevel(*def);
     m_level.inZone    = true;
     m_level.zoneFloor = zoneFloor;
     m_zoneEdgeArmed   = false;   // re-arms once the player steps clear of the border

@@ -265,6 +265,11 @@ constexpr u32 GROUP_MIN    = 3;        // the aim target + 2 more inside GROUP_R
 // Either alone is too loose: low health with a single target is a fight to walk away from, and a
 // cluster at full health is exactly when the swarm should be chewing on it instead.
 constexpr f32 DETONATE_HP_FRAC = 0.35f;
+
+// Minions that must be out before a minion BUFF is worth the pool. Three is a swarm rather than a
+// straggler: Swarm Deploy lands several drones at once, so this reads as "the swarm is up" and not
+// "one drone survived".
+constexpr u32 MINION_BUFF_MIN = 3;
 inline f32 engageCeiling(const BotView& v, const Doctrine& d) {
     const f32 band = d.engageMax * v.weaponRange;
     return (band > THREAT_RADIUS) ? band : THREAT_RADIUS;
@@ -598,6 +603,12 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
             if (v.skillIsSummon[s] && v.skillCost[s] > summonReserve) summonReserve = v.skillCost[s];
         auto affordable = [&](s8 s) {
             if (v.skillIsSummon[s]) return true;                       // this IS the thing we save for
+            // A MINION BUFF is exempt too, but only with a swarm worth multiplying. Overclock doubles
+            // drone damage, so for a class whose damage COMES from its minions it is worth more than
+            // the Swarm Deploy the reserve protects — but only while there are drones out. Reserving
+            // against it took it from 0.7 casts/min to ZERO (measured): the reserve solving its own
+            // problem by muting the one skill that multiplies everything it was saving for.
+            if (v.skillIsMinionBuff[s]) return v.minionCount >= MINION_BUFF_MIN;
             return (v.energy - v.skillCost[s]) >= summonReserve;
         };
         // SUMMONS FIRST — whenever one is off cooldown. A drone / turret / queen is the one skill
@@ -608,6 +619,20 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
         // group/AoE branch on purpose — the engine's own per-skill cooldown is the rate limit, and the
         // damage branches below still get every tick the summons are cooling down.
         for (s8 s = 3; s >= 0; s--) if (v.castableSkill[s] && v.skillIsSummon[s]) { slot = s; break; }
+        // ...THEN THE OCCASIONAL OVERCLOCK. Ranked BELOW the summons (a drone that exists beats a buff
+        // on drones that do not) and ABOVE the damage dump, so it lands while the swarm is out rather
+        // than competing with filler for the leftovers. It needs no rate limit of its own: the swarm
+        // gate plus the skill's own cooldown already make it periodic, which is what "occasional"
+        // means here — it fires when there is something to multiply, then goes quiet.
+        if (slot < 0)
+            for (s8 s = 3; s >= 0; s--)
+                // Gated through affordable(), which already owns the "is there a swarm worth
+                // multiplying" rule. Re-testing minionCount here would state the same fact twice —
+                // and did: a sabotage of one copy left the other standing, so the test that was
+                // supposed to prove the carve-out passed with the carve-out disabled.
+                if (v.castableSkill[s] && v.skillIsMinionBuff[s] && affordable(s)) {
+                    slot = s; break;
+                }
         if (slot < 0 && cluster >= GROUP_MIN) {
             for (s8 s = 3; s >= 0; s--)
                 if (v.castableSkill[s] && v.skillIsAoe[s] && affordable(s) &&

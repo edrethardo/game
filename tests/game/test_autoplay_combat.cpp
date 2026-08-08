@@ -1493,3 +1493,36 @@ TEST_CASE("the reserve is inert for a class with no summons") {
     v.skillIsSummon[0] = true; v.skillCost[0] = 40.0f;
     CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == -1);
 }
+
+// A MINION BUFF is worth the pool the summon reserve protects — but only with a swarm out.
+//
+// DISCRIMINATING ON THE SWARM ALONE: identical view, identical energy, identical reserve; the only
+// difference between the two cases is how many drones are alive. Overclock doubles drone damage, so
+// for a class whose damage COMES from its minions it beats the Swarm Deploy being saved for — which
+// is why reserving against it measured 0.7 casts/min -> ZERO, the reserve muting the one skill that
+// multiplies everything it was saving for.
+TEST_CASE("a minion buff is cast with a swarm out and withheld without one") {
+    auto view = [](u32 minions) {
+        BotView v = tinkererView();
+        BotTarget t{}; t.pos = {0, 1.7f, -10.0f}; t.dist = 10.0f; t.hasLOS = true;
+        static BotTarget s_t; s_t = t;
+        v.targets = &s_t; v.targetCount = 1;
+        v.minionCount = minions;
+        for (u8 i = 0; i < 4; i++) { v.castableSkill[i] = false; v.skillIsSummon[i] = false; }
+        v.skillIsSummon[1]     = true;    // a summon EXISTS (so a reserve is held) but is cooling
+        v.skillCost[1]         = 40.0f;
+        v.castableSkill[3]     = true;    // the buff is the only castable slot
+        v.skillIsMinionBuff[3] = true;
+        v.skillCost[3]         = 30.0f;
+        v.energy               = 45.0f;   // under cost+reserve: only the exemption can afford it
+        return v;
+    };
+    SUBCASE("swarm is up — the buff fires") {
+        BotView v = view(MINION_BUFF_MIN);
+        CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == 3);
+    }
+    SUBCASE("no swarm — the buff is withheld and the pool stays for the summon") {
+        BotView v = view(0);
+        CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot != 3);
+    }
+}

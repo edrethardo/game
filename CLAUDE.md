@@ -395,6 +395,51 @@ country is not findable. Both are FIXTURES now (feet on the floor, no bob, no sp
 the MINIMAP, which previously showed neither. A shrine still hides until you have been there — it is
 a reward you find — but a gate and a waypoint are the map's furniture and only DIM while unexplored.
 
+**THREE AUTOPLAY STALLS IN THE ACTS, EACH HIDDEN BY THE ONE BEFORE IT (2026-08-08).** A 9-class
+40-minute act soak went **7/9 -> 8/9 -> 8/9 -> 9/9** as they came off, and none was visible until its
+predecessor was cleared.
+**(1) THE EXIT BULL HAD NO GEOMETRY VETO.** Every other movement producer is checked against
+`stepAllowed`; the bull aimed at the goal and held FORWARD through whatever was in the way. Measured:
+a warrior 6.1 m from the Den's gate pressed a wall for **2198 s**, with the routed field
+(`fdir=+0.17,+0.99`) and the commanded movement (`mdir=-0.29,-0.96`) pointing OPPOSITE ways — A* had
+answered with a first leg through the obstacle, and because a returned path counts as "routed" the
+wall-aware field never got its turn. It now vetoes the heading, falls back to the field, and
+**UNLATCHES** when both are blocked. The unlatch is the load-bearing half: a latched bull deliberately
+PREEMPTS the escape ladder, so one that keeps its latch while refusing to move starves the only rescue
+built for a wedge — the bot would stand still instead of walking into the wall, which is not an
+improvement.
+**(2) BOXED-IN HAD NO DETECTOR OUTSIDE THE DESCENT.** The veto refused the route AND all four fan
+detours, leaving the brain nothing to command (`flow=0.00 mv=0`). `boxedDetected` existed but was
+FOUR_STORY-scoped; extended to ZONES, which are flat by construction (a zone's terrain maps to
+WILDERNESS / GAUNTLET / HUB, never a stacked style). Deliberately NOT extended to VERTICAL_HALL — the
+code carries a measured A/B showing sideways-first is the wrong remedy on a narrow ramp.
+**(3) MINION DAMAGE DISARMS EVERY PROGRESS-GATED REMEDY — the generalisable one.** `combatProgress`
+zeroes `noProgressTimer` on any damage dealt, INCLUDING a summoner's drones while the player stands
+still. Measured: a Tinkerer stood at exactly **(14.9, 46.4) for thirty minutes** in Piccadilly with
+three hostiles 2.5 m away and `fire=0` throughout, on a CLEAR_ZONE quest that cannot complete while a
+dormant AMBUSH body is left standing (Act 2 fields one — Mind The Gap). `npt` never exceeded **1.3 s**
+all run and the look-behind fired **ZERO** times. Same shape as the exit watchdog that "latched 0% of
+the time". Replaced with a BEHAVIOURAL standoff test — targets visible, none engaged, not moving —
+which cannot be confused with a real fight (which fires) or travel (which moves). Fired 169 times in
+the passing run.
+**The thread through all three: a positional or behavioural failure needs a positional or behavioural
+detector.** A progress clock cannot see a bot standing still while something else makes progress for it.
+
+**`worldClearLevelFlags` was CLOBBERING the zone's layout style (found while chasing the above).**
+`enterZone`/`enterZoneClient` ran `buildZoneLevel` — which records `m_level.layoutStyle` — and THEN
+the shared clear, which resets it to BSP_ROOMS. So every zone reported `rooms` for its whole life
+(measured: `style=rooms` while standing in zone 58). Harmless by luck — wilderness and rooms are both
+FLAT, so every consumer that branches on style wanted the same answer — but it made the stall
+telemetry lie about which floor you were looking at. The clear now runs BEFORE the build. Verified
+live: zone 52 reports `wilderness`, the Den `cavern`.
+**`m_level.currentFloor` is NOT re-assigned on zone entry and deliberately stays that way.** A zone's
+identity is `zoneFloor`; `scalingEffectiveFloor()` already special-cases `inZone` (so enemy scaling
+never depended on it). Making it "honest" would set it to 52-96 and reach **131 sites across 46
+symbols** — including the render theme table, which would light open country with the Void's purple.
+The one gate that quietly depended on the stale value is now explicit: the look-behind reads
+`currentFloor <= 10 || inZone`, so a later cleanup cannot silently switch the gargoyle remedy off in
+the acts.
+
 **EVERY INTERIOR NOW HAS ITS OWN DOORWAY (2026-08-08, Aaron: "make the other instances reachable
 through properly modelled entrances like the den of evil; create the Stone Circle for the TristRAM
 entrance and the Gates for the Hellgate Localhost act").** The cave mouth fixed ONE of six
@@ -496,10 +541,21 @@ against one straggler is a fight to leave, and a healthy bot in a pack should le
 48.2/min, Swarm Queen 3.6 -> 8.5/min, **Detonate 3.0 -> 0**; Engineer turret 1.6 -> 19.7/min, Shock
 Bolt 30.6 -> 1.5, Tesla 6.5 -> 0.5, and Mech Overdrive unchanged (0.96 -> 0.98) — the heal still
 fires, which is the check that the reserve did not simply mute the class.
-**KNOWN TRADE, not yet decided:** Overclock (the drone damage buff) goes 0.7 -> **0**. It competes
-for the same pool and the reserve now outranks it. It was already almost never cast, but a buff that
-MULTIPLIES the minions is arguably worth more than one extra Swarm Deploy — if so the fix is to
-exempt minion-buff skills from the reserve, not to lower it.
+**...AND OVERCLOCK IS BACK, ON A SWARM GATE (2026-08-08, Aaron: "put in the occasional
+overclock").** The reserve had taken the drone damage buff from 0.7 casts/min to **0** — the reserve
+solving its own problem by muting the one skill that MULTIPLIES everything it was saving for. Fixed
+as predicted: minion-BUFF skills are exempt from the reserve like summons, but only while
+`minionCount >= MINION_BUFF_MIN` (3) — a swarm worth doubling rather than one surviving drone. The
+count uses the SAME predicate `fireOverclock` does (friendly, alive, `npcClass NONE`; class NPCs are
+skipped there), so the decision to cast and the thing the cast does cannot drift. Ranked BELOW the
+summons (a drone that exists beats a buff on drones that do not) and ABOVE the damage dump. No rate
+limit of its own — the swarm gate plus the skill's cooldown make it periodic, which is what
+"occasional" means here. Measured live, 7 min Tinkerer: Swarm Deploy 44.7/min, Queen 5.4,
+**Overclock 0 -> 5.3**, Detonate still 0; firing on 7-11 drones a time.
+**The rule lives in ONE place, and it took a failed sabotage to notice.** It was first written into
+both `affordable()` and the cast branch — so disabling one copy left the other and the test passed
+with the carve-out off. The cast branch now goes through `affordable()`. Worth remembering that a
+sabotage which does NOT fail is evidence about the TEST, not permission to move on.
 
 **FINISHING THE ACTS PARKED THE BOT IN THE RIFT (Aaron: "the bot stopped doing anything in
 hellgate localhost", fixed 2026-08-07).** The acts' end-of-run called `exitAutoplayRun()`, which only

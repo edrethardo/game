@@ -157,6 +157,13 @@ struct BotView {
     // reactively — on an incoming melee swing or a tracked projectile about to land — exactly like
     // the perfect-block tap. The counter IS the class fantasy (Aaron), so spending it blind wastes it.
     bool skillIsCounter[4] = {};
+    // Per-slot: does this skill BUFF existing minions rather than create or spend them (Tinkerer
+    // Overclock). Worth casting only when there is a swarm to multiply — see minionCount.
+    bool skillIsMinionBuff[4] = {};
+    // How many minions the buff would actually reach. Counted with the SAME predicate fireOverclock
+    // uses (friendly, alive, npcClass NONE) so the decision to cast and the thing the cast does
+    // cannot drift apart — a count that included the class NPCs would fire it on an empty swarm.
+    u32 minionCount = 0;
     // Per-slot: does this skill CONSUME the minions it uses (Tinkerer Detonate Swarm — every drone
     // you control explodes and then DIES)? For a summoner that is not a damage skill, it is spending
     // the build's whole engine for one burst, and the biggest-first dump treated it as ordinary
