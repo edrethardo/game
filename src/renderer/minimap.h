@@ -38,5 +38,9 @@ namespace Minimap {
               const EntityPool& entities,
               const Vec3* otherPlayers = nullptr, const bool* otherActive = nullptr,
               u32 otherPlayerCount = 0,
-              const WorldItemPool* worldItems = nullptr);
+              const WorldItemPool* worldItems = nullptr,
+              // The overworld sentinel floor we are standing on (0 = not in a zone). Only used to
+              // decide which zone-gate icon to draw: a cave mouth is a cave mouth from BOTH sides,
+              // so the glyph needs to know where you are, not just where the gate leads.
+              u8 zoneFloor = 0);
 }

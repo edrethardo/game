@@ -872,8 +872,16 @@ void Engine::update(f32 dt) {
             // starting a whole new run would be the game refusing to be quit. Singleplayer only:
             // a host silently re-rolling a new dungeon would strand its guests, so an online session
             // still ends at the menu, where the teardown below disconnects it properly.
+            // ...and never over a hero the PLAYER loaded. The roll-on rotates the class and starts
+            // a fresh Normal floor-1 run, which is right for a soak (the mode minted that character)
+            // and wrong for a saved hero — the same hazard that hit the ACTS rail, where a loaded
+            // endgame Rogue came back as a floor-1 Paladin. Both rails carry the guard; fixing one
+            // and leaving the other is how a defect survives in the seat next door.
+            bool loadedHero = false;
+            for (u8 L = 0; L < m_splitPlayerCount && L < MAX_LOCAL_PLAYERS; L++)
+                if (m_laneLoadedFromSave[L]) loadedHero = true;
             const bool nextRun = m_autoplayActive && botAdvance && !toTown &&
-                                 m_netRole == NetRole::NONE;
+                                 m_netRole == NetRole::NONE && !loadedHero;
             if (m_autoplayActive)
                 LOG_INFO("[AUTOPLAY] ending advance after %.1f s -> %s", m_autoplayEndT,
                          toTown ? "town" : (nextRun ? "next run" : "menu"));

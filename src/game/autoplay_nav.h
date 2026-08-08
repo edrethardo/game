@@ -419,6 +419,10 @@ inline bool mayDescend(const DescendCtx& c) {
 // running in the bot's favour.) ONE-SHOT per stuck episode: a bot that keeps spinning is neither
 // useful nor watchable, so the latch only re-arms after real progress.
 inline constexpr f32 LOOK_BEHIND_AT   = 3.0f;   // s of no progress before the look-behind (Aaron's number)
+// Seconds of STANDOFF — visible targets, none engaged, no movement — before looking away. Longer
+// than LOOK_BEHIND_AT because this one can fire during a legitimate lull (reloading behind cover,
+// waiting out an i-frame), and a spin-around mid-fight is worse than a second of patience.
+inline constexpr f32 STANDOFF_AT      = 5.0f;
 // Long enough for the aim smoother to actually complete the half-turn (a 180 deg sweep takes ~0.9 s
 // at the shipped flick rate + ease-out) and still face away for a few ticks — the wake test runs
 // every tick, so a few is plenty.

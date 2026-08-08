@@ -1422,6 +1422,459 @@ def gen_gargoyle(height=1.6):
     return mb
 
 
+def _crag(x, z):
+    """Deterministic 0-2 voxel jitter for rock surfaces.
+
+    Pure integer math on purpose. `assets/meshes/*.obj` is GITIGNORED and rebuilt on every CI
+    machine, so a mound built from `random` (whose stream is not guaranteed stable across Python
+    versions) would produce a different silhouette per platform — invisible locally, and the kind of
+    difference that only shows up as "the rock looks wrong in the release build".
+    """
+    h = (x * 73856093) ^ (z * 19349663)
+    h = (h ^ (h >> 13)) & 0x7FFFFFFF
+    return h % 3
+
+
+# The skin pixel reserved for the unlit throat of the cave. `add_voxel_model` maps a voxel to a skin
+# pixel by (gx, gy) ALONE, so a column that holds both the mouth's inner wall and the mound's outer
+# rock cannot have two colours — the interior voxels are therefore remapped onto one dedicated pixel
+# via uv_overrides (the same mechanism that stops eye colour bleeding to the back of a head). It is
+# the skin's top-LEFT corner: the mound is a dome, so its widest column is at the base and its
+# tallest is at the centre, leaving (min_gx, max_gy) permanently empty. gen_cave_mouth asserts that.
+CAVE_VOID_PIXEL = "top-left (px 0, py h-1)"
+
+
+def _reserved_pixel(filled):
+    """A (gx, gy) the model never occupies, for uv_overrides to point dark voxels at.
+
+    add_voxel_model maps a voxel to a skin pixel by (gx, gy) ALONE, so a column holding both an
+    interior face and an exterior one cannot have two colours. The fix is to remap every interior
+    voxel onto ONE pixel no exterior voxel uses. Which pixel that is must be DERIVED, never typed:
+    cave_mouth hard-coded a row index, then grew a row when crown chunks were added and silently
+    painted its own throat rock-grey. Scans the (gx, gy) projection and returns the first free
+    corner-most cell, so the answer moves with the model.
+    """
+    proj = {(x, y) for (x, y, _z) in filled}
+    min_gx = min(p[0] for p in filled); max_gx = max(p[0] for p in filled)
+    min_gy = min(p[1] for p in filled); max_gy = max(p[1] for p in filled)
+    # The corner is FIXED, not searched. The skin generator cannot see the mesh, so both sides have
+    # to derive the same answer independently — and the only way to do that is a convention: the
+    # TOP-LEFT cell, which the skin writes as (0, h - 1). Searching for "any free pixel" looks more
+    # robust and is strictly worse: the day the top-left fills in, the mesh would quietly move its
+    # void elsewhere while the skin kept painting the corner, and the throat would render as rock
+    # with no error anywhere. Fail loudly here instead — a model that needs the corner must leave
+    # it empty.
+    if (min_gx, max_gy) in proj:
+        raise AssertionError(
+            "top-left (gx=%d, gy=%d) is occupied — it is reserved for the uv_override void pixel "
+            "and the skin paints it at (0, h-1). Trim the model's top-left column." % (min_gx, max_gy))
+    return (min_gx, max_gy)
+
+
+def _interior_voxels(filled, cavity):
+    """Voxels whose every OPEN face looks into `cavity` — the ones to paint as void.
+
+    Derived from the geometry, NOT from distance. Where a wall is thin a single voxel is both the
+    inner face and the outer face, and a "near the back" rule darkens it, smearing black across the
+    outside beside the opening. -Y is excluded: nothing sees a prop's underside.
+    """
+    EXPOSED = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, 0, 1), (0, 0, -1))
+    dark = set()
+    for v in filled:
+        open_faces = [d for d in EXPOSED
+                      if (v[0] + d[0], v[1] + d[1], v[2] + d[2]) not in filled]
+        if open_faces and all((v[0] + d[0], v[1] + d[1], v[2] + d[2]) in cavity for d in open_faces):
+            dark.add(v)
+    return dark
+
+
+def gen_grave_gate(height=3.0):
+    """THE BURIAL GROUNDS GATE — a cemetery arch of stone posts and iron bars, standing ajar.
+
+    D2's Burial Grounds are entered through a gate in a wall, and a gate is the opposite statement
+    to a cave: a cave says the land opened up, a gate says someone FENCED this and meant to keep it
+    shut. Ours guards the Deprecated Graveyard, where the dead keep being brought back, so it is
+    the entrance that should look maintained and still failing at its job — hence the leaf standing
+    open rather than a neat closed pair.
+
+    Origin at the feet (Y=0), facing -Z. ~2.9 x 3.0 m with a 1.4 m opening.
+    """
+    mb = MeshBuilder()
+    N = 14
+    vs = height / N
+    HW = 6          # half-width in voxels
+    GAP = 3         # half-width of the opening
+
+    filled = set()
+    for gx in range(-HW, HW + 1):
+        for gz in range(-1, 2):
+            if abs(gx) <= GAP:
+                # The arch over the opening: a shallow curve rather than a flat lintel, integer-only
+                # (a table, not trig — libm differs across platforms and assets rebuild on CI).
+                rise = (0, 0, 1, 2)[min(abs(gx), 3)]
+                for gy in range(N - 3 + rise, N):
+                    filled.add((gx, gy, gz))
+                continue
+            # The piers: thicker at the base, capped.
+            top = N - 2 if abs(gx) >= HW - 1 else N - 3
+            for gy in range(top):
+                filled.add((gx, gy, gz))
+            for gy in range(top, top + 1):          # cap stone, one cell proud
+                for oz in (-1, 0, 1):
+                    filled.add((gx, gy, oz))
+
+    # The iron leaf, swung INWARD and standing open — vertical bars on a frame. Placed on one side
+    # only: a symmetric pair reads as closed even when it is not, and "ajar" is the whole story.
+    for gy in range(1, N - 4):
+        for gx in range(-GAP + 1, 0):
+            if gx % 2 == 0 or gy in (1, N - 5):     # bars, plus top and bottom rails
+                filled.add((gx, gy, 2))
+
+    add_voxel_model(mb, filled, vs, offset=(0.0, 0.0, 0.0))
+    return mb
+
+
+def gen_tube_entrance(height=3.2):
+    """WHITECHAPEL TERMINAL — the Underground entrance you take down into Act 2.
+
+    You do not walk through this one, you DESCEND it, and that had to be visible from outside or the
+    act transition reads as another border crossing. So the shape is a stairwell: two low flanking
+    walls, a dark opening in the ground between them, and the roundel on a post beside it — the one
+    piece of London signage everybody recognises from across a street.
+
+    Origin at the feet (Y=0). ~3.2 x 3.2 m, opening 1.5 m wide.
+    """
+    mb = MeshBuilder()
+    N = 14
+    vs = height / N
+    HW = 6
+    GAP = 3
+
+    filled = set()
+    # Low parapet walls either side of the stair mouth — waist height, so the hole between them is
+    # the thing you see, not the walls.
+    for gx in range(-HW, HW + 1):
+        if abs(gx) <= GAP:
+            continue
+        for gz in range(-3, 4):
+            for gy in range(4):
+                filled.add((gx, gy, gz))
+    # The stair treads dropping away into the dark, stepping down toward +Z so the descent is
+    # legible from the front rather than being a flat black rectangle.
+    for step, gz in enumerate(range(-3, 4)):
+        for gx in range(-GAP + 1, GAP):
+            gy = max(0, 3 - step)
+            filled.add((gx, gy, gz))
+
+    # The roundel: a bar across a ring, on a post. Drawn as a solid disc with a slot rather than a
+    # true annulus — at this voxel size a one-cell ring reads as noise.
+    POST_X = HW + 1
+    for gy in range(9):
+        filled.add((POST_X, gy, 0))
+    for dy in range(-2, 3):
+        for dx in range(-2, 3):
+            if dx * dx + dy * dy > 5:
+                continue
+            filled.add((POST_X + dx, 11 + dy, 0))
+
+    add_voxel_model(mb, filled, vs, offset=(0.0, 0.0, 0.0))
+    return mb
+
+
+def gen_service_door(height=2.8):
+    """BANK STATION — the maintenance door off the Circle Line.
+
+    Not a monument and not a hole: a DOOR, in a frame, in a bit of tunnel wall. Bank is reached by
+    a service passage rather than a public entrance, and the joke of *Insufficient Funds* lands
+    better if the way in is the unglamorous staff door beside the money.
+
+    Deliberately the plainest entrance in the game — it is the one you would walk past.
+    Origin at the feet (Y=0). ~2.2 x 2.8 m.
+    """
+    mb = MeshBuilder()
+    N = 14
+    vs = height / N
+    HW = 4
+
+    filled = set()
+    # A slab of tunnel wall, so the door reads as set INTO something rather than free-standing.
+    for gx in range(-HW, HW + 1):
+        for gy in range(N):
+            for gz in range(-1, 1):
+                edge = abs(gx) >= HW - 1 or gy >= N - 2
+                if edge:
+                    filled.add((gx, gy, gz))
+    # The door leaf itself, recessed one cell — the recess is what makes it a doorway and not a
+    # painted rectangle.
+    for gx in range(-HW + 2, HW - 1):
+        for gy in range(N - 2):
+            filled.add((gx, gy, 1))
+    # A kick plate and a push bar, the two details that say "staff only".
+    for gx in range(-HW + 2, HW - 1):
+        filled.add((gx, 1, 2))
+        filled.add((gx, 7, 2))
+
+    add_voxel_model(mb, filled, vs, offset=(0.0, 0.0, 0.0))
+    return mb
+
+
+def gen_stone_circle(height=3.2):
+    """THE CAIRN STONES — the standing-stone ring that opens the way to TristRAM.
+
+    Diablo 2's Tristram is not a place on the road: it is a RED PORTAL raised at the Cairn Stones in
+    the Stony Field, which is why the town reads as a massacre you drop into rather than somewhere
+    you pass through. Ours needs the same beat, so the entrance had to be a MONUMENT you activate,
+    not a hole you walk into — the opposite silhouette to the cave mouth on purpose.
+
+    FIVE stones, as in D2, set in a ring you can see through. Seeing through it is the whole read:
+    a solid mass would be another rock, while gaps at eye height say "this is arranged, someone put
+    it here". Heights are deliberately UNEQUAL and one stone LEANS — the zone's quest is *Align the
+    Standing Stones*, whose joke is that monuments to abandoned features cannot agree with one
+    another, so the disagreement has to be visible before you fix it.
+
+    Origin at the feet (Y=0). Ring diameter ~3.6 m inside a 4.4 m footprint, tallest stone ~3.2 m.
+    """
+    mb = MeshBuilder()
+    N = 14                      # voxels tall
+    vs = height / N
+    R = 6                       # ring radius in voxels
+
+    filled = set()
+    # (angle-ish offsets on a hand-placed ring, stone height, lean)  — hand-placed rather than
+    # trig-generated so the ring stays deterministic integer maths, the same rule the level
+    # generators follow: libm differs across platforms and these assets are rebuilt on CI.
+    STONES = (
+        (  0, -R,  13, 0),      # north — the tallest, the "true" stone
+        (  R, -3,  11, 0),      # north-east
+        (  R,  3,   9, 1),      # south-east — LEANS: the one that will not agree
+        ( -R,  3,  12, 0),      # south-west
+        ( -R, -3,  10, 0),      # north-west
+    )
+    for (sx, sz, sh, lean) in STONES:
+        for gy in range(sh):
+            # A leaning stone shifts one cell outward over its top third: enough to read as tilted
+            # from any angle, not so much that it looks knocked over.
+            off = 1 if (lean and gy > sh * 2 // 3) else 0
+            for ox in range(2):
+                for oz in range(2):
+                    # Taper the top so the stones read as weathered menhirs, not fenceposts.
+                    if gy >= sh - 2 and (ox + oz) == 2:
+                        continue
+                    filled.add((sx + ox + off * (1 if sx > 0 else -1), gy, sz + oz))
+
+    # A fallen stone lying flat between two of the uprights — every real circle has one down, and it
+    # breaks the ring's rhythm so the arrangement reads as ancient rather than built yesterday.
+    for gx in range(-2, 3):
+        for gz in range(R - 1, R + 1):
+            filled.add((gx, 0, gz))
+
+    # A low altar slab at the centre: the thing the portal opens above, and what makes the middle of
+    # the ring read as the point of interest rather than empty grass.
+    for gx in range(-2, 3):
+        for gz in range(-2, 3):
+            for gy in range(2):
+                if abs(gx) == 2 and abs(gz) == 2:
+                    continue        # bevel the corners
+                filled.add((gx, gy, gz))
+
+    add_voxel_model(mb, filled, vs, offset=(0.0, 0.0, 0.0))
+    return mb
+
+
+def gen_hell_gate(height=4.4):
+    """THE HELLGATE — the rift forced open at Piccadilly Circus, the way into Hellgate: Localhost.
+
+    The gate is the one thing in Hellgate London you never simply walk through, so the act's finale
+    could not be an ordinary border: *Privilege Escalation* is the beat where you force it. The
+    silhouette therefore has to read as BREACHED rather than built — two slabs of shattered masonry
+    shoved apart with something wrong burning between them.
+
+    Deliberately the tallest entrance in the game (4.4 m against the cave mouth's 3.4) and the only
+    one that is bilaterally symmetric: a cave mouth is a natural accident and a stone circle is
+    weathered, but a rift is a WOUND, and a wound is symmetric about the thing that tore it.
+
+    The throat between the jambs is real unlit geometry remapped onto a single reserved skin pixel
+    (see _reserved_pixel) — the same trick the cave mouth uses, and for the same reason: a tinted
+    prop reads as a decorated doorway, while genuine black reads as depth.
+    """
+    mb = MeshBuilder()
+    N = 18
+    vs = height / N
+    HW = 7                       # half-width in voxels (15 cells across)
+    DEPTH = 3                    # z half-extent
+    GAP = 2                      # half-width of the rift opening
+
+    filled = set()
+    for gx in range(-HW, HW + 1):
+        for gz in range(-DEPTH, DEPTH + 1):
+            inner = abs(gx) <= GAP
+            # The jambs: full height, thicker at the base, chewed at the top edge.
+            top = N - 1 - _crag(gx, gz) - (2 if abs(gx) > HW - 2 else 0)
+            if inner:
+                # The opening itself — floor to lintel is void, so nothing is added here except the
+                # lintel above it.
+                if gz < -DEPTH + 1 or gz > DEPTH - 1:
+                    continue
+                for gy in range(N - 4, top):
+                    filled.add((gx, gy, gz))     # the lintel spanning the gap
+                continue
+            for gy in range(top):
+                filled.add((gx, gy, gz))
+
+    # Shattered chunks torn off the jambs — the detail that says "forced" rather than "opened".
+    for (jx, jz, jh) in ((-6, 0, 2), (6, 0, 2), (-4, 2, 1), (4, -2, 1), (-7, -1, 1), (7, 1, 1)):
+        col = [p[1] for p in filled if p[0] == jx and p[2] == jz]
+        if not col:
+            continue
+        for gy in range(max(col) + 1, max(col) + 1 + jh):
+            filled.add((jx, gy, jz))
+
+    # The rift cavity: everything the opening carved out, used to classify which voxels face INTO it.
+    cavity = {(gx, gy, gz)
+              for gx in range(-GAP, GAP + 1)
+              for gy in range(0, N - 4)
+              for gz in range(-DEPTH, DEPTH + 1)
+              if (gx, gy, gz) not in filled}
+    dark = _interior_voxels(filled, cavity)
+    void_px = _reserved_pixel(filled)
+    uv_overrides = {v: void_px for v in dark}
+
+    add_voxel_model(mb, filled, vs, offset=(0.0, 0.0, 0.0), uv_overrides=uv_overrides)
+    return mb
+
+
+def gen_cave_mouth(height=3.4):
+    """Cave entrance — a craggy rock outcrop with a black arched mouth cut into its face.
+
+    Diablo 2's Act 1 cave entrances (the Den of Evil, the Cave, the Hole) are not doorways and not
+    monuments: they are a HOLE IN A ROCK. What makes one readable from across a field is the
+    CONTRAST — a pale weathered outcrop with a pure black opening at its base — not detail in the
+    rock. So the silhouette is plain, the mouth is big, and the interior is genuinely unlit geometry
+    rather than a dark-tinted prop.
+
+    Origin at the feet (Y=0), unrotated, mouth facing -Z. Nothing places these with a yaw, so the
+    facing is fixed — hence the shape is a forward-leaning RIDGE rather than a dome: it carries full
+    height along its whole front and slopes away to the back and sides, so from the front you get a
+    rock face with an arch in it and from anywhere else you get a rock.
+
+    Footprint ≈ 4.2 x 3.0 m, ≈3.4 m tall, with a 1.0 x 1.8 m opening — a doorway a person walks
+    into, inside a landmark that reads from across a field. Kept under INTERACT_RANGE (3.5 m) at the
+    half-width so a player standing at the mouth can always reach the item at its centre.
+    """
+    mb = MeshBuilder()
+    # Resolution is deliberately COARSE. At 17 voxels tall this came out at 4300 triangles — 2.5x
+    # the shrine and 3x a boss — for a prop that is only ever a lump of rock. Dropping to 13 keeps
+    # the silhouette and the arch intact, costs about a third of that, and the chunkier voxels read
+    # more like the rest of the game's art anyway.
+    N = 13                     # voxels tall — sets the resolution of everything below
+    vs = height / N
+    RX, RZ = 8, 5              # outcrop half-extents in voxels (17 x 11 cells)
+
+    filled = set()
+    for gx in range(-RX, RX + 1):
+        for gz in range(-RZ, RZ + 1):
+            fx = gx / RX
+            fz = gz / RZ
+            # Plan: an ellipse stretched along Z, so the front and back round off rather than
+            # ending in slab corners.
+            if fx * fx + 0.45 * fz * fz > 1.0:
+                continue
+            ridge = 1.0 - 0.55 * fx * fx                        # tall at the middle, low at the sides
+            prof = 1.0 - 0.60 * max(0.0, fz) ** 2               # front at full height, back slopes off
+            # Two octaves of jitter: per-cell grit plus 2x2 lumps. One octave alone leaves the
+            # outline reading as a smooth loaf — the large-scale bumps are what make it rock.
+            hh = int(N * ridge * prof) + _crag(gx, gz) + _crag(gx >> 1, (gz >> 1) + 31)
+            hh = max(2, min(N, hh))
+            for gy in range(hh):
+                filled.add((gx, gy, gz))
+
+    # Jagged crown chunks. The bare profile above is a smooth dome — from the front it reads as a
+    # beanie hat, not a rock. A handful of deterministic blocks stacked on chosen columns break the
+    # outline. Placed away from |gx| <= MOUTH_HW+1 so they can never roof over the arch.
+    # Each is 2x2 in plan: a 1x1 column reads as an antenna, not as broken rock.
+    for (jx, jz, jh) in ((-5, 1, 2), (4, -1, 2), (6, 1, 1), (-3, 3, 1), (5, -3, 2), (-7, 0, 1)):
+        col = [p[1] for p in filled if p[0] == jx and p[2] == jz]
+        if not col:
+            continue
+        top = max(col) + 1
+        for gy in range(top, top + jh):
+            for ox in range(2):
+                for oz in range(2):
+                    filled.add((jx + ox, gy, jz + oz))
+
+    # A couple of fallen boulders flanking the mouth. Kept inside |gx| <= RX so they do not widen
+    # the skin grid — they are set dressing, not silhouette.
+    for sx in (-1, 1):
+        bx = sx * (RX - 3)
+        for gy in range(0, 2):
+            for gx in range(bx, bx + 2):
+                for gz in range(-RZ - 2, -RZ):
+                    filled.add((gx, gy, gz))
+
+    # --- carve the arch -------------------------------------------------------------------------
+    # A rounded arch: full width to the spring line, then closing to a crown. Carved from gy=1 up,
+    # so the outcrop's ground layer survives as a threshold stone under the opening — which is also
+    # what gives the recess a floor to be dark, instead of showing the grass through it.
+    MOUTH_H = 7                # crown height in voxels (~1.8 m — a person's doorway)
+    MOUTH_HW = 2               # half-width (5 voxels ~ 1.3 m)
+    MOUTH_DEPTH = 7            # how far back the recess reaches from the front of the outcrop
+    SPRING = 4                 # height at which the arch starts closing
+
+    def half_width(gy):
+        if gy <= SPRING:
+            return MOUTH_HW
+        t = (gy - SPRING) / (MOUTH_H - SPRING)   # 0 at the spring line, 1 at the crown
+        return int(round(MOUTH_HW * math.sqrt(max(0.0, 1.0 - t * t))))
+
+    carved = set()
+    for gy in range(1, MOUTH_H):
+        hw = half_width(gy)
+        if hw < 0:
+            continue
+        for gx in range(-hw, hw + 1):
+            for gz in range(-RZ, -RZ + MOUTH_DEPTH):
+                cell = (gx, gy, gz)
+                if cell in filled:
+                    filled.discard(cell)
+                    carved.add(cell)
+
+    # --- mark the throat ------------------------------------------------------------------------
+    # A surviving voxel is INTERIOR — the visible inside of the cave — when every open face it has
+    # looks into the cavity. Back wall, side walls, ceiling and threshold floor all satisfy that;
+    # the rock beside the mouth does not, because it also faces open sky.
+    #
+    # Derived from the carve rather than listed, so it cannot drift out of step with the arch shape,
+    # and stated as "not exposed to the outside" rather than "near the back" — a distance rule looks
+    # equivalent and is not: where the outcrop is thin, one voxel is both inner wall and outer face,
+    # and darkening it paints a black smear across the rock beside the opening.
+    #
+    # -Y is excluded from the exposure test: the underside of a model resting on the ground is never
+    # seen, and counting it would leave the recess floor lit like open rock.
+    EXPOSED_DIRS = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, 0, 1), (0, 0, -1))
+    dark = set()
+    for (cx, cy, cz) in carved:
+        for (dx, dy, dz) in EXPOSED_DIRS + ((0, -1, 0),):
+            n = (cx + dx, cy + dy, cz + dz)
+            if n not in filled:
+                continue
+            if all((n[0] + ex, n[1] + ey, n[2] + ez) in filled or
+                   (n[0] + ex, n[1] + ey, n[2] + ez) in carved
+                   for (ex, ey, ez) in EXPOSED_DIRS):
+                dark.add(n)
+
+    min_gx = min(p[0] for p in filled)
+    max_gy = max(p[1] for p in filled)
+    # The reserved void pixel must be a column no real voxel occupies, or the throat's black would
+    # be painted onto the rock as well. Cheap to assert, and silent + ugly if it ever stops holding.
+    assert not any(p[0] == min_gx and p[1] == max_gy for p in filled), \
+        "cave_mouth: reserved void pixel (min_gx, max_gy) is occupied — pick another"
+
+    uv_overrides = {v: (min_gx, max_gy) for v in dark}
+    add_voxel_model(mb, filled, vs, offset=(-0.5 * vs, 0, -0.5 * vs),
+                    uv_overrides=uv_overrides)
+    return mb
+
+
 def gen_shrine(height=2.0):
     """Shrine — a broad stone plinth with a floating rune crystal above it. Origin at feet (Y=0).
     Deliberately WIDE and chunky: an earlier, slimmer version rendered as a thin white pole from a
@@ -5770,6 +6223,16 @@ MESH_TYPES = {
         "func": gen_shrine,
         "desc": "Shrine — stone plinth with a floating rune crystal. Params: --height",
         "default_file": "shrine.obj",
+    },
+    "grave_gate": {"func": gen_grave_gate, "desc": "Cemetery gate — the Burial Grounds. Params: --height", "default_file": "grave_gate.obj"},
+    "tube_entrance": {"func": gen_tube_entrance, "desc": "Underground stair entrance — Act 2. Params: --height", "default_file": "tube_entrance.obj"},
+    "service_door": {"func": gen_service_door, "desc": "Maintenance door — Bank Station. Params: --height", "default_file": "service_door.obj"},
+    "stone_circle": {"func": gen_stone_circle, "desc": "Cairn-stone ring — the TristRAM portal. Params: --height", "default_file": "stone_circle.obj"},
+    "hell_gate": {"func": gen_hell_gate, "desc": "The forced rift — Hellgate: Localhost entrance. Params: --height", "default_file": "hell_gate.obj"},
+    "cave_mouth": {
+        "func": gen_cave_mouth,
+        "desc": "Cave entrance — craggy outcrop with a black arched mouth. Params: --height",
+        "default_file": "cave_mouth.obj",
     },
     "goblin": {
         "func": gen_goblin,

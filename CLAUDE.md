@@ -391,12 +391,176 @@ is the case that actually reads as broken: backtracking through ground you alrea
 **(2) THE INVISIBLE DEN.** Its mouth had **no render branch at all** — zone gates and waypoints fell
 through to the generic loot path and drew as a small cube, bobbing and spinning like a dropped item,
 and the fixture-anchor change had put it on a room centre in a far corner. A spinning trinket in open
-country is not findable. Both are FIXTURES now (feet on the floor, no bob, no spin, on the shrine's
-standing-pillar mesh at 2.2x/1.8x scale) and both draw on the MINIMAP, which previously showed
-neither. A shrine still hides until you have been there — it is a reward you find — but a gate and a
-waypoint are the map's furniture and only DIM while unexplored. **Cave destinations use GREY**
-(Aaron's call), keyed off the DESTINATION's terrain so a gate always advertises what is on the other
-side rather than where it stands.
+country is not findable. Both are FIXTURES now (feet on the floor, no bob, no spin) and both draw on
+the MINIMAP, which previously showed neither. A shrine still hides until you have been there — it is
+a reward you find — but a gate and a waypoint are the map's furniture and only DIM while unexplored.
+
+**EVERY INTERIOR NOW HAS ITS OWN DOORWAY (2026-08-08, Aaron: "make the other instances reachable
+through properly modelled entrances like the den of evil; create the Stone Circle for the TristRAM
+entrance and the Gates for the Hellgate Localhost act").** The cave mouth fixed ONE of six
+interiors; the other five were still the generic 1.5x standing stone, so an act's finale and a
+side-cave announced themselves identically. Five new meshes + skins: **stone_circle** (the Cairn
+Stones -> TristRAM), **hell_gate** (the forced rift -> Hellgate: Localhost), **grave_gate** (a
+cemetery gate standing ajar -> the Deprecated Graveyard), **tube_entrance** (a stair mouth with the
+roundel -> Act 2), **service_door** (a staff door -> Bank Station).
+**The kind is AUTHORED on the interior, not derived from terrain** (`ZoneDef::entrance`,
+`Zone::Entrance`). Terrain cannot tell them apart — TristRAM and the Graveyard are both
+OPEN_COUNTRY, and their entrances are a ring of standing stones and an iron gate. The interior owns
+the answer because the interior is what the doorway leads to; the field it stands in is incidental.
+**`entranceFor(here, there)` is the single choke** both consumers go through — the world renderer
+(mesh + scale + skin) and the minimap (glyph + colour) — so the thing in front of you and the
+symbol on your map can never disagree. It resolves from whichever side is an INTERIOR, so a doorway
+is the same object from both directions; `isCaveBoundary` survives as a thin wrapper.
+**The field is APPENDED to ZoneDef, never inserted.** The table initialises positionally, so a
+field added in the middle shifts every value after it into the wrong member — `underground` and
+`gridSize` would have silently swapped meaning. Appending also lets the 11 road zones omit it and
+get STONE (0) by value-initialisation, which is right for them.
+**The reserved void-pixel contract is now pinned rather than searched.** `_reserved_pixel` fixes
+the TOP-LEFT cell and ASSERTS the model leaves it empty, because the skin generator cannot see the
+mesh and both sides must derive the same cell independently. A "find any free pixel" fallback looks
+more robust and is strictly worse: the day the corner fills in, the mesh would quietly move its
+void while the skin kept painting the corner — the cave mouth's rock-grey-throat bug with no error
+anywhere.
+**Minimap: shape carries WHAT, colour carries WHICH.** Everything you WALK INTO keeps the arch
+(cave / graveyard / stair / door) and is told apart by colour; the two that are not doorways get
+their own glyphs — `emitRing` (five dots, because at icon size a thin outlined circle smudges into
+a blob while five marks stay countable and read as ARRANGED) and `emitRift` (a narrow pointed tear:
+an arch is a way through that was always there, a rift is a wound). Neither carries a centre pip,
+for the arch's own reason — the empty middle IS the read. Winding stays load-bearing.
+**Pinned by test in `test_zone_def.cpp`**: each pair resolves to its kind from BOTH sides, the cave
+predicate stays true for the cave ONLY (so a stone circle cannot inherit the cave mouth's mesh), a
+road-to-road border is not an entrance at all, and **every interior must author a kind** — an
+unauthored one still works, falling back to the plain marker, which is exactly the silent downgrade
+this work exists to remove. Sabotage-verified: authoring TristRAM as CAVE fails three assertions by
+name.
+
+**...and a cave entrance is now a CAVE, not a tinted pillar (2026-08-07, Aaron: "remodel the cave
+entrances using the tools").** The first pass reused the shrine's standing-pillar mesh with a grey
+tint. Diablo 2's Act 1 entrances are not monuments — they are a HOLE IN A ROCK, and that silhouette
+is the whole reason you can spot one across a field, because it says *you go INTO this* where a
+tinted stone only says *something is here*. **`cave_mouth`** (`gen_mesh.py` + `gen_skin.py`) is a
+4.2 x 3.0 m craggy outcrop with a 1.3 x 1.8 m black arch cut into its face.
+**The shape is a forward-leaning RIDGE, not a dome, and that is forced by the fact that nothing
+places these with a yaw**: it carries full height along its whole front and slopes away to the back
+and sides, so the front third reads as a rock face with an arch in it and every other angle reads as
+a rock. A dome with a hole in it was the first attempt and looked like a beanie hat; the jagged
+crown chunks exist for the same reason.
+**The throat is real unlit geometry, and it needed a trick.** `add_voxel_model` maps a voxel to a
+skin pixel by **(gx, gy) alone**, so a column holding both the mouth's inner wall and the outcrop's
+outer rock cannot have two colours. Every interior voxel is therefore remapped by `uv_overrides`
+onto ONE reserved pixel — the skin's top-left corner, which a ridge never occupies (the generator
+asserts it). "Interior" is derived as *every open face of this voxel looks into the cavity*, NOT as
+"near the back": a distance rule looks equivalent and is not, because where the outcrop is thin one
+voxel is both inner wall and outer face, and darkening it smears black across the rock beside the
+opening.
+**A cave mouth is a cave mouth from BOTH sides** (`Zone::isCaveBoundary`, shared by the world
+renderer and the minimap so the model and the symbol can never disagree). Keying on the destination
+alone — the original rule — dressed the Den's exit as an orange standing stone floating inside a
+cave.
+**The minimap glyph is a D2-style ARCH** (`emitArch`, three quads): two jambs and a lintel, grey,
+with **no centre pip** — the pip would fill in the doorway, which is the entire read. Shrines and
+other gates keep their diamonds, so shape carries WHAT and colour carries WHICH, the rule that icon
+block already followed. Winding is load-bearing there exactly as it is for the diamond.
+**Two bugs surfaced while doing it.** (1) Gates and waypoints **had never been scaled at all**: the
+model-matrix chain gates the item-mesh branch on `defId < m_itemDefCount`, and a sentinel defId
+(0xFFF4) is far outside that range, so both fell through to the 0.3-scale cube fallback — a 2 m
+standing stone drawn at 60 cm. They were documented as "2.2x/1.8x" and were in fact 0.3x, which is
+most of why the Den's mouth was hard to find even after it got a mesh. (2) The reserved void pixel
+was written as a literal row index; adding the crown chunks grew the grid 13 -> 14 rows and silently
+painted the throat rock-grey. It derives from `h - 1` now. `check_skin_grids.py` catches a SIZE
+mismatch but cannot know which pixel carries meaning — a load-bearing pixel has to derive itself.
+
+**THE SUMMON CLASSES SPENT THEIR POOL ON FILLER AND BLEW UP THEIR OWN SWARM (Aaron, 2026-08-07:
+don't "burn through all their mana with attack skills", prefer minions and keep them on cooldown; use
+the Tinkerer's suicide move "as last resort instead of always").** Three defects, and the first is a
+one-word classification error with the largest effect.
+**(1) TESLA COIL WAS CLASSED AS A SUMMON.** `fireTeslaCoil` is a 360-degree query that damages and
+staggers — it leaves nothing behind. Listed in `skillIsSummon` it inherited the "cast whenever off
+cooldown" priority that sits ABOVE every other branch, so the Combat Engineer spent 25 energy every
+5 s on it and could never afford the 40-energy Deploy Turret when that came up. Measured: turret
+**1.6 -> 19.7 casts/min** once it was declassified (it is an AoE, radius 4, so `skillIsAoe` already
+routes it to the group branch at the right priority).
+**(2) NOTHING RESERVED ENERGY FOR A COOLING SUMMON.** `castableSkill` reports "affordable right
+now", and the case that matters is a summon that is merely on cooldown: by the time it lands the
+biggest-first dump has drained the pool on filler, so it stays unaffordable through its whole next
+window. The policy now keeps the most expensive summon's cost in hand (`summonReserve`) and lets
+other class skills spend only above that line. Summons are exempt from their own reserve, and the
+reserve is 0 for a class with no summons, so every other class is untouched — pinned by a
+DISCRIMINATING test that changes only whether a summon exists in the kit.
+**(3) DETONATE SWARM WAS ORDINARY FILLER.** It consumes every drone and kills them. With Queen and
+Deploy both cooling it was simply the biggest castable slot, so the Tinkerer blew its own swarm
+**~3x a minute, forever**. Withheld from the dump entirely and fired only as a last resort — hurt
+(under `DETONATE_HP_FRAC`) AND with a real cluster to blow. Both halves are required: low health
+against one straggler is a fight to leave, and a healthy bot in a pack should let the swarm chew.
+**Measured, same class and same content, against the pre-fix soak:** Tinkerer Swarm Deploy 30.0 ->
+48.2/min, Swarm Queen 3.6 -> 8.5/min, **Detonate 3.0 -> 0**; Engineer turret 1.6 -> 19.7/min, Shock
+Bolt 30.6 -> 1.5, Tesla 6.5 -> 0.5, and Mech Overdrive unchanged (0.96 -> 0.98) — the heal still
+fires, which is the check that the reserve did not simply mute the class.
+**KNOWN TRADE, not yet decided:** Overclock (the drone damage buff) goes 0.7 -> **0**. It competes
+for the same pool and the reserve now outranks it. It was already almost never cast, but a buff that
+MULTIPLIES the minions is arguably worth more than one extra Swarm Deploy — if so the fix is to
+exempt minion-buff skills from the reserve, not to lower it.
+
+**FINISHING THE ACTS PARKED THE BOT IN THE RIFT (Aaron: "the bot stopped doing anything in
+hellgate localhost", fixed 2026-08-07).** The acts' end-of-run called `exitAutoplayRun()`, which only
+DISARMS the driver — it does not leave the world. So a bot that completed both acts logged
+"[AUTOPLAY] ACTS COMPLETE" and then stood in Hellgate: Localhost with nobody driving, forever.
+Measured in a 24-minute soak: three of three passing classes emitted **zero `[ZBOT]` lines after the
+completion line**, one of them standing there for 17 minutes. This is the THIRD appearance of one
+shape — the credits park and the death-screen strand were the others — and each time it is the BEST
+outcome the mode can produce that stops it playing. Worth stating as a rule: **an autoplay ending is
+not a place to stop, it is a place to continue from**, and any new terminal state needs a
+continuation or it becomes a park.
+**...and the first version of that fix LOOPED FOREVER, which found a third instance of the
+flag-leak.** `startGame` clears `inTown` / `inArena` / `townPortalActive` from its OWN ad-hoc list
+rather than calling `worldClearLevelFlags()`, and that list had never gained `inZone`/`zoneFloor`.
+So the roll-on built a fresh dungeon floor 1 while the level was STILL flagged as zone 66 — and
+`updateAutoplay` gates its entire act branch on `m_level.inZone`, so with the quest chain already
+complete it ended the "act" again on the very next frame and minted another run. Measured as the
+whole nine-class roster cycling in **one second**. Fixed by adding the two lines; the real lesson is
+the one this file already states twice (the town portal, the Hellforge surcharge) and which a third
+occurrence should settle: **a world flag cleared by a per-site list will drift — the clear belongs in
+`worldClearLevelFlags`, and `startGame` is the last entry point still keeping its own copy.**
+
+Fixed by ending the acts the way the standard dungeon ending already does: `autoplayNextRun()` mints
+the next run. Same guards as that path — `saveAllCharacters()` FIRST (the roll-on moves the lane onto
+a fresh slot, so it is the last chance to write the hero that just finished) and singleplayer only,
+since a host silently re-rolling a dungeon would strand its guests. A STRANDED route rolls on too,
+deliberately: `zoneAutoplayStep` has already logged the WARN naming the broken link, so nothing is
+hidden, and a bot that keeps playing beats one parked in a zone it cannot leave.
+
+**ENEMIES SANK INTO THE GROUND — the state that fights you was the one state that never re-grounded
+(reported twice, finally fixed 2026-08-07).** Two independent defects; the first pass at this only
+found a third, smaller one (`entityMoveAndSlide` aborting an airborne arc after gravity had already
+moved `position.y`, leaving `velocity.y == 0` over a solid cell so nothing could recover it) and
+took the rate from 18.4% to ~9.6%. The rest was these:
+**(1) GROUNDING WAS A THING EACH AI STATE HAD TO REMEMBER, AND `ATTACK` DID NOT.**
+`entityMoveAndSlide`'s Y block is gated on `ENT_FLYING`, so a GROUND enemy's height comes only from
+the airborne-arc branch or from whichever state handler calls `snapEntityToFloor` — and there is no
+shared call after the state switch. Nine of the twelve states call it; **`AIState::ATTACK`'s only
+call is buried inside the ranged-attacker-lost-LOS branch**. So a melee enemy creeping at you at 60%
+speed mid-swing — literally the reported symptom, "when attacking and moving towards the player" —
+was never re-grounded for as long as the fight lasted, and any Y error it already carried became
+permanent the moment it engaged. Two later writers make it worse and are unreachable from inside a
+state handler anyway: the entity-entity **separation push** and the stuck-detector's **teleport**
+both write position AFTER every handler has run, and neither re-grounds.
+Fixed with a **per-tick grounding pass at the end of `EnemyAI::update`**, the vertical twin of the
+wall-ejection net that already sits there for exactly this reason ("rather than harden each call
+site and hope the next one remembers"). It is safe as a blanket call only because
+`snapEntityToFloor` CLAMPS instead of snapping for an airborne body — pad launches and gap vaults
+keep their arcs. Flyers and PROPs are excluded.
+**(2) GROWING A HITBOX MOVES THE FEET.** `spawnChampion` seats the entity, then enlarges
+`halfExtents` by `Champion::SCALE_MULT` (1.25) and left `position` alone — but position.y is the
+CENTRE, so **every champion in the game spawned ~22 cm underground**. Self-healing in states that
+re-ground, permanent in the one that did not, which is why the two bugs read as one. The spawn now
+lifts by the growth so the feet stay put. Any future "scale a body up" needs the same line.
+**Measured**, paladin in zones 56/58: **0/223 and 0/76 hostiles below their floor**, from 9.6%
+(zone 56, after the first pass) and ~38% (zone 58, seen live in a soak). Sabotage-verified —
+removing just the grounding pass puts zone 58 back to **68/334 (20.4%)**.
+**It was also breaking QUESTS**, which is worth remembering as a symptom: a `CLEAR_ZONE` quest is
+polled as "no hostiles left in the pool", so ONE straggler embedded in the ground where the bot
+cannot reach it means the quest never completes, the gate refuses the exit, and the run circles that
+zone forever. A bug in entity Y is not only cosmetic.
 
 **SHIELD BEARERS FACED THEIR BACKS TO YOU — one wrong sign, and it read as "it only attacks once"
 (Aaron's report, fixed 2026-08-07).** Forward is `(-sin(yaw), _, -cos(yaw))` — BOTH horizontal
@@ -529,6 +693,37 @@ on "is the console even running the fix?".
 `buildBotView` writes LATER in the same tick, so it ended every run the instant it arrived. It
 evaluates now — a cached bool whose correctness depends on call order inside a function ordered for
 other reasons is not worth the recompute it saves.
+
+**A FINISHED HERO HAD NOTHING TO DO IN THE OVERWORLD — reported twice, as opposite symptoms
+(2026-08-07).** Aaron first: "I get ported to floor 1 with a new paladin"; then, after the guard for
+that: "autoplay stopped working in the overworld". ONE defect wearing two faces.
+`ZoneRoute::objectiveZone` returns **0 when every quest bit is set**, so for a hero who has already
+finished both acts `zoneBotGoal` finds no goal and `zoneAutoplayStep` returns true on the FIRST TICK
+in a zone. That fed the end-of-acts branch, which either minted a new run (rotating the class by one
+— ROGUE 3 -> PALADIN 4, difficulty Normal, floor 1) or, once loaded heroes were excluded from the
+roll-on, simply disarmed the bot. Neither is playing.
+**The branch was also ABOVE the human-control gate**, which is what let it touch a player at all:
+`updateAutoplay` ran it as its first statement, while `if (!botInControl()) return;` sits further
+down — and autoplay hands control to the human on the first input it sees, so "armed" and "driving"
+are very different states. Moving it below the gates is the fix for the human case; note the town
+step's comment had to move with it, or the explanation ends up over the wrong statement.
+**The real answer is that the mode needed a THIRD outcome.** Now: a hero the MODE minted still ends
+its run and rolls on (the soak's pass condition, byte-identical); a hero the PLAYER loaded
+(`m_laneLoadedFromSave`) **FREE ROAMS** — hunt what is alive, and when the zone is clear cross to the
+next one. Same shape as the credits park, the death-screen strand and the Hellgate park before it:
+**an autoplay ending is not a place to stop, it is a place to continue from.**
+**The first roam walked home and started a dungeon run.** Zone 52's south neighbour is the TOWN, and
+the town has its own autoplay policy that takes the portal — so the bot cleared the Blood Buffer,
+strolled back and was on dungeon floor 5 a minute later (measured: `Entered the town` 14 s in, then
+floors 1-5). The roam now refuses the `TOWN_FLOOR` link outright, prefers an edge it did not just
+arrive through (a `zoneRoamFrom` memory, or two zones ping-pong forever) and accepts one only as a
+dead-end fallback. Measured after: **145 `[ZBOT]` lines over a 150 s run across zones 52 -> 54 -> 56,
+0 town entries, 0 run-endings** — against 14 lines and a town exit before.
+**`--quests-done` is the new dev door**, for the same reason `--endgame` and `--victory` exist: the
+post-acts state otherwise costs a full two-act playthrough to reach. Compose it —
+`--load <slot> --endgame --zone 52 --autoplay --quests-done` is "my finished hero walks into the
+overworld with the bot driving". The control that makes the test discriminating is swapping `--load`
+for `--new`: same flags, same content, and the minted hero must still log ACTS COMPLETE and roll on.
 
 **QUESTS (`game/quest_def.h`)** are D2's Act 1 chain, beat for beat, renamed: *Free the Allocation*
 (clear the Den), *The Rebaser* (the graveyard keeps bringing its history back), *Align the Standing

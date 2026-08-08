@@ -592,6 +592,15 @@ void Engine::startGame(GameStart mode, bool lanesPrepared) {
     m_level.inTown           = false;
     m_level.inArena          = false;
     m_level.townPortalActive = false;
+    // ...AND THE OVERWORLD. This ad-hoc list is exactly the drift worldClearLevelFlags exists to
+    // stop, and it drifted again: `inZone`/`zoneFloor` were never added, so a run started FROM a
+    // zone kept both set while standing on dungeon floor 1. That is not cosmetic — updateAutoplay
+    // gates its whole act branch on `m_level.inZone`, so with the quest chain already complete the
+    // driver ended the "act" again on the very next frame and minted another run, forever: measured
+    // as the entire class roster cycling in a single second. Anything that keys off "am I in a
+    // zone" would have read it wrong too.
+    m_level.inZone           = false;
+    m_level.zoneFloor        = 0;
     EnemyAI::setTownMode(false);   // dungeon companions follow + fight again
     // Floor + difficulty fold in so each floor and each difficulty-loop tier differs.
     u32 dungeonSeed = m_level.levelSeed

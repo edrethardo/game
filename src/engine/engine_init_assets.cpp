@@ -223,6 +223,12 @@ void Engine::initAssets() {
     m_meshIdChest    = findMeshByName("chest");
     m_goblinMeshId   = findMeshByName("goblin");
     m_shrineMeshId   = findMeshByName("shrine");
+    m_caveMouthMeshId = findMeshByName("cave_mouth");
+    m_stoneCircleMeshId = findMeshByName("stone_circle");
+    m_hellGateMeshId    = findMeshByName("hell_gate");
+    m_graveGateMeshId   = findMeshByName("grave_gate");
+    m_tubeEntryMeshId   = findMeshByName("tube_entrance");
+    m_serviceDoorMeshId = findMeshByName("service_door");
     m_meshIdHuman    = findMeshByName("human");
     m_meshIdSword    = findMeshByName("sword");
     m_meshIdDagger   = findMeshByName("dagger");

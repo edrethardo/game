@@ -64,6 +64,12 @@ static constexpr MeshAsset kMeshAssets[] = {
     {"rail_replacement",  "assets/meshes/rail_replacement.obj"},
     {"legacy_archer",     "assets/meshes/legacy_archer.obj"},
     {"shrine",         "assets/meshes/shrine.obj"},   // walk-up buff shrine
+    {"cave_mouth",     "assets/meshes/cave_mouth.obj"},  // overworld cave entrance (D2 Act 1 style)
+    {"stone_circle",   "assets/meshes/stone_circle.obj"}, // the Cairn Stones -> TristRAM
+    {"hell_gate",      "assets/meshes/hell_gate.obj"},    // the forced rift -> Hellgate: Localhost
+    {"grave_gate",     "assets/meshes/grave_gate.obj"},   // cemetery gate -> the Deprecated Graveyard
+    {"tube_entrance",  "assets/meshes/tube_entrance.obj"},// Underground stair -> Act 2
+    {"service_door",   "assets/meshes/service_door.obj"}, // staff door -> Bank Station
     {"sword",          "assets/meshes/sword.obj"},
     {"dagger",         "assets/meshes/dagger.obj"},
     {"axe",            "assets/meshes/axe.obj"},

@@ -7,6 +7,7 @@
 // applyClassToLane0 is the shared class-stat setup extracted from engine_menu.cpp's class-select
 // confirm handler, so the menu and the CLI configure a fresh hero identically.
 
+#include "game/quest_def.h"   // --quests-done: mark the act chain complete
 #include "engine/engine.h"
 #include "game/build_score.h"   // DEFAULT_BUILD_CELL for the --autoloot dev door
 #include "engine/launch_options.h"
@@ -340,6 +341,14 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         if (opt.endgame) equipEndgameLoadout(0);
         if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
         if (opt.endgame) autoEquipBackpack(0);   // re-pick under the class's own build cell
+        // --quests-done: hand the hero a finished act chain. Applied AFTER enterAutoplayRun (which
+        // does not touch the mask) and BEFORE enterZone, so the very first tick in the zone already
+        // sees the post-acts state — which is the tick that decides roam vs end-the-run.
+        if (opt.questsDone) {
+            m_questMask[0] = (Quest::COUNT >= 64) ? ~0ull : ((1ull << Quest::COUNT) - 1ull);
+            LOG_INFO("Launch: --quests-done - both acts marked complete on lane 0 (%u quests)",
+                     Quest::COUNT);
+        }
         enterZone(opt.zoneFloor, /*fromFloor=*/0);
         LOG_INFO("Launch: entered overworld zone %u (--zone)", (u32)opt.zoneFloor);
         return;

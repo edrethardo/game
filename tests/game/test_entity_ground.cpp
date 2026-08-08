@@ -169,3 +169,40 @@ TEST_CASE("flyers are gated OUT by the CALLERS, not by this function") {
     snapEntityToFloor(e, r.grid);
     CHECK(e.position.y == doctest::Approx(FEET_ON_FLOOR));   // grounded — callers must not call it
 }
+
+// ------------------------------------------------------------------------------------------------
+// Growing a body's hitbox moves its FEET — the champion burial
+// ------------------------------------------------------------------------------------------------
+
+TEST_CASE("scaling halfExtents without lifting the centre buries the feet") {
+    // What spawnChampion did: seat the entity at floor + baseHalf.y, then enlarge halfExtents by
+    // Champion::SCALE_MULT and leave position alone. position.y is the CENTRE, so the feet drop by
+    // the whole growth and every champion in the game spawned underground.
+    //
+    // Pinned as arithmetic on the same rule the spawn site now uses, so the relationship is stated
+    // somewhere a reader can find it rather than living only in a spawn callback.
+    constexpr f32 SCALE = 1.25f;
+    Room r;
+    Entity e = walker(8.5f, 8.5f);              // halfExtents.y 0.9, centre 0.9, feet on 0
+    const Vec3 baseHalf = e.halfExtents;
+
+    e.halfExtents = baseHalf * SCALE;           // grow the hitbox, as the champion pass does
+    CHECK((e.position.y - e.halfExtents.y) < -0.2f);   // feet are now well under the floor
+
+    e.position.y += (SCALE - 1.0f) * baseHalf.y;      // the fix: lift by the growth
+    CHECK((e.position.y - e.halfExtents.y) == doctest::Approx(0.0f));   // feet back where they were
+}
+
+TEST_CASE("a buried body is recovered by the grounding pass, whatever state it is in") {
+    // The safety net in EnemyAI::update calls this on EVERY non-flying entity at the end of every
+    // tick, which is what makes AIState::ATTACK — the one state with no snap of its own — correct
+    // without each state having to remember. A body buried by any means comes back up.
+    Room r;
+    for (f32 sunk : {-0.25f, -1.0f, -4.0f}) {
+        Entity e = walker(8.5f, 8.5f);
+        e.position.y = FEET_ON_FLOOR + sunk;
+        CAPTURE(sunk);
+        snapEntityToFloor(e, r.grid);
+        CHECK(e.position.y == doctest::Approx(FEET_ON_FLOOR));
+    }
+}

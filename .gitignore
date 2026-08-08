@@ -47,3 +47,9 @@ steamworks_sdk_*.zip
 # Soak run logs (tools/overworld_soak.py) — measurements, not source
 soak_*/
 soak_*.out
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/
+
+# local graft/LLM endpoint settings (machine-specific)
+.env

@@ -308,6 +308,13 @@ private:
         // screen — a dead lane sits in its own branch waiting for a JUMP press, and gameUpdate (which
         // runs updateAutoplay) is SKIPPED for it, so the bot can never press anything. Without this a
         // couch bot simply stays dead. Per-lane because each local player dies on its own clock.
+        // OVERWORLD FREE ROAM (a hero whose acts are already finished). `zoneRoamHere` is the zone
+        // the roam last saw; when it changes, the old value becomes `zoneRoamFrom` so the roam does
+        // not immediately walk back the way it came and ping-pong two zones forever. Tracked here
+        // rather than in enterZone because the roam is the only consumer, and a world flag set by an
+        // entry path is exactly the kind that drifts (see worldClearLevelFlags).
+        u8               zoneRoamHere = 0;
+        u8               zoneRoamFrom = 0;
         f32              deadRespawnT = 0.0f;
         Vec3             lastPos = {0, 0, 0};      // XZ progress anchor for the stuck detector (also the escalating escape's "wedge anchor")
         f32              noProgressTimer = 0.0f;   // seconds the bot has sat within 0.5 m of the anchor while travelling; also keys the escape ESCALATION (nudge <6 s, 8-dir >6 s, A* leg >8 s)
@@ -392,6 +399,9 @@ private:
         f32              lookBehindTimer = 0.0f; // >0 = mid look-behind, holding the reversed aim
         f32              lookBehindYaw   = 0.0f; // the reversed yaw captured when the turn armed
         bool             lookBehindDone  = false;// this stuck episode has already spent its turn
+        // A STANDOFF is "targets I will not shoot, and I am not moving" — held on its OWN clock,
+        // deliberately NOT the no-progress timer. See the trigger in engine_autoplay.cpp.
+        f32              standoffT       = 0.0f;
         f32            throwSeq      = -1.0f;  // >=0: running the synthetic Fire tap
         f32            throwLeash    = 0.0f;   // s until the bot may throw again
         f32            reloadThrow   = 0.0f;   // s until the next THROWAWAY reload throw
@@ -1468,6 +1478,7 @@ private:
     void zoneClearPad(u32 cx, u32 cz, u32 radius);
     void zoneOpenGate(Zone::Dir dir);
     Vec3 zoneGatePos(Zone::Dir dir) const;
+    const Entity* nearestZoneHostile() const;   // shared by the quest hunt and the post-acts roam
     Vec3 zoneReturnPos(const Zone::ZoneDef& def) const;
     Vec3 zoneArrivalPos(const Zone::ZoneDef& def, u8 fromFloor);
     // Walking into a border band with a linked neighbour hands off to the next zone (host decides,
@@ -1935,6 +1946,12 @@ private:
     // Used to keep the target bar from becoming a wallhack.
     bool hasLineOfSightTo(Vec3 target) const;
     u8   m_shrineMeshId = 0;
+    u8   m_caveMouthMeshId = 0;   // overworld cave entrance (D2 Act 1 style); 0 = falls back to the shrine pillar
+    u8   m_stoneCircleMeshId = 0; // the Cairn Stones -> TristRAM; 0 = falls back to the shrine pillar
+    u8   m_hellGateMeshId    = 0; // the forced rift -> Hellgate: Localhost; 0 = falls back to the shrine pillar
+    u8   m_graveGateMeshId   = 0; // cemetery gate -> the Deprecated Graveyard
+    u8   m_tubeEntryMeshId   = 0; // Underground stair -> Act 2
+    u8   m_serviceDoorMeshId = 0; // staff door -> Bank Station
     // The champion affixes that fire on a CYCLE (Molten eruptions, Thundering novas, Teleport
     // blinks) rather than on a hit (applyDamage) or a death (handleDeathPreamble). Authoritative
     // sim only — called from tickSharedSystems inside its NetRole::CLIENT gate.

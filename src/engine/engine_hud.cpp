@@ -513,7 +513,8 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
     // frame, so a guest's minimap shows exactly the shrines the host's does (and loses one the
     // moment anybody activates it).
     Minimap::draw(sw, sh, m_level.grid, m_localPlayer.position, m_localPlayer.yaw,
-                  minimapEntities, otherPos, otherActive, MAX_PLAYERS, &m_worldItems);
+                  minimapEntities, otherPos, otherActive, MAX_PLAYERS, &m_worldItems,
+                  m_level.zoneFloor);
 
     // Legendary item dots on minimap — gold "+" cross at each active legendary world item
     {

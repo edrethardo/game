@@ -1173,6 +1173,36 @@
       "id": 186,
       "name": "rail_replacement_skin",
       "texture": "rail_replacement_skin_42.png"
+    },
+    {
+      "id": 187,
+      "name": "cave_mouth_skin",
+      "texture": "cave_mouth_skin_42.png"
+    },
+    {
+      "id": 188,
+      "name": "stone_circle_skin",
+      "texture": "stone_circle_skin_42.png"
+    },
+    {
+      "id": 189,
+      "name": "hell_gate_skin",
+      "texture": "hell_gate_skin_42.png"
+    },
+    {
+      "id": 190,
+      "name": "grave_gate_skin",
+      "texture": "grave_gate_skin_42.png"
+    },
+    {
+      "id": 191,
+      "name": "tube_entrance_skin",
+      "texture": "tube_entrance_skin_42.png"
+    },
+    {
+      "id": 192,
+      "name": "service_door_skin",
+      "texture": "service_door_skin_42.png"
     }
   ]
 }

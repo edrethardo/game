@@ -1395,3 +1395,101 @@ TEST_CASE("a short dash-smite stays in the rotation at blade range") {
     const BotIntent out = decideCombat(v, doctrineFor(v.buildCell));
     CHECK(out.classSkillSlot == 0);
 }
+
+// ------------------------------------------------------------------------------------------------
+// SUMMONER ECONOMY (Aaron, 2026-08-07: the summon classes "burn through all their mana with attack
+// skills" instead of keeping minions up, and the Tinkerer detonates its swarm constantly)
+// ------------------------------------------------------------------------------------------------
+
+// A Tinkerer-shaped view: slot 0 Swarm Deploy (12), 1 Overclock (25), 2 Detonate (20), 3 Queen (40).
+static BotView tinkererView() {
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*1 + 2;                 // Moderate / Ranged — the summon classes' column
+    v.maxEnergy = 110.0f; v.energy = 110.0f;
+    v.skillCost[0] = 12.0f; v.skillIsSummon[0] = true;
+    v.skillCost[1] = 25.0f;
+    v.skillCost[2] = 20.0f; v.skillIsMinionSacrifice[2] = true;
+    v.skillCost[3] = 40.0f; v.skillIsSummon[3] = true;
+    return v;
+}
+
+TEST_CASE("a summoner keeps the queen's cost in hand instead of spending it on filler") {
+    // THE BUG: castableSkill only says "affordable right now", so with both summons COOLING the dump
+    // spent the pool on Overclock and the 40-energy Queen was unaffordable through its whole next
+    // window. The reserve is what makes a summon always castable the moment its cooldown lapses.
+    BotView v = tinkererView();
+    BotTarget t{}; t.pos = {0,1.7f,-10.0f}; t.dist = 10.0f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;
+    v.castableSkill[1] = true;              // only Overclock is off cooldown; both summons cooling
+
+    v.energy = 50.0f;                       // 50 - 25 = 25, under the 40 reserve => withheld
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == -1);
+
+    v.energy = 70.0f;                       // 70 - 25 = 45, clear of the reserve => spend freely
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == 1);
+}
+
+TEST_CASE("a summon is exempt from its own reserve, and outranks everything") {
+    // The reserve must never gate the thing it is saving for, or the class would hoard forever.
+    BotView v = tinkererView();
+    BotTarget t{}; t.pos = {0,1.7f,-10.0f}; t.dist = 10.0f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;
+    v.energy = 40.0f;                       // exactly the queen's cost: nothing else may spend
+    v.castableSkill[1] = true;              // Overclock affordable in isolation...
+    v.castableSkill[3] = true;              // ...but the Queen is up
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == 3);
+}
+
+TEST_CASE("the minion sacrifice is never ordinary filler") {
+    // THE BUG: with both summons cooling, Detonate was simply the biggest castable slot, so the bot
+    // blew its own swarm every 6 s and never fielded drones at all.
+    BotView v = tinkererView();
+    BotTarget t{}; t.pos = {0,1.7f,-10.0f}; t.dist = 10.0f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;
+    v.castableSkill[2] = true;              // Detonate is the ONLY castable skill
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == -1);   // cast nothing instead
+}
+
+TEST_CASE("the minion sacrifice fires as a LAST RESORT — hurt AND surrounded") {
+    // Both halves are required. Either alone is the wrong moment: low health against one straggler
+    // is a fight to leave, and a healthy bot in a pack should let the swarm chew on it.
+    BotView v = tinkererView();
+    BotTarget ts[3];
+    ts[0] = {}; ts[0].pos = {0,1.7f,-6.0f};  ts[0].dist = 6.0f; ts[0].hasLOS = true;
+    ts[1] = {}; ts[1].pos = {2,1.7f,-6.0f};  ts[1].dist = 6.3f; ts[1].hasLOS = true;
+    ts[2] = {}; ts[2].pos = {-2,1.7f,-7.0f}; ts[2].dist = 7.3f; ts[2].hasLOS = true;
+    v.targets = ts; v.targetCount = 3;      // a real pack
+    v.castableSkill[2] = true;
+
+    v.hp = v.maxHp;                                     // healthy in a pack => still withheld
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == -1);
+
+    v.hp = v.maxHp * 0.2f;                              // hurt AND surrounded => fire it
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == 2);
+
+    v.targetCount = 1;                                  // hurt but alone => not worth the swarm
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == -1);
+}
+
+TEST_CASE("the reserve is inert for a class with no summons") {
+    // Every non-summon class must behave exactly as before. With reserve 0 the rule reduces to
+    // "energy >= cost", which castableSkill already guarantees, so it can never bite.
+    //
+    // Written DISCRIMINATING on purpose: the same energy and the same cost, differing only in
+    // whether a summon exists anywhere in the kit. A first version set energy BELOW the skill's cost
+    // while leaving castableSkill true — a state the driver cannot produce (it gates on the pool),
+    // so it proved nothing and failed for the wrong reason.
+    BotView v = selfAt({0,0,0});
+    v.buildCell = 3*1 + 0;                  // Magic
+    BotTarget t{}; t.pos = {0,1.7f,-10.0f}; t.dist = 10.0f; t.hasLOS = true;
+    v.targets = &t; v.targetCount = 1;
+    v.energy = 70.0f;
+    v.skillCost[3] = 60.0f;
+    v.castableSkill[3] = true;
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == 3);   // no summons: spend it
+
+    // Give the kit a 40-energy summon and nothing else changes — now 70 - 60 = 10 is under the
+    // reserve and the very same cast is withheld. That is the rule doing its job, not a side effect.
+    v.skillIsSummon[0] = true; v.skillCost[0] = 40.0f;
+    CHECK(decideCombat(v, doctrineFor(v.buildCell)).classSkillSlot == -1);
+}

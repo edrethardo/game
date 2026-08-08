@@ -197,16 +197,6 @@ static bool intentActs(const Autoplay::BotIntent& in) {
 void Engine::updateAutoplay(f32 dt) {
     if (!m_autoplayActive) return;
 
-    // THE OVERWORLD IS PLAYED, NOT REFUSED. The bot used to end its run on entering a zone, because
-    // an act has no descent objective and a bot standing in one would idle forever — the town and
-    // credits strands in a new costume. It now has an objective: the quest chain (game/zone_route.h),
-    // presented to the brain as an ordinary floor door (engine_autoplay_zone.cpp). The run ends only
-    // when both acts are finished, or when the route is genuinely stranded — and says which.
-    if (m_level.inZone && zoneAutoplayStep()) {
-        exitAutoplayRun();
-        return;
-    }
-
     // Takeover latch. Activity while a blocking UI is open must NOT grab control (browsing the build
     // in the inventory is the whole point of "keep fighting while I re-gear"), so uiOpen mirrors
     // gameplayInputFrozen()'s screen set and is passed to the latch, which freezes on it.
@@ -267,6 +257,62 @@ void Engine::updateAutoplay(f32 dt) {
     // CHAMBER (the secret boss you opt into) still idle exactly as before, and the brain itself stays
     // flat-floor pure — no town concept ever reaches it.
     if (m_level.inTown) { autoplayTownStep(dt, uiOpen); return; }
+
+    // THE OVERWORLD IS PLAYED, NOT REFUSED. The bot used to end its run on entering a zone, because
+    // an act has no descent objective and a bot standing in one would idle forever — the town and
+    // credits strands in a new costume. It now has an objective: the quest chain (game/zone_route.h),
+    // presented to the brain as an ordinary floor door (engine_autoplay_zone.cpp). The run ends only
+    // when both acts are finished, or when the route is genuinely stranded — and says which.
+    //
+    // ORDERING IS LOAD-BEARING — this must stay BELOW the botInControl()/botMayAct() gates.
+    // It used to be the FIRST statement in this function, above them, which meant it fired while
+    // the HUMAN held control. "Armed" and "driving" are very different states: the takeover latch
+    // hands control to the player on the first input it sees, so an armed run under human control
+    // is the NORMAL way a person watches the bot and then takes the wheel. Reported from the
+    // Switch: a player walked their own endgame ROGUE into Act 1 — whose quests that character had
+    // already finished, so objectiveZone() is 0 and this returns true on the very first tick in the
+    // zone — and the game rolled the hero into a fresh run: class rotated by one (Rogue 3 ->
+    // Paladin 4), difficulty reset to Normal, floor 1, on a new save slot. The character survived
+    // (saveAllCharacters runs first) but the player was thrown out of the world they had just
+    // entered. A branch that mints a new character belongs behind the same gate as every other
+    // thing the bot does.
+    if (m_level.inZone && zoneAutoplayStep()) {
+        // FINISHING THE ACTS MUST NOT PARK THE BOT. exitAutoplayRun only disarms the driver — it
+        // does not leave the world — so on its own it left the hero standing in Hellgate: Localhost
+        // with nobody driving, forever. Measured: a marksman completed both acts, logged "ACTS
+        // COMPLETE", and then stood in the rift for the remaining 17 minutes of the soak, emitting
+        // no [ZBOT] at all. That is the credits park and the death-screen strand for a third time,
+        // and again it is the BEST outcome the mode can produce that stops it playing.
+        //
+        // So the acts end the way the standard ending does: mint the next run. Same three rules —
+        // save the champion FIRST (autoplayNextRun moves the lane onto a fresh slot, so this is the
+        // last chance to write the hero that just finished), and singleplayer only, because a host
+        // silently re-rolling a dungeon would strand its guests.
+        //
+        // A STRANDED route rolls on too, deliberately: zoneAutoplayStep has already logged the WARN
+        // that names the broken link, so nothing is hidden, and a bot that keeps playing is strictly
+        // better for a soak than one parked in a corner of a zone it cannot leave.
+        //
+        // SECOND GUARD: a hero the PLAYER loaded is never rolled over. autoplayNextRun rotates the
+        // class and starts a fresh Normal floor-1 run — right for a soak, which MINTED the character
+        // it is replacing, and wrong for someone's saved hero, who would come back to a different
+        // class. Soaks are unaffected because they launch --new/--endgame, so the lane is not
+        // loaded-from-save. Such a run ENDS instead (the hero keeps standing where they are, with
+        // the acts finished and saved) — parking a bot is the lesser evil when the alternative is
+        // replacing a character the player owns.
+        const bool playerOwnedHero = m_laneLoadedFromSave[m_localPlayerIndex];
+        saveAllCharacters();   // the acts are finished either way — persist that before deciding
+        if (m_netRole == NetRole::NONE && !playerOwnedHero) {
+            autoplayNextRun();
+        } else {
+            if (playerOwnedHero)
+                LOG_INFO("[AUTOPLAY] acts finished on a LOADED hero — ending the run rather than "
+                         "rolling it over (the character belongs to the player)");
+            exitAutoplayRun();
+        }
+        return;
+    }
+
 
     // --- BALANCE TELEMETRY (playtest rig). One `[TELEM]` line per floor completed + a 30 s heartbeat,
     // so a soak is a balance dataset: how long each floor took, deaths/kills on it, and the player's
@@ -661,6 +707,37 @@ void Engine::updateAutoplay(f32 dt) {
         ap().lookBehindYaw   = Autoplay::lookBehindYaw(m_localPlayer.yaw);
     }
 
+    // ...AND A STANDOFF TRIGGER THAT DOES NOT CONSULT THE PROGRESS CLOCK.
+    //
+    // The rule above is gated on noProgressTimer, and `combatProgress` zeroes that timer on any
+    // damage dealt — INCLUDING damage dealt by MINIONS while the player stands still. So for the two
+    // summon classes the clock is pinned near zero forever and every remedy hanging off it is
+    // permanently disarmed. Measured in the 9-class act soak: a Tinkerer stood at exactly
+    // (14.9, 46.4) in Piccadilly Circus for THIRTY MINUTES with three hostiles 2.5 m away, `fire=0`
+    // throughout, its drones chipping away — `npt` never once exceeded 1.3 s across the whole run
+    // and the look-behind fired ZERO times. This is the same shape as the exit watchdog that
+    // "latched 0% of the time" because chip damage kept restarting it.
+    //
+    // The standoff is a BEHAVIOURAL state, so detect it behaviourally: targets are visible, the bot
+    // refuses to shoot any of them, and it is not moving. That cannot be confused with a real fight
+    // (which fires) or with travel (which moves), and it is exactly the dormant-AMBUSH deadlock the
+    // look-behind exists for — a body that wakes only while unobserved, which the bot pins asleep by
+    // staring at it. Act 2 fields one (Mind The Gap, `ambush`, tier 5), and a CLEAR_ZONE quest
+    // cannot complete while one is left standing.
+    // Same 0.5 m test the progress branch uses, against the same anchor — ap().lastPos only moves
+    // when the bot actually travels, so "still within 0.5 m of it" IS "has not gone anywhere".
+    const Vec3 sd = m_localPlayer.position - ap().lastPos;
+    const bool standoffStill = (sd.x * sd.x + sd.z * sd.z) <= 0.25f;
+    const bool standoff = v.targetCount > 0 && !in.fire && standoffStill;
+    ap().standoffT = standoff ? ap().standoffT + dt : 0.0f;
+    if (ap().standoffT >= Autoplay::STANDOFF_AT) {
+        ap().standoffT       = 0.0f;      // re-arm: one turn per standoff, not a continuous spin
+        ap().lookBehindTimer = Autoplay::LOOK_BEHIND_HOLD;
+        ap().lookBehindYaw   = Autoplay::lookBehindYaw(m_localPlayer.yaw);
+        LOG_INFO("[AUTOPLAY] standoff: %u targets, none engaged, no movement for %.1f s — looking away",
+                 v.targetCount, Autoplay::STANDOFF_AT);
+    }
+
     // Remedy A (priority) — WEDGED right at the exit with the boss dead: an unreachable LOS straggler keeps
     // FIGHT active but the bot can't close, so stand still and force the descend (hold PICKUP, drop
     // fire/move) — the interact-hold completes over the next few ticks and we leave.
@@ -928,6 +1005,49 @@ void Engine::updateAutoplay(f32 dt) {
             // rather than the wall-seeking bee-line. This is what makes the bull's "just leave" reliable
             // on a large flat maze, not only near the door.
             if (!routed && lengthSq(v.flowDir) > 1e-6f) heading = Vec3{v.flowDir.x, 0.0f, v.flowDir.z};
+        }
+
+        // ...AND THE HEADING MUST BE WALKABLE. Every other movement producer is vetoed against the
+        // geometry; the bull was the one that aimed at the goal and held FORWARD whatever was in the
+        // way, which is exactly how it wedges. Measured in the 9-class act soak: a warrior 6.1 m
+        // from the Den's gate held moveFwd into a WALL for 2198 seconds — `net=0.00` with the routed
+        // field (`fdir=+0.17,+0.99`) and the commanded movement (`mdir=-0.29,-0.96`) pointing
+        // OPPOSITE ways. A* had answered with a first leg through the obstacle, and because a
+        // returned path counts as "routed" the wall-aware field never got its turn.
+        //
+        // So: if the chosen heading walks into something, take the field instead; if that is blocked
+        // too, drop the bull's claim on the intent entirely so the escape ladder — which is built
+        // for a body wedged in geometry — gets to run. Preferring the field over A*'s first leg
+        // outright would be the wrong fix: A* is what routes AROUND a large obstacle, and the field
+        // is a greedy descent that can sit in a local pocket. Each covers the other's failure.
+        {
+            const f32 feetY = m_localPlayer.position.y;
+            if (!Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, heading,
+                                       m_level.lavaFloor)) {
+                const Vec3 fieldDir{v.flowDir.x, 0.0f, v.flowDir.z};
+                if (lengthSq(fieldDir) > 1e-6f &&
+                    Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, fieldDir,
+                                          m_level.lavaFloor)) {
+                    heading = fieldDir;
+                } else {
+                    // Nothing walkable toward the exit from here: this is a WEDGE, not a
+                    // "moving but not arriving". UNLATCH so the escape ladder can own the next tick.
+                    //
+                    // Clearing the latch is the whole fix, not merely dropping the heading. A
+                    // latched bull deliberately PREEMPTS the escape branch (the gauntlet livelock:
+                    // the ladder monopolised the intent for two hours emitting useless sidesteps),
+                    // so a bull that keeps its latch while refusing to move starves the one rescue
+                    // built for a body stuck in geometry — the bot would stand still instead of
+                    // walking into the wall, which is not an improvement.
+                    //
+                    // Re-latching is automatic: the watchdog re-arms whenever the bot is moving and
+                    // still not closing on the exit, so the two remedies alternate by their own
+                    // definitions — the bull for "moving, not arriving", the ladder for "not moving".
+                    ap().remedy   = "bull-blocked";
+                    ap().exitBull = false;
+                    heading = Vec3{0, 0, 0};
+                }
+            }
         }
         in = Autoplay::BotIntent{};
         in.aimYaw = m_localPlayer.yaw; in.aimPitch = m_localPlayer.pitch;
@@ -1531,7 +1651,21 @@ void Engine::updateAutoplay(f32 dt) {
     // the strip — precisely the ramp-drift the follower's point servo corrects. A VHALL riser wedge needs a
     // ramp-aware remedy (back off DOWN the strip and re-approach centred, or a centreline hop), not
     // this one. Do not re-extend without measuring that separately.
-    if (m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY && !in.descend &&
+    // ...and OVERWORLD ZONES, which are flat by construction (a zone's terrain maps to WILDERNESS /
+    // GAUNTLET / HUB — never a stacked style), so this is the Descent's own shape: open floor either
+    // side of the wedge, which is exactly the condition that makes sideways-first the right remedy
+    // and the VHALL ramp the wrong place for it. Gated on `inZone` rather than on the style because
+    // `m_level.layoutStyle` is NOT set on zone entry — it still reads whatever dungeon floor came
+    // before (measured: `style=rooms` while standing in zone 58), so a style test here would be
+    // silently wrong in both directions.
+    //
+    // Measured need: the 9-class act soak left a warrior in zone 52 with `flow=0.00 fdir=+0.00,+0.00
+    // mv=0 tgts=0` — the veto had refused the routed heading and all four fan detours, so the brain
+    // had nothing to command and simply idled, 25 m from a border it never crossed. The no-progress
+    // timer could not rescue it either: the bot drifts ~0.4 m per window, which re-anchors the timer
+    // (`npt=2.8`) and starves the escape ladder. Being boxed in is POSITIONAL, so it needs the
+    // positional detector, not a progress clock.
+    if ((m_level.layoutStyle == LevelGen::LayoutStyle::FOUR_STORY || m_level.inZone) && !in.descend &&
         !v.stunned && !v.rolling && ap().lootDwell <= 0.0f) {
         const bool cmdMove = in.moveFwd || in.moveBack || in.moveLeft || in.moveRight;
 
@@ -1951,10 +2085,23 @@ Autoplay::BotView Engine::buildBotView() {
             // the four that leave a persistent ALLY behind (Tinkerer drones/queen, Combat Engineer
             // turret/coil). Their value is independent of the current target, so the policy fires them
             // whenever they are off cooldown rather than saving them for a good moment.
+            //
+            // TESLA_COIL IS NOT ONE, and listing it here was the summon classes' whole energy
+            // problem. It leaves nothing behind — `fireTeslaCoil` is a 360-degree query that damages
+            // and staggers, a pure burst. Classed as a summon it inherited the "cast whenever off
+            // cooldown" priority ABOVE everything else, so the Combat Engineer spent 25 energy every
+            // 5 s on it and could never afford the 40-energy Deploy Turret when that came up. It is
+            // an AoE (radius 4), which skillIsAoe already reports, so the group branch and the dump
+            // still use it — at the right priority.
             v.skillIsSummon[s] = (id == SkillId::SWARM_DEPLOY)  || (id == SkillId::SWARM_QUEEN) ||
-                                 (id == SkillId::DEPLOY_TURRET) || (id == SkillId::TESLA_COIL);
+                                 (id == SkillId::DEPLOY_TURRET);
             // Reactive parry (Wanderer Deflect): cast on the block-tap triggers, never on cooldown.
             v.skillIsCounter[s] = (id == SkillId::DEFLECT);
+            // Spends the swarm to deal damage and kills it. Last resort only — see autoplay_combat.h.
+            v.skillIsMinionSacrifice[s] = (id == SkillId::DETONATE_SWARM);
+            // Recorded for EVERY unlocked slot, castable or not: the reserve rule below has to know
+            // what a summon costs precisely when the pool cannot yet afford it.
+            v.skillCost[s] = def->energyCost;
             // BLOOD_NOVA pays HEALTH, not energy (tryActivate refuses to suicide); everything else
             // draws the shared pool. Mirroring the split keeps the bot off a skill it can't afford.
             if (id == SkillId::BLOOD_NOVA) {

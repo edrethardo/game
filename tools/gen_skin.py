@@ -42,6 +42,250 @@ def write_png(path, width, height, pixels):
 # Eye colors are muted because they show on all faces of the voxel.
 # ---------------------------------------------------------------------------
 
+def skin_grave_gate():
+    """Cemetery gate — pale weathered piers, dark rusted ironwork. Grid 13 x 14."""
+    w, h = 13, 14
+
+    def mottle(px, py, k):
+        v = (px * 73856093) ^ (py * 19349663) ^ (k * 83492791)
+        return (((v ^ (v >> 13)) & 0x7FFFFFFF) % 11) - 5
+
+    p = {}
+    pier  = (146, 142, 133)       # limestone
+    cap   = (168, 164, 154)       # the cap stone catches the light
+    moss  = ( 92, 106,  78)
+    iron  = ( 62,  56,  52)       # the leaf and the arch bars
+    rust  = ( 96,  62,  40)
+    mid = (w - 1) / 2.0
+    for px in range(w):
+        for py in range(h):
+            d = abs(px - mid) / mid
+            f = py / max(h - 1, 1)
+            # The centre columns are the OPENING and its ironwork; the outer ones are masonry.
+            if d < 0.46:
+                c = rust if ((px * 5 + py * 3) % 7) == 0 else iron
+            elif f > 0.86:
+                c = cap
+            else:
+                c = moss if (f < 0.3 and ((px * 11 + py * 7) % 6) == 0) else pier
+            m = mottle(px, py, 6)
+            p[(px, py)] = (max(0, min(255, c[0] + m)), max(0, min(255, c[1] + m)),
+                           max(0, min(255, c[2] + m)), 255)
+    return w, h, p
+
+
+def skin_tube_entrance():
+    """Underground entrance — grimy tile parapets, dark stairwell, the roundel's red and blue.
+
+    Grid 16 x 14. The roundel is the one saturated thing on the model and it sits at the far +X
+    columns, where the post stands; everything else is deliberately drab so it pops.
+    """
+    w, h = 16, 14
+
+    def mottle(px, py, k):
+        v = (px * 73856093) ^ (py * 19349663) ^ (k * 83492791)
+        return (((v ^ (v >> 13)) & 0x7FFFFFFF) % 9) - 4
+
+    p = {}
+    tile  = (152, 148, 140)       # station tile, London-grimy
+    grime = (108, 104,  98)
+    dark  = ( 26,  26,  30)       # down the stairs
+    red   = (196,  40,  46)       # roundel ring
+    blue  = ( 20,  60, 132)       # roundel bar
+    post  = ( 58,  58,  62)
+    for px in range(w):
+        for py in range(h):
+            f = py / max(h - 1, 1)
+            if px >= w - 5:                       # the roundel post's columns
+                if   f > 0.72: c = blue if 0.78 < f < 0.86 else red
+                else:          c = post
+            elif f < 0.30:
+                c = dark                          # the stair mouth
+            else:
+                c = grime if ((px * 7 + py * 5) % 5) == 0 else tile
+            m = mottle(px, py, 3)
+            p[(px, py)] = (max(0, min(255, c[0] + m)), max(0, min(255, c[1] + m)),
+                           max(0, min(255, c[2] + m)), 255)
+    return w, h, p
+
+
+def skin_service_door():
+    """Bank's maintenance door — painted steel in a concrete frame, with a warning stripe.
+
+    Grid 9 x 14. The plainest entrance in the game on purpose: it is the one you would walk past.
+    """
+    w, h = 9, 14
+
+    def mottle(px, py, k):
+        v = (px * 73856093) ^ (py * 19349663) ^ (k * 83492791)
+        return (((v ^ (v >> 13)) & 0x7FFFFFFF) % 9) - 4
+
+    p = {}
+    frame = (104, 102,  98)       # concrete surround
+    steel = ( 74,  86,  84)       # institutional green-grey door paint
+    kick  = ( 96, 108, 106)       # scuffed kick plate
+    warn  = (176, 148,  44)       # the hazard stripe — the only warm note
+    for px in range(w):
+        for py in range(h):
+            f = py / max(h - 1, 1)
+            edge = px <= 1 or px >= w - 2 or f > 0.88
+            if   edge:        c = frame
+            elif f < 0.12:    c = kick
+            elif 0.46 < f < 0.54: c = warn
+            else:             c = steel
+            m = mottle(px, py, 8)
+            p[(px, py)] = (max(0, min(255, c[0] + m)), max(0, min(255, c[1] + m)),
+                           max(0, min(255, c[2] + m)), 255)
+    return w, h, p
+
+
+def skin_stone_circle():
+    """Cairn stones — weathered granite, lichen low down, sun-bleached crowns.
+
+    Grid is 15 x 13, the mesh's REAL filled extent (gx -6..8, gy 0..12), not a nominal size:
+    add_voxel_model derives the UVs from the filled set, so a skin sized to anything else is
+    stretched across the model and every band lands somewhere it was not meant to.
+
+    The palette does the ageing that the coarse voxels cannot: pale dry crowns where rain runs off,
+    darker damp bases, and green-grey lichen creeping up the north faces. Nothing here is random at
+    runtime — mottle() is a fixed integer hash, because .obj/.png are gitignored and rebuilt on CI,
+    so a random skin would differ between machines.
+    """
+    w, h = 15, 13
+    p = {}
+    def mottle(px, py, k):
+        """Deterministic signed speckle. Integer-only for the same reason gen_mesh's _crag is:
+        textures are regenerated on every CI machine and must come out byte-identical."""
+        v = (px * 73856093) ^ (py * 19349663) ^ (k * 83492791)
+        return (((v ^ (v >> 13)) & 0x7FFFFFFF) % 13) - 6
+
+    base   = (122, 120, 116)      # granite
+    dark   = ( 92,  90,  88)      # damp base
+    pale   = (156, 154, 147)      # sun-bleached crown
+    lichen = ( 96, 112,  84)      # the only non-grey — keeps the ring from reading as concrete
+    for px in range(w):
+        for py in range(h):
+            f = py / max(h - 1, 1)
+            if   f > 0.78: c = pale
+            elif f < 0.18: c = dark
+            else:          c = base
+            m = mottle(px, py, 9)
+            # Lichen in the damp lower third, in patches rather than a band.
+            if f < 0.42 and ((px * 7 + py * 13) % 5) == 0:
+                c = lichen
+            p[(px, py)] = (max(0, min(255, c[0] + m)),
+                           max(0, min(255, c[1] + m)),
+                           max(0, min(255, c[2] + m)), 255)
+    return w, h, p
+
+
+def skin_hell_gate():
+    """The forced rift — pale Portland-stone jambs, scorched toward the opening, black throat.
+
+    Grid is 15 x 18 (gx -7..7, gy 0..17). The reserved VOID pixel is (0, h - 1): gen_mesh's
+    _reserved_pixel fixes the top-left corner by convention and asserts the model leaves it empty,
+    because the skin cannot see the mesh and both sides must derive the same cell independently.
+
+    Colour tells the story the silhouette cannot: the outer edges are ordinary London stone, and the
+    closer a column sits to the gap the more it chars and then glows — so the gate reads as
+    something that was FORCED through clean masonry rather than built as a doorway.
+    """
+    w, h = 15, 18
+    p = {}
+    def mottle(px, py, k):
+        """Deterministic signed speckle. Integer-only for the same reason gen_mesh's _crag is:
+        textures are regenerated on every CI machine and must come out byte-identical."""
+        v = (px * 73856093) ^ (py * 19349663) ^ (k * 83492791)
+        return (((v ^ (v >> 13)) & 0x7FFFFFFF) % 13) - 6
+
+    stone  = (168, 163, 152)      # Portland stone, the Circus's own material
+    soot   = ( 74,  68,  64)
+    ember  = (150,  46,  28)
+    glow   = (206,  92,  40)
+    void   = (  8,   4,   6, 255) # the rift itself — near-black, faintly red
+    mid = (w - 1) / 2.0
+    for px in range(w):
+        for py in range(h):
+            d = abs(px - mid) / mid                    # 0 at the gap, 1 at the outer edge
+            f = py / max(h - 1, 1)
+            if   d < 0.34: c = ember                   # the torn edge, still hot
+            elif d < 0.52: c = soot                    # scorched
+            else:          c = stone
+            # Heat pools UNDER the lintel rather than washing the whole jamb — the rift is a tear at
+            # the top, so that is where the light comes from.
+            if d < 0.40 and f > 0.66:
+                c = glow
+            m = mottle(px, py, 4)
+            p[(px, py)] = (max(0, min(255, c[0] + m)),
+                           max(0, min(255, c[1] + m)),
+                           max(0, min(255, c[2] + m)), 255)
+    # Derived, never a literal row: the crown chunks once grew a mesh by a row and a hard-coded
+    # index silently painted the cave mouth's throat rock-grey.
+    p[(0, h - 1)] = void
+    return w, h, p
+
+
+def skin_cave_mouth():
+    """Grid: x=[-8,8] (w=17), y=[0,13] (h=14). Matches gen_cave_mouth.
+
+    A cave entrance is READ BY CONTRAST, not by detail: a pale weathered outcrop with a pure black
+    hole in it. So this is mostly one rock ramp — damp and dark at the base where the ground meets
+    it, drying to sun-bleached grey at the crown — plus two things that carry the meaning:
+
+      * (0, 12) is the VOID PIXEL. gen_cave_mouth remaps every interior voxel of the throat onto
+        this one pixel via uv_overrides, because `add_voxel_model` keys the skin by (gx, gy) alone
+        and a column holding both the mouth's inner wall and the outcrop's outer rock cannot
+        otherwise have two colours. It is the top-left corner precisely because the outcrop is a
+        ridge — its widest columns are at the base and its tallest at the centre — so nothing real
+        ever lands there. gen_cave_mouth asserts that; if the assert ever fires, this pixel and that
+        override have to move together.
+      * px 5-11 below the crown is the weathered LIP around the opening, a shade lighter than the
+        body. Without it the arch is a black shape on flat grey and stops reading as a mouth in a
+        rock at any distance.
+    """
+    w, h = 17, 14
+    p = {}
+    void    = (6, 5, 8, 255)          # the throat — near-black, not pure, so it still shades
+    # Ground line. Kept only ONE row deep and no darker than this: at two rows of (58,56,52) the
+    # whole base read as a shadow slab the outcrop was sinking into, and the fallen boulders sitting
+    # in that band turned into black tiles rather than rocks.
+    damp    = (80, 77, 71, 255)
+    body    = (104, 101, 96, 255)     # the bulk of the rock
+    body_d  = (88, 85, 81, 255)       # mottling, one step down
+    body_l  = (118, 115, 109, 255)    # mottling, one step up
+    crown   = (139, 136, 128, 255)    # sun-bleached top
+    lip     = (126, 120, 108, 255)    # weathered stone framing the opening
+
+    def mottle(px, py):
+        """Deterministic 3-way speckle. Integer-only for the same reason gen_mesh's _crag is:
+        textures are regenerated on every CI machine and must come out byte-identical."""
+        v = (px * 73856093) ^ (py * 19349663)
+        return ((v ^ (v >> 13)) & 0x7FFFFFFF) % 3
+
+    for py in range(h):
+        for px in range(w):
+            if py == 0:
+                base = damp
+            elif py >= 10:
+                base = crown
+            else:
+                base = (body_d, body, body_l)[mottle(px, py)]
+            p[(px, py)] = base
+
+    # The weathered lip around the arch (the opening spans px 6-10, crown at py 6).
+    for py in range(0, 8):
+        for px in range(5, 12):
+            if py >= 2:
+                p[(px, py)] = lip
+
+    # RESERVED void pixel — see the docstring. Written as h-1, NOT a literal row: adding the jagged
+    # crown chunks to the mesh grew the grid 13 -> 14 rows, and a hardcoded 12 silently left the
+    # throat painted rock-grey. The skin-grid check catches a size mismatch but cannot know which
+    # pixel carries meaning, so this one has to derive itself.
+    p[(0, h - 1)] = void
+    return w, h, p
+
+
 def skin_griswald():
     """Grid: x=[-6,4] (w=11), y=[0,14] (h=15). Matches gen_griswald.
 
@@ -5423,6 +5667,12 @@ SKIN_TYPES = {
     "turnstile_wraith": ("turnstile_wraith_skin_42.png", skin_turnstile_wraith),
     "fare_evader": ("fare_evader_skin_42.png", skin_fare_evader),
     "rail_replacement": ("rail_replacement_skin_42.png", skin_rail_replacement),
+    "grave_gate": ("grave_gate_skin_42.png", skin_grave_gate),
+    "tube_entrance": ("tube_entrance_skin_42.png", skin_tube_entrance),
+    "service_door": ("service_door_skin_42.png", skin_service_door),
+    "stone_circle": ("stone_circle_skin_42.png", skin_stone_circle),
+    "hell_gate": ("hell_gate_skin_42.png", skin_hell_gate),
+    "cave_mouth": ("cave_mouth_skin_42.png", skin_cave_mouth),
 
     "skeleton":           ("skeleton_skin_42.png",           skin_skeleton),
     # --- Act 1 overworld bestiary (grids match their gen_mesh.py generators) ---

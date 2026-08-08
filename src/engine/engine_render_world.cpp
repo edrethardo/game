@@ -139,12 +139,52 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         // of open country, indistinguishable from litter.
         bool isGateObj   = isZoneGate(wi.item);
         bool isWayObj    = isWaypoint(wi.item);
+        // A cave mouth is the boundary BETWEEN a cave and the open air, so it is a cave mouth from
+        // EITHER side — the Den's entrance out in the Blood Buffer, and the way back out seen from
+        // inside the Den. Keying only on the destination would have left that second one an orange
+        // standing stone floating in a cave, which is the same "reads as a trinket, not a place"
+        // problem this whole change exists to fix.
+        // Resolved here rather than down in the tint block because it picks the mesh AND the scale
+        // as well, and those three have to agree.
+        // Every interior now has a doorway MODELLED as what it actually is, chosen from one place.
+        // The kind is authored on the interior (Zone::Entrance) and resolved by entranceFor, which
+        // answers the same from either side — so the way in and the way back out are the same
+        // object. A table rather than a bool per kind: the cave was the first, and adding "is it a
+        // stone circle" and "is it the rift" as three more booleans is how the scale, the mesh and
+        // the tint drift apart from one another.
+        const Zone::Entrance gateKind =
+            isGateObj ? Zone::entranceFor(m_level.zoneFloor, static_cast<u8>(wi.item.itemLevel))
+                      : Zone::Entrance::STONE;
+        u8          gateMesh  = 0;
+        const char* gateSkin  = nullptr;
+        switch (gateKind) {
+            case Zone::Entrance::CAVE:
+                gateMesh = m_caveMouthMeshId;   gateSkin = "cave_mouth_skin";   break;
+            case Zone::Entrance::STONES:
+                gateMesh = m_stoneCircleMeshId; gateSkin = "stone_circle_skin"; break;
+            case Zone::Entrance::HELLGATE:
+                gateMesh = m_hellGateMeshId;    gateSkin = "hell_gate_skin";    break;
+            case Zone::Entrance::GRAVE:
+                gateMesh = m_graveGateMeshId;   gateSkin = "grave_gate_skin";   break;
+            case Zone::Entrance::TUBE:
+                gateMesh = m_tubeEntryMeshId;   gateSkin = "tube_entrance_skin";break;
+            case Zone::Entrance::DOOR:
+                gateMesh = m_serviceDoorMeshId; gateSkin = "service_door_skin"; break;
+            default: break;                     // STONE keeps the shrine pillar below
+        }
+        // A missing mesh must fall back, never draw nothing: assets are generated and gitignored, so
+        // a build that skipped one would otherwise make an act's entrance invisible.
+        const bool isModelledGate = isGateObj && gateMesh > 0 && gateMesh < m_meshDefCount;
         bool isFixture   = isShrineObj || isChestObj || isStashObj || isGateObj || isWayObj;
-        f32 renderScale = isGlobeItem ? 0.4f
-                        : isShard     ? 0.9f
-                        : isGateObj   ? 2.2f     // a doorway between worlds should read from range
-                        : isWayObj    ? 1.8f
-                        : isShrineObj ? 1.6f : ITEM_SCALE;
+        f32 renderScale = isGlobeItem      ? 0.4f
+                        : isShard          ? 0.9f
+                        // Modelled entrances are authored at their REAL size (a 3.4 m outcrop, a
+                        // 4.4 m rift), so they draw at 1.0 — scaling them would be scaling a
+                        // doorway a person is meant to walk through.
+                        : isModelledGate   ? 1.0f
+                        : isGateObj        ? 1.5f     // the plain marker: read it from range
+                        : isWayObj         ? 1.4f
+                        : isShrineObj      ? 1.6f : ITEM_SCALE;
         // Shrines and chests are FIXTURES: no bob, no spin, feet on the floor. Loot hovers and
         // turns to catch the eye; a fixture that did the same would read as a pickup — and a
         // bobbing "chest" next to a stone-still mimic would be a free mimic detector.
@@ -184,14 +224,26 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             if (isWayObj) {
                 tint = {0.55f, 0.85f, 1.00f, 1.0f};   // the blue its travel list and map icon use
             } else {
-                // GREY FOR CAVES (Aaron's call). The destination's own terrain decides it, so a
-                // gate always advertises what is on the other side rather than where it stands:
-                // the Den's mouth is grey stone from either side of it. Everything else keeps the
-                // warm orange of a way onward, matching its minimap diamond.
-                const Zone::ZoneDef* dst = Zone::find(static_cast<u8>(wi.item.itemLevel));
-                const bool cave = dst && dst->terrain == Zone::Terrain::CAVE;
-                tint = cave ? Vec4{0.58f, 0.58f, 0.62f, 1.0f}
-                            : Vec4{0.95f, 0.55f, 0.20f, 1.0f};
+                if (isModelledGate) {
+                    // AN ENTRANCE SHOULD LOOK LIKE WHAT IT IS. A cave is a hole in a rock, the way
+                    // to TristRAM is a ring of standing stones you activate, and the Hellgate is a
+                    // rift forced through masonry — three different silhouettes, and the silhouette
+                    // is the whole reason you can spot one across a field. A tinted standing stone
+                    // says "something is here"; only the shape says "you go INTO this, and this is
+                    // what it is".
+                    //
+                    // Each mesh carries its OWN skin, so they draw untinted — a tint would wash out
+                    // exactly the contrast the shape depends on (the cave's black throat, the
+                    // rift's ember glow).
+                    itemMesh = &m_meshDefs[gateMesh].mesh;
+                    const Material* gm = MaterialSystem::get(MaterialSystem::getIdByName(gateSkin));
+                    if (gm) { itemTex = gm->texture; tint = {1.0f, 1.0f, 1.0f, 1.0f}; }
+                    else    { tint = {0.58f, 0.58f, 0.62f, 1.0f}; }   // texture missing: plain grey stone
+                } else {
+                    // Everything else keeps the warm orange of a way onward — a portal, a station
+                    // mouth — matching its minimap diamond.
+                    tint = {0.95f, 0.55f, 0.20f, 1.0f};
+                }
             }
         } else if (isChestObj) {
             // The dormant mimic's EXACT presentation — chest mesh, default texture, the same
@@ -269,6 +321,14 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             Vec3 mc = {(mb.min.x + mb.max.x) * 0.5f, mb.min.y, (mb.min.z + mb.max.z) * 0.5f};
             model = Mat4::translate(pos) * Mat4::scale({cs, cs, cs})
                   * Mat4::translate({-mc.x, -mc.y, -mc.z});
+        } else if ((isGateObj || isWayObj) && itemMesh != &m_cubeMesh) {
+            // Own branch for the same sentinel-defId reason as the shrine, and it was MISSING: a
+            // gate's defId is far outside the real item range, so the generic item-mesh path below
+            // never matched and both fixtures fell through to the 0.3-scale cube fallback — drawing
+            // a 2 m standing stone at 60 cm. They were documented as "2.2x/1.8x" and had in fact
+            // never been scaled at all, which is most of why a cave mouth was hard to find.
+            // Both meshes put their origin at the FEET, so they stand on floorY unrotated.
+            model = Mat4::translate(pos) * Mat4::scale({renderScale, renderScale, renderScale});
         } else if (isChestObj && itemMesh != &m_cubeMesh) {
             // Own branch for the same sentinel-defId reason as the shrine. Sized to the dormant
             // mimic's exact silhouette — mesh scaled to 0.8 m tall (the mimic's halfExtents.y

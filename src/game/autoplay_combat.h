@@ -254,6 +254,17 @@ constexpr f32 THREAT_RADIUS = 12.0f;   // ~ the width of a couple of rooms
 // an AoE (the "Frozen Orb is awesome to kill large groups" case).
 constexpr f32 GROUP_RADIUS = 6.0f;
 constexpr u32 GROUP_MIN    = 3;        // the aim target + 2 more inside GROUP_RADIUS
+
+// DETONATE-AS-LAST-RESORT (Aaron: the Tinkerer should use the minion suicide move "as last resort
+// option instead of always"). Blowing the swarm is not a damage skill for a summoner — it spends the
+// build's entire engine, and the drones then have to be re-summoned against their own cooldowns. So
+// it is withheld from the biggest-first dump entirely and fires only when BOTH hold:
+//   * the bot is genuinely in trouble (health under DETONATE_HP_FRAC), so the drones are likely to
+//     die anyway and the burst is worth more now than the bodies are, and
+//   * there is a real pack to blow (a GROUP_MIN cluster), so it is not spent on one straggler.
+// Either alone is too loose: low health with a single target is a fight to walk away from, and a
+// cluster at full health is exactly when the swarm should be chewing on it instead.
+constexpr f32 DETONATE_HP_FRAC = 0.35f;
 inline f32 engageCeiling(const BotView& v, const Doctrine& d) {
     const f32 band = d.engageMax * v.weaponRange;
     return (band > THREAT_RADIUS) ? band : THREAT_RADIUS;
@@ -570,6 +581,25 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
             if (gx * gx + gz * gz <= GROUP_RADIUS * GROUP_RADIUS) cluster++;
         }
         s8 slot = -1;
+        // THE SUMMON RESERVE. A summoner's damage comes from what it FIELDS, not from what it casts,
+        // so energy spent on a nuke is only worth it once the drones are paid for. castableSkill
+        // cannot express this: it reports "affordable right now", and the case that matters is a
+        // summon that is merely COOLING — by the time it comes up the dump has already drained the
+        // pool on filler, and it stays unaffordable through its whole next window. Measured as the
+        // two SUMMON classes finishing last and second-last across every soak.
+        //
+        // So: keep the most expensive summon's cost in hand, and let every OTHER class skill spend
+        // only what is above that line. Summons themselves are exempt (they are what is being saved
+        // for), and the reserve is 0 for a class with no summons, which makes this inert everywhere
+        // else. Pools are deep enough for it to bite without muting anyone — a Tinkerer reserves 40
+        // of 110, an Engineer 40 of 120.
+        f32 summonReserve = 0.0f;
+        for (u8 s = 0; s < 4; s++)
+            if (v.skillIsSummon[s] && v.skillCost[s] > summonReserve) summonReserve = v.skillCost[s];
+        auto affordable = [&](s8 s) {
+            if (v.skillIsSummon[s]) return true;                       // this IS the thing we save for
+            return (v.energy - v.skillCost[s]) >= summonReserve;
+        };
         // SUMMONS FIRST — whenever one is off cooldown. A drone / turret / queen is the one skill
         // family whose worth does not depend on this target or this moment: it persists and keeps
         // fighting on its own, so every cast that is merely POSSIBLE is a cast that should happen, and
@@ -579,7 +609,9 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
         // damage branches below still get every tick the summons are cooling down.
         for (s8 s = 3; s >= 0; s--) if (v.castableSkill[s] && v.skillIsSummon[s]) { slot = s; break; }
         if (slot < 0 && cluster >= GROUP_MIN) {
-            for (s8 s = 3; s >= 0; s--) if (v.castableSkill[s] && v.skillIsAoe[s]) { slot = s; break; }
+            for (s8 s = 3; s >= 0; s--)
+                if (v.castableSkill[s] && v.skillIsAoe[s] && affordable(s) &&
+                    !v.skillIsMinionSacrifice[s]) { slot = s; break; }
         }
         if (slot < 0) {
             // A MELEE build IN WEAPON REACH fights like a caster: biggest castable slot first
@@ -612,12 +644,22 @@ inline BotIntent decideCombat(const BotView& v, const Doctrine& d) {
             const bool meleeClosing = (col == 1) && t.dist > v.weaponRange;
             if (!meleeClosing) {
                 for (s8 s = 3; s >= 0; s--)
-                    if (v.castableSkill[s] && !v.skillIsCounter[s] && !overshoots(s)) { slot = s; break; }
+                    if (v.castableSkill[s] && !v.skillIsCounter[s] && !overshoots(s) &&
+                        affordable(s) && !v.skillIsMinionSacrifice[s]) { slot = s; break; }
             } else {
                 for (s8 s = 0; s <  4; s++)
-                    if (v.castableSkill[s] && !v.skillIsCounter[s]) { slot = s; break; }
+                    if (v.castableSkill[s] && !v.skillIsCounter[s] && affordable(s) &&
+                        !v.skillIsMinionSacrifice[s]) { slot = s; break; }
             }
         }
+        // LAST-RESORT MINION SACRIFICE (Tinkerer Detonate Swarm). Chosen only after the dump has
+        // had its say, and only in the emergency the constant above describes.
+        if (v.maxHp > 0.0f && (v.hp / v.maxHp) < DETONATE_HP_FRAC &&
+            cluster >= GROUP_MIN) {
+            for (s8 s = 3; s >= 0; s--)
+                if (v.castableSkill[s] && v.skillIsMinionSacrifice[s]) { slot = s; break; }
+        }
+
         // TIMED COUNTER (Wanderer Deflect): the parry is cast exactly like the perfect-block tap —
         // a melee swing inside the block lead, or a tracked projectile about to land — and it
         // PREEMPTS whatever the dump chose this tick (a parry window outranks one more filler cast).

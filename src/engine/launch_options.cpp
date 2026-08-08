@@ -163,6 +163,11 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             // against a hero who has finished the ladder, so anything else is not a test of them.
             opt.endgame = true;
             opt.active  = true;
+        } else if (ieq(a, "--quests-done")) {
+            // Dev door onto a hero who has ALREADY finished both acts — the state that decides
+            // whether the overworld bot roams or ends its run.
+            opt.questsDone = true;
+            opt.active     = true;
         } else if (ieq(a, "--victory")) {
             // Dev door onto the ENDING screens: builds the world, then rolls the standard ending's
             // credits on the spot. Exercises credits -> victory -> (autoplay) next-run continuation

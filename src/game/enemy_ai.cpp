@@ -934,4 +934,29 @@ void EnemyAI::update(EntityPool& pool, const LevelGrid& grid,
         Collision::ensureNotInWall(e.position, foot, grid);
         if (e.flags & ENT_FLYING) e.position.y = origY;
     }
+
+    // --- Grounding safety net (invariant: no ground entity ends a tick below its floor) -----------
+    // The VERTICAL twin of the wall ejection above, and it exists for the same reason: grounding was
+    // a thing each AI state had to REMEMBER to do, and `AIState::ATTACK` — the one state where an
+    // enemy is stood next to you creeping forward at 60% speed — did not. Its only
+    // snapEntityToFloor is buried inside the ranged-attacker-lost-LOS branch, so a melee enemy
+    // swinging at the player was never re-grounded for as long as the fight lasted. That is exactly
+    // the report ("enemies drive inside the ground when attacking and moving towards the player"):
+    // any Y error the body already carried became permanent the moment it engaged.
+    //
+    // Nothing that runs before this point is a reliable place to fix it either — the entity-entity
+    // separation push and the stuck-detector's teleport both write position AFTER every state
+    // handler has run, and neither re-grounds. Hence one pass here, at the end of the tick, past
+    // every writer.
+    //
+    // snapEntityToFloor CLAMPS rather than snaps for an airborne body, so pad launches and gap
+    // vaults keep their arcs; that property is what makes a blanket per-tick call safe at all.
+    // Flyers are excluded (they hover by design) and so are PROPs, which are decorative geometry.
+    for (u32 a = 0; a < pool.activeCount; a++) {
+        Entity& e = pool.entities[pool.activeList[a]];
+        if (!(e.flags & ENT_ACTIVE) || (e.flags & ENT_DEAD)) continue;
+        if (e.flags & ENT_FLYING) continue;
+        if (e.enemyType == EnemyType::PROP) continue;
+        snapEntityToFloor(e, grid);
+    }
 }

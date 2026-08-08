@@ -40,6 +40,23 @@ inline constexpr u8 NO_LINK = 0;
 //   STATION      -> HUB         (Act 2: a concourse with passages off it)
 enum struct Terrain : u8 { OPEN_COUNTRY, CAVE, TUNNEL, STATION, COUNT };
 
+// HOW you get into an interior — the model that stands at its mouth and the symbol on the minimap.
+//
+// Authored on the INTERIOR, not derived from terrain, because terrain cannot tell these apart:
+// TristRAM and the Deprecated Graveyard are both OPEN_COUNTRY, and their entrances are a ring of
+// standing stones and a cemetery gate respectively. The interior owns the answer because the
+// interior is what the doorway leads to; the field it stands in is incidental.
+enum struct Entrance : u8 {
+    STONE,      // the default upright marker — a plain standing stone
+    CAVE,       // a hole in a rock (the Den of Evil)
+    STONES,     // the Cairn Stones: a ring you activate (TristRAM)
+    HELLGATE,   // a rift forced through masonry (Hellgate: Localhost)
+    GRAVE,      // a cemetery gate, standing ajar (the Deprecated Graveyard)
+    TUBE,       // an Underground stair you descend (Act 2's escalator)
+    DOOR,       // a staff maintenance door (Bank Station)
+    COUNT
+};
+
 struct ZoneDef {
     u8          floor;              // this zone's sentinel floor (52-96) — its identity everywhere
     const char* name;               // player-facing, also the waypoint list label
@@ -53,6 +70,11 @@ struct ZoneDef {
     Terrain     terrain;            // which generator builds it
     bool        underground;        // keep the ceiling: no sky, no daylight clear colour
     u8          gridSize;           // square grid edge; kept <= 64 (see the minimap/spatial-grid caps)
+    // APPENDED, never inserted. The table below initialises positionally, so a field added in the
+    // middle silently shifts every value after it into the wrong member. Appending also means the
+    // 11 road zones that have no interior can simply omit it and get STONE (0) by aggregate
+    // value-initialisation, which is the right default for them.
+    Entrance    entrance;           // how this INTERIOR is entered; ignored for a road zone
 };
 
 // SLICE 1. Two worlds beyond the town, which is the minimum that proves the architecture: an outdoor
@@ -111,7 +133,8 @@ inline constexpr ZoneDef ZONES[] = {
       /*boss*/       "",
       /*terrain*/    Terrain::CAVE,
       /*underground*/true,
-      /*gridSize*/   44 },
+      /*gridSize*/   44,
+      /*entrance*/   Entrance::CAVE },
 
     // 3. D2's Cold Plains. Cold storage: the place data goes when nobody wants to delete it but
     //    nobody wants to look at it either. Second waypoint, and the burial ground hangs off it.
@@ -140,7 +163,8 @@ inline constexpr ZoneDef ZONES[] = {
       /*boss*/       "The Garbage Collector",   // D2's Blood Raven, and the same joke twice over: it reclaims the dead, and it will not stop
       /*terrain*/    Terrain::OPEN_COUNTRY,
       /*underground*/false,
-      /*gridSize*/   44 },
+      /*gridSize*/   44,
+      /*entrance*/   Entrance::GRAVE },
 
     // 5. D2's Stony Field. A field of standing stones that are, on inspection, monuments to
     //    abandoned features. The waypoint here is the halfway anchor of the act.
@@ -173,7 +197,8 @@ inline constexpr ZoneDef ZONES[] = {
       /*boss*/       "Griswald, the Unfinished Build",   // ACT 1's FINAL BOSS — see the note above
       /*terrain*/    Terrain::OPEN_COUNTRY,
       /*underground*/false,
-      /*gridSize*/   44 },
+      /*gridSize*/   44,
+      /*entrance*/   Entrance::STONES },
 
     // 7. D2's Dark Wood / Black Marsh, compressed into one approach zone. The last stretch of open
     //    country before the gate; no waypoint, so the walk in from TristRAM stays a walk.
@@ -228,7 +253,8 @@ inline constexpr ZoneDef ZONES[] = {
       /*boss*/       "",
       /*terrain*/    Terrain::TUNNEL,
       /*underground*/true,
-      /*gridSize*/   48 },
+      /*gridSize*/   48,
+      /*entrance*/   Entrance::TUBE },
 
     // 10. The survivor hub — Act 2's town. The last station with the lights still on, and the only
     //     peaceful ground down here. A null terminus: the end of the string, where nothing follows.
@@ -286,7 +312,8 @@ inline constexpr ZoneDef ZONES[] = {
       /*boss*/       "The Perpetual Commuter",   // has been riding since before the gate opened and has never once reached a destination
       /*terrain*/    Terrain::STATION,
       /*underground*/true,
-      /*gridSize*/   44 },
+      /*gridSize*/   44,
+      /*entrance*/   Entrance::DOOR },
 
     // 14. Piccadilly Circus: too many lines meeting in too little space, which is what an overflow is.
     { /*floor*/      65,
@@ -315,7 +342,8 @@ inline constexpr ZoneDef ZONES[] = {
       /*boss*/       "Signal Failure",   // ACT 2's FINAL BOSS — the thing holding the gate open, announced as a service disruption
       /*terrain*/    Terrain::STATION,
       /*underground*/true,
-      /*gridSize*/   52 },
+      /*gridSize*/   52,
+      /*entrance*/   Entrance::HELLGATE },
 };
 
 inline constexpr u32 COUNT = sizeof(ZONES) / sizeof(ZONES[0]);
@@ -327,6 +355,37 @@ inline const ZoneDef* find(u8 floor) {
     for (u32 i = 0; i < COUNT; i++)
         if (ZONES[i].floor == floor) return &ZONES[i];
     return nullptr;
+}
+
+// Is the boundary between `here` and `there` a CAVE MOUTH?
+//
+// True when EITHER side is a cave, because a cave entrance is one object seen from two places: the
+// Den's mouth out in the Blood Buffer and the way back out seen from inside the Den are the same
+// hole in the same rock. Keying on the destination alone would dress the outward one as an ordinary
+// portal — an orange standing stone floating in a cave.
+//
+// Shared by the world renderer (which picks the mesh and its scale) and the minimap (which picks
+// the icon), so the model in front of you and the symbol on your map can never disagree about what
+// kind of way through this is.
+inline Entrance entranceFor(u8 here, u8 there) {
+    const ZoneDef* a = find(here);
+    const ZoneDef* b = find(there);
+    // Whichever side is an INTERIOR owns the answer, so both directions agree by construction.
+    // A cave mouth is a cave mouth from inside as well as out — keying on the destination alone is
+    // what once dressed the Den's exit as an orange standing stone floating in a cave.
+    if (b && b->returnFloor != 0) return b->entrance;
+    if (a && a->returnFloor != 0) return a->entrance;
+    // Terrain is the fallback so a zone that gains a CAVE interior still reads correctly before
+    // anyone remembers to author its entrance field.
+    if ((a && a->terrain == Terrain::CAVE) || (b && b->terrain == Terrain::CAVE))
+        return Entrance::CAVE;
+    return Entrance::STONE;
+}
+
+// Kept as the narrow question the collision/AI paths ask; both consumers of the MODEL go through
+// entranceFor so the mesh and the map icon cannot disagree.
+inline bool isCaveBoundary(u8 here, u8 there) {
+    return entranceFor(here, there) == Entrance::CAVE;
 }
 
 // The zone reached by leaving `from` through `dir`, or NO_LINK. TOWN_FLOOR is a legal answer.

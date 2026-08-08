@@ -277,7 +277,15 @@ bool Engine::tryMakeChampion(Entity& leader, u16 leaderIdx, const DungeonRoom& r
     leader.damage     = baseDamage * Champion::DAMAGE_MULT;
     // halfExtents drives the model scale AND the hitbox AND is already replicated — so this one
     // assignment gives the guest the size tell for free.
+    //
+    // ...but position.y is the body's CENTRE, so growing the hitbox alone drops the FEET. The entity
+    // was seated at floor + baseHalf.y; at 1.25x it needs floor + 1.25*baseHalf.y, so leaving the
+    // centre put every champion in the game 0.25*baseHalf.y (~22 cm on a humanoid) underground from
+    // the instant it spawned. Self-healing in states that re-ground, and PERMANENT in the one state
+    // that did not — see the grounding safety net in enemy_ai.cpp. Lift by the growth so the feet
+    // stay exactly where they were.
     leader.halfExtents = baseHalf * Champion::SCALE_MULT;
+    leader.position.y += (Champion::SCALE_MULT - 1.0f) * baseHalf.y;
 
     if (leader.champAffixes & ChampAffix::EXTRA_FAST) {
         // BOTH must move: the AURA herald role restores moveSpeed from baseMoveSpeed, so buffing

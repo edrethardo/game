@@ -1,6 +1,7 @@
 #include "renderer/minimap.h"
 #include "renderer/shader.h"
 #include "core/log.h"
+#include "game/zone_def.h"   // Zone::isCaveBoundary — picks the cave-mouth arch glyph
 #include <glad/glad.h>
 #include <cstring>
 #include <cmath>
@@ -252,7 +253,8 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
                    const EntityPool& entities,
                    const Vec3* otherPlayers, const bool* otherActive,
                    u32 otherPlayerCount,
-                   const WorldItemPool* worldItems)
+                   const WorldItemPool* worldItems,
+                   u8 zoneFloor)
 {
     if (s_gridW == 0 || s_gridD == 0) return;
     if (s_dirty) rebuildTexture(grid);
@@ -554,6 +556,83 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
             v[5] = {bottom, {0.5f, 0.0f}};
         };
 
+        // A CAVE MOUTH gets an ARCH, not a diamond — Diablo 2's automap marks a level entrance with
+        // a little gateway glyph, and it works because the shape says "you go THROUGH this" where a
+        // dot only says "something is here". Two legs and a lintel: a doorway in silhouette, which
+        // is the same thing the model in the world is.
+        //
+        // Three axis-aligned quads, 18 verts. WINDING IS LOAD-BEARING here exactly as it is for the
+        // diamond above — GL_CULL_FACE is on and never disabled — so each quad runs so that its
+        // triangles have a positive cross product, matching emitDiamond's right -> top -> left.
+        auto emitArch = [](MinimapVertex* v, f32 cx, f32 cy, f32 r) {
+            const f32 t    = r * 0.42f;          // leg thickness / lintel depth
+            const f32 span = r * 0.30f;          // height at which the legs meet the lintel
+            u32 n = 0;
+            auto quad = [&](f32 x0, f32 y0, f32 x1, f32 y1) {
+                v[n+0] = {{x0, y0, 0}, {0.0f, 0.0f}};
+                v[n+1] = {{x1, y0, 0}, {1.0f, 0.0f}};
+                v[n+2] = {{x1, y1, 0}, {1.0f, 1.0f}};
+                v[n+3] = {{x0, y0, 0}, {0.0f, 0.0f}};
+                v[n+4] = {{x1, y1, 0}, {1.0f, 1.0f}};
+                v[n+5] = {{x0, y1, 0}, {0.0f, 1.0f}};
+                n += 6;
+            };
+            quad(cx - r,     cy - r,    cx - r + t, cy + span);   // left jamb
+            quad(cx + r - t, cy - r,    cx + r,     cy + span);   // right jamb
+            quad(cx - r,     cy + span, cx + r,     cy + r);      // lintel
+        };
+        // THE CAIRN STONES — five dots on a ring, the way the stones stand in the field.
+        //
+        // Drawn as separate marks rather than an outlined circle on purpose: at this size a thin
+        // ring outline turns into a smudged blob, while five distinct dots stay countable and read
+        // as ARRANGED — which is the whole point of the landmark, and of its quest.
+        // Offsets are a hand-written unit ring (integer-free trig would be overkill for five fixed
+        // points, and hard-coding them keeps this a pure lookup with no libm call per frame).
+        auto emitRing = [](MinimapVertex* v, f32 cx, f32 cy, f32 r) {
+            static const f32 OFF[5][2] = {
+                { 0.00f,  1.00f}, { 0.95f,  0.31f}, { 0.59f, -0.81f},
+                {-0.59f, -0.81f}, {-0.95f,  0.31f},
+            };
+            const f32 dot = r * 0.40f;           // each stone
+            const f32 ring = r * 0.78f;          // how far out they stand
+            u32 n = 0;
+            for (u32 i = 0; i < 5; i++) {
+                const f32 x = cx + OFF[i][0] * ring, y = cy + OFF[i][1] * ring;
+                // Same right -> top -> left order as emitDiamond: GL_CULL_FACE is on and never
+                // disabled, so a reversed winding silently draws nothing.
+                v[n+0] = {{x + dot, y,       0}, {1.0f, 0.5f}};
+                v[n+1] = {{x,       y + dot, 0}, {0.5f, 1.0f}};
+                v[n+2] = {{x - dot, y,       0}, {0.0f, 0.5f}};
+                v[n+3] = {{x + dot, y,       0}, {1.0f, 0.5f}};
+                v[n+4] = {{x - dot, y,       0}, {0.0f, 0.5f}};
+                v[n+5] = {{x,       y - dot, 0}, {0.5f, 0.0f}};
+                n += 6;
+            }
+        };
+        static constexpr u32 RING_VERTS = 30;
+
+        // THE RIFT — a tall narrow tear, pointed at both ends.
+        //
+        // Deliberately NOT an arch: an arch is a way through that was always there, and the Hellgate
+        // is a wound forced open. Narrow-and-pointed also stays distinct from the diamond at a
+        // glance, which matters because both are lit warm.
+        auto emitRift = [](MinimapVertex* v, f32 cx, f32 cy, f32 r) {
+            const f32 w = r * 0.34f;             // half-width at the waist
+            v[0] = {{cx + w, cy,     0}, {1.0f, 0.5f}};
+            v[1] = {{cx,     cy + r, 0}, {0.5f, 1.0f}};
+            v[2] = {{cx - w, cy,     0}, {0.0f, 0.5f}};
+            v[3] = {{cx + w, cy,     0}, {1.0f, 0.5f}};
+            v[4] = {{cx - w, cy,     0}, {0.0f, 0.5f}};
+            v[5] = {{cx,     cy - r, 0}, {0.5f, 0.0f}};
+        };
+        static constexpr u32 RIFT_VERTS = 6;
+
+        static constexpr u32 ARCH_VERTS = 18;
+        // Sized to the LARGEST glyph, derived rather than typed: the ring is 30 verts and a buffer
+        // sized to the arch's 18 would overrun it.
+        static constexpr u32 GLYPH_MAX_VERTS =
+            (RING_VERTS > ARCH_VERTS ? RING_VERTS : ARCH_VERTS);
+
         MinimapVertex coreBatch[MAX_SHRINE_ICONS * 6];
         u32 coreVerts = 0;
 
@@ -597,19 +676,57 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
             // Colour carries WHICH, shape carries WHAT — the rule this icon block already follows.
             // A gate is the warm orange of a way through; a waypoint the same blue its travel list
             // and its discovery message use, so the three readings agree.
-            const Vec3 c = zgate  ? Vec3{0.95f, 0.55f, 0.20f}
-                         : waypnt ? Vec3{0.55f, 0.85f, 1.00f}
-                                  : Shrine::colorOf(Shrine::buffOf(wi.item));
-            MinimapVertex diamond[6];
-            emitDiamond(diamond, icoX, icoY, SHRINE_R);
-            glBufferSubData(GL_ARRAY_BUFFER, 0, 6 * sizeof(MinimapVertex), diamond);
+            // A cave mouth is grey stone rather than the warm orange of a portal, matching the model
+            // it marks — the destination's terrain decides, via the same predicate the world
+            // renderer uses, so the icon and the thing it points at can never disagree.
+            // The SAME predicate the world renderer picks the mesh with, so the shape on the map
+            // and the thing standing in the field can never disagree about what kind of way this is.
+            const Zone::Entrance ekind =
+                zgate ? Zone::entranceFor(zoneFloor, static_cast<u8>(wi.item.itemLevel))
+                      : Zone::Entrance::STONE;
+            // SHAPE carries WHAT, COLOUR carries WHICH — the rule this icon block already followed.
+            // Everything you WALK INTO keeps the arch (a cave, a cemetery gate, a stair mouth, a
+            // service door) and is told apart by colour; the two that are not doorways at all get
+            // their own shapes, because no amount of tinting would make a ring of standing stones
+            // or a torn rift read as a door.
+            const bool stones = zgate && ekind == Zone::Entrance::STONES;
+            const bool rift   = zgate && ekind == Zone::Entrance::HELLGATE;
+            const bool cave   = zgate && !stones && !rift && ekind != Zone::Entrance::STONE;
+            Vec3 c;
+            switch (ekind) {
+                case Zone::Entrance::CAVE:     c = {0.72f, 0.72f, 0.76f}; break;  // bare rock
+                case Zone::Entrance::STONES:   c = {0.78f, 0.74f, 0.62f}; break;  // weathered granite
+                case Zone::Entrance::HELLGATE: c = {0.90f, 0.28f, 0.18f}; break;  // ember, the only red
+                case Zone::Entrance::GRAVE:    c = {0.55f, 0.62f, 0.55f}; break;  // mossy iron
+                case Zone::Entrance::TUBE:     c = {0.30f, 0.55f, 0.95f}; break;  // Underground blue
+                case Zone::Entrance::DOOR:     c = {0.62f, 0.66f, 0.60f}; break;  // painted steel
+                default:
+                    c = zgate  ? Vec3{0.95f, 0.55f, 0.20f}
+                      : waypnt ? Vec3{0.55f, 0.85f, 1.00f}
+                               : Shrine::colorOf(Shrine::buffOf(wi.item));
+                    break;
+            }
+            MinimapVertex glyph[GLYPH_MAX_VERTS];
+            const u32 glyphVerts = cave ? ARCH_VERTS : stones ? RING_VERTS : rift ? RIFT_VERTS : 6u;
+            if      (cave)   emitArch(glyph, icoX, icoY, SHRINE_R);
+            else if (stones) emitRing(glyph, icoX, icoY, SHRINE_R);
+            else if (rift)   emitRift(glyph, icoX, icoY, SHRINE_R);
+            else             emitDiamond(glyph, icoX, icoY, SHRINE_R);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, glyphVerts * sizeof(MinimapVertex), glyph);
             if (s_minimapShader.loc_color >= 0)
                 glUniform4f(s_minimapShader.loc_color, c.x, c.y, c.z, alpha);
-            glDrawArrays(GL_TRIANGLES, 0, 6);
+            glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(glyphVerts));
 
-            // Centre pip — same white for all, so every shrine's core batches into one draw.
-            emitDiamond(&coreBatch[coreVerts], icoX, icoY, SHRINE_CORE);
-            coreVerts += 6;
+            // Centre pip — same white for all, so every shrine's core batches into one draw. The
+            // arch deliberately has NO pip: its opening is the read, and a dot in the doorway fills
+            // in the one part of the glyph that says "way through".
+            // The three ENTRANCE glyphs carry no pip: the arch's opening, the ring's empty middle
+            // and the rift's slot are each the read, and a dot dropped in the centre fills in
+            // exactly the part that says "way through".
+            if (!cave && !stones && !rift) {
+                emitDiamond(&coreBatch[coreVerts], icoX, icoY, SHRINE_CORE);
+                coreVerts += 6;
+            }
             drawn++;
         }
 

@@ -69,6 +69,13 @@ struct LaunchOptions {
     // zone at all — measured, and it is why every early overworld probe went silent within a second
     // of arriving. Without this there is no way to soak-test the acts.
     bool endgame = false;
+    // --quests-done: mark every act quest complete on the loaded hero. The post-acts FREE ROAM
+    // (engine_autoplay_zone.cpp) only engages for a hero who arrives with the chain already
+    // finished, which otherwise costs a full two-act playthrough to reach — the same reason
+    // --endgame and --victory exist. Compose it: --load <slot> --endgame --zone 52 --autoplay
+    // --quests-done reproduces "my finished hero walks into the overworld with the bot driving".
+    bool questsDone = false;
+
     bool arenaCouch = false;                   // --arena-couch: local-versus arena, two fresh lanes
     bool autoplayCouch = false;                // --autoplay-couch: split-screen, BOTH lanes bot-driven
     // --devperf: emit the 1 Hz [DEVPERF] measurement line. OFF by default so a build you actually

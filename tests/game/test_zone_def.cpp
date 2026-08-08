@@ -372,3 +372,54 @@ TEST_CASE("the respawn anchor stays inside the world it belongs to") {
         CHECK(anchorZ < static_cast<f32>(z.gridSize) - 1.0f);
     }
 }
+
+// Every interior's doorway is modelled as what it actually is, and reads the same from BOTH sides.
+//
+// The symmetry is the load-bearing half. An entrance is one object seen from two worlds — the Den's
+// mouth out in the Blood Buffer and the way back out seen from inside the Den are the same hole in
+// the same rock — and keying on the destination alone is what once dressed the Den's exit as an
+// orange standing stone floating in a cave. Anything that picks a MESH or a MAP GLYPH goes through
+// entranceFor, so this pins both consumers at once.
+TEST_CASE("zone entrances are modelled per interior and symmetric") {
+    struct Pair { u8 outside, interior; Zone::Entrance kind; const char* what; };
+    const Pair PAIRS[] = {
+        { 52, 53, Zone::Entrance::CAVE,     "the Den of Evil is a hole in a rock" },
+        { 56, 57, Zone::Entrance::STONES,   "TristRAM is reached through the Cairn Stones" },
+        { 65, 66, Zone::Entrance::HELLGATE, "Hellgate: Localhost is a forced rift" },
+        { 54, 55, Zone::Entrance::GRAVE,    "the Deprecated Graveyard is behind a cemetery gate" },
+        { 59, 60, Zone::Entrance::TUBE,     "Act 2 is down an Underground stair" },
+        { 62, 64, Zone::Entrance::DOOR,     "Bank is through a staff maintenance door" },
+    };
+    for (const Pair& p : PAIRS) {
+        CAPTURE(p.what);
+        CHECK(Zone::entranceFor(p.outside, p.interior) == p.kind);   // walking in
+        CHECK(Zone::entranceFor(p.interior, p.outside) == p.kind);   // and back out
+    }
+
+    // The old narrow predicate still answers for the cave and ONLY the cave — the stone circle and
+    // the rift must not inherit the cave mouth's mesh just because they are also interiors.
+    CHECK(Zone::isCaveBoundary(52, 53));
+    CHECK(Zone::isCaveBoundary(53, 52));
+    CHECK_FALSE(Zone::isCaveBoundary(56, 57));
+    CHECK_FALSE(Zone::isCaveBoundary(65, 66));
+
+    // A road-to-road border is not an entrance at all: it is a walk, and dressing it as a doorway
+    // would put a monument in the middle of an open field.
+    CHECK(Zone::entranceFor(52, 54) == Zone::Entrance::STONE);
+}
+
+// EVERY interior has a modelled entrance. An interior that forgets to author one still WORKS — it
+// falls back to the plain standing stone — which is exactly why this needs a test rather than a
+// review: the failure is a silent downgrade to the generic marker, in a corner of a zone nobody
+// walks to twice.
+TEST_CASE("every overworld interior authors a modelled entrance") {
+    u32 interiors = 0;
+    for (const Zone::ZoneDef& z : Zone::ZONES) {
+        if (z.returnFloor == 0) continue;          // a road zone, not an interior
+        interiors++;
+        CAPTURE(z.name);
+        CHECK(z.entrance != Zone::Entrance::STONE);
+        CHECK(z.entrance < Zone::Entrance::COUNT);
+    }
+    CHECK(interiors == 6);   // Den, Graveyard, TristRAM, Act 2, Bank, the Hellgate
+}

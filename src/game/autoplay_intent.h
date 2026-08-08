@@ -157,6 +157,17 @@ struct BotView {
     // reactively — on an incoming melee swing or a tracked projectile about to land — exactly like
     // the perfect-block tap. The counter IS the class fantasy (Aaron), so spending it blind wastes it.
     bool skillIsCounter[4] = {};
+    // Per-slot: does this skill CONSUME the minions it uses (Tinkerer Detonate Swarm — every drone
+    // you control explodes and then DIES)? For a summoner that is not a damage skill, it is spending
+    // the build's whole engine for one burst, and the biggest-first dump treated it as ordinary
+    // damage: with Swarm Queen and Swarm Deploy both cooling, slot 2 IS the biggest castable, so the
+    // bot detonated its own swarm every 6 seconds forever and never fielded drones at all.
+    // Withheld from the dump and cast only as a LAST RESORT (see autoplay_combat.h).
+    bool skillIsMinionSacrifice[4] = {};
+    // Per-slot ENERGY COST, filled for every unlocked slot whether or not it is castable this tick.
+    // The policy needs the cost of a summon it CANNOT currently afford in order to save up for it,
+    // which is exactly the case castableSkill cannot express.
+    f32  skillCost[4] = {};
     // Per-slot: is this a TELEPORT / GAP-CLOSE skill (SkillDef.distance > 0 — Holy Smite, Shadow Step/
     // Strike, Phase Dash)? The policy casts one to CLOSE the gap to a target beyond reach (it blinks
     // toward the facing), so a melee build teleports onto a far enemy instead of only walking.

@@ -61,6 +61,24 @@ Vec3 Engine::autoplayGoalPos() const {
     return m_level.floorDoorPos;
 }
 
+// Nearest live hostile to the player in this zone, or nullptr.
+//
+// Shared by the CLEAR_ZONE quest hunt and the post-acts free roam so the two cannot disagree about
+// what counts as a hostile — the skip set matches the bot's own target scan and CombatQuery.
+const Entity* Engine::nearestZoneHostile() const {
+    const Entity* nearest = nullptr;
+    f32 bestD2 = 1e18f;
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        const Entity& e = m_entities.entities[m_entities.activeList[a]];
+        if (e.flags & ENT_DEAD)     continue;
+        if (e.flags & ENT_FRIENDLY) continue;
+        if (e.enemyType == EnemyType::PROP) continue;
+        const f32 d2 = lengthSq(e.position - m_localPlayer.position);
+        if (d2 < bestD2) { bestD2 = d2; nearest = &e; }
+    }
+    return nearest;
+}
+
 // Where the act wants the bot to go, right now.
 //
 // Returns false when there is nothing to head for — the acts are finished, or this is a world the
@@ -95,17 +113,7 @@ bool Engine::zoneBotGoal(Vec3& outGoal, bool& outNeedsInteract) {
             // difference between finishing the quest and circling forever.
             // Same skip set the target scan and CombatQuery use, so "is this a hostile" cannot
             // drift between the thing that fights them and the thing that counts them.
-            const Entity* nearest = nullptr;
-            f32 bestD2 = 1e18f;
-            for (u32 a = 0; a < m_entities.activeCount; a++) {
-                const Entity& e = m_entities.entities[m_entities.activeList[a]];
-                if (e.flags & ENT_DEAD)     continue;
-                if (e.flags & ENT_FRIENDLY) continue;
-                if (e.enemyType == EnemyType::PROP) continue;
-                const f32 d2 = lengthSq(e.position - m_localPlayer.position);
-                if (d2 < bestD2) { bestD2 = d2; nearest = &e; }
-            }
-            if (nearest) { outGoal = nearest->position; return true; }
+            if (const Entity* nearest = nearestZoneHostile()) { outGoal = nearest->position; return true; }
             // Nothing left alive: the CLEAR poll completes the quest within a tick, so just hold at
             // the centre rather than reporting "no goal" and ending the run a frame early.
             outGoal = zoneCentre(*def);
@@ -116,7 +124,58 @@ bool Engine::zoneBotGoal(Vec3& outGoal, bool& outNeedsInteract) {
 
     // 2. Nothing to do here: take the next hop toward the act's objective.
     const u8 goalZone = ZoneRoute::objectiveZone(mask);
-    if (goalZone == 0) return false;                       // both acts done — the run is over
+    if (goalZone == 0) {
+        // BOTH ACTS DONE. What happens next depends on WHOSE hero this is, and the two answers are
+        // genuinely different:
+        //
+        //  * A hero the MODE minted (--autoplay from the menu, a soak, a roll-on) has finished what
+        //    it was started for, so returning false ends the step and updateAutoplay mints the next
+        //    run. That is the soak's pass condition and stays byte-identical.
+        //
+        //  * A hero the PLAYER loaded has no next run to go to — rolling it over would replace their
+        //    character, and ending the run just switches the bot off. Both were reported as bugs, and
+        //    they are the same defect seen from two sides: a finished hero had no objective here, so
+        //    the mode had nothing to do but stop. It now FREE ROAMS instead: hunt what is alive, and
+        //    when the zone is clear move to the next one. That is what an endgame player does with
+        //    the overworld anyway.
+        if (!m_laneLoadedFromSave[m_localPlayerIndex]) return false;
+
+        // Track the previous zone so the roam does not bounce between two neighbours. Derived from a
+        // change in zoneFloor rather than hooked into the entry path — every world entry would have
+        // to remember to set it, and that is the flag-drift trap this file's neighbours document.
+        if (ap().zoneRoamHere != m_level.zoneFloor) {
+            ap().zoneRoamFrom = ap().zoneRoamHere;
+            ap().zoneRoamHere = m_level.zoneFloor;
+        }
+
+        if (const Entity* prey = nearestZoneHostile()) { outGoal = prey->position; return true; }
+
+        // Zone cleared: leave by an edge. Two rules, both measured rather than assumed:
+        //
+        //  * NEVER take the TOWN link. The first zone's south edge is the town, and the town has its
+        //    own autoplay policy that walks to the portal and starts a DUNGEON run — so the first
+        //    version of this roam cleared the Blood Buffer, strolled home and was on dungeon floor 5
+        //    a minute later. The overworld roam must stay in the overworld.
+        //  * Prefer an edge we did not just arrive through, but ACCEPT one if it is the only way out
+        //    (a dead-end zone), because backtracking beats standing still.
+        s8 fallbackDir = -1;
+        for (u8 d = 0; d < 4; d++) {
+            const u8 n = def->neighbour[d];
+            if (n == Zone::NO_LINK || n == Zone::TOWN_FLOOR) continue;
+            if (n == ap().zoneRoamFrom) { if (fallbackDir < 0) fallbackDir = static_cast<s8>(d); continue; }
+            outGoal = zoneEdgeCrossPos(static_cast<Zone::Dir>(d));
+            return true;
+        }
+        if (fallbackDir >= 0) {
+            outGoal = zoneEdgeCrossPos(static_cast<Zone::Dir>(fallbackDir));
+            return true;
+        }
+        // An INTERIOR (TristRAM, a den, the rift) has no edges at all — its only way out is the
+        // return gate, which is pressed, not walked through.
+        outNeedsInteract = true;
+        outGoal = zoneReturnPos(*def);
+        return true;
+    }
     const ZoneRoute::Hop hop = ZoneRoute::nextHop(m_level.zoneFloor, goalZone, mask);
     if (hop.kind == ZoneRoute::HopKind::NONE) return false;
 
