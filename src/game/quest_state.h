@@ -3,12 +3,9 @@
 // Header-only and engine-free (the zone_route.h / free_play.h pattern) so the act's rules unit-test
 // with no GL and no live level.
 //
-// STATUS — this is the FOUNDATION, not yet the live path. `Progress` WILL BE what the save file
-// holds at SAVE_VERSION 7 (a later commit in this series). TODAY SAVE_VERSION is 6, nothing in the
-// engine constructs a `Progress` at all, and quest completion still lives in `Engine::m_questMask`
-// — a plain u64, written by engine_persist.cpp and read by every live consumer. Until that
-// migration lands, changing this struct alone changes NOTHING a player can observe: m_questMask is
-// what actually gates the acts.
+// `Progress` IS the save payload at SAVE_VERSION 7, and it is the AUTHORITY: `Engine::m_questProgress`
+// holds it per lane, engine_persist.cpp writes it, and a v6 file is reconstructed into it by
+// migrateFromMask on load. `Engine::m_questMask` survives only as a CACHE refreshed from here.
 //
 // THE DERIVED MASK is the compatibility hinge. ZoneRoute, the gate refusals and the whole autoplay
 // act branch consume a plain u64 of completed quests. They keep doing so — completionMask() builds
@@ -29,8 +26,7 @@ namespace Quest {
 //   COMPLETE — every objective satisfied
 enum struct State : u8 { LOCKED, OFFERED, ACTIVE, COMPLETE, COUNT };
 
-// Per character. This WILL BE the save payload at SAVE_VERSION 7; engine_persist.cpp still writes
-// the u64 m_questMask today (see STATUS above).
+// Per character. This IS the save payload at SAVE_VERSION 7 (engine_persist.cpp, the per-player tail).
 //
 // `obj` holds STORED progress only. A CLEAR_ZONE objective deliberately has no stored counterpart:
 // "how many hostiles are left" is a property of the entity pool, which is already polled every
