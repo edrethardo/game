@@ -7,6 +7,7 @@
 //
 // Geometry comes entirely from InventoryUI::journalLayout — this file never re-derives a rect.
 #include "renderer/hud.h"
+#include "renderer/hud_internal.h"   // pushLine/flushHUD — the opaque backing
 #include "renderer/font.h"
 #include "game/inventory_ui.h"
 #include "game/quest_def.h"
@@ -88,6 +89,30 @@ void HUD::drawJournalPanel(u32 sw, u32 sh, const Quest::Progress& prog,
     const InventoryUI::SlotHit hover  = InventoryUI::hitTestJournal(sw, sh, mouseX, mouseY);
     const f32 s  = r.uiScale;
     const f32 tx = 1.0f * s;   // text scale
+
+    // Opaque backing, drawn first — the same thing drawStashPanel does, and for the same reason:
+    // the equipment column and the BACKPACK GRID both sit underneath this area. Without it the
+    // narration is drawn straight over item icons and is unreadable on any bag that is not empty
+    // (which the first screenshots of this panel could not show, because the test hero's bag was).
+    //
+    // Extents come from JournalRects alone — this file re-derives no geometry, which is the whole
+    // point of the layout split. The LIST column is the deeper of the two, so its full row span is
+    // what sets the bottom edge; the detail pane's worst case (title + narration + giver +
+    // objectives) is shorter than that.
+    {
+        const f32 leftX  = r.listX;
+        const f32 rightX = r.detailX + r.detailW;
+        const f32 topY   = r.tabY + r.tabH;
+        const f32 botY   = r.listTopY - r.rowH * static_cast<f32>(InventoryUI::JOURNAL_ROWS);
+        const f32 pad    = 10.0f * s;
+        // Cold ink rather than the stash's warm {0.07,0.06,0.04}: at a glance the two full-width
+        // panels must not read as the same screen. Dark, because every text colour on this panel
+        // (white / gold / green) is chosen to sit on a dark ground.
+        const Vec3 bg = {0.05f, 0.052f, 0.072f};
+        for (f32 fy = botY - pad; fy < topY + pad; fy += 1.0f)
+            pushLine(leftX - pad, fy, rightX + pad, fy, bg);
+        flushHUD();
+    }
 
     // --- Act tabs ---
     for (u32 t = 0; t < InventoryUI::JOURNAL_TABS; t++) {

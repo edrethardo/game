@@ -355,6 +355,37 @@ void Engine::updateInventoryInteraction(f32 dt) {
         // when something is equipped that grants one, so the cursor must skip it otherwise.
         HUD::EquipSkillSlot navEquip[MAX_EQUIP_SKILL_SLOTS];
         const u32 navEquipCount = buildEquipSkillSlots(navEquip);
+
+        // J toggles the Journal. NOT gated on cursorMode, and that is the entire point: the panel
+        // cycle lives on the shoulder buttons (controller only) and the Journal's mouse hit-test is
+        // consulted only while the Journal is ALREADY the active panel — self-blocking, so without
+        // this key a keyboard-and-mouse player can navigate the Journal but can never enter it.
+        //
+        // A FIXED scancode, not a new GameAction: those ordinals ARE controls.json's on-disk format
+        // (serialized by enum position), so appending one for a convenience key would mean a
+        // BINDINGS_REV migration. Same shape as the character screen's fixed T/K.
+        //
+        // It TOGGLES rather than only entering, so a fixed key can never be a trap: J takes you back
+        // to the panel you came from.
+        if (kb && Input::isKeyPressed(SDL_SCANCODE_J)) {
+            if (m_invCursorPanel == INV_PANEL_JOURNAL) {
+                // The equip-skill bar can have emptied while the Journal was up (a legendary was
+                // unequipped from it), and the panel cycle already refuses to land there when it
+                // holds nothing — returning to it would park the cursor on an empty bar.
+                m_invCursorPanel = (m_invPanelBeforeJournal == INV_PANEL_EQUIP_SKILL && navEquipCount == 0)
+                                 ? INV_PANEL_BACKPACK : m_invPanelBeforeJournal;
+                m_invCursorIndex = 0;
+            } else {
+                // Never remember a panel outside the cycle (STASH): its cursor maps through a
+                // layout that is only on screen while the stash is open, so returning to it would
+                // park the synthetic cursor on a panel nobody is looking at.
+                m_invPanelBeforeJournal = (m_invCursorPanel < INV_PANEL_COUNT)
+                                        ? m_invCursorPanel : INV_PANEL_BACKPACK;
+                m_invCursorPanel = INV_PANEL_JOURNAL;
+                m_invCursorQuest = 0;   // enter on row 0 — the same reset the act flip does
+            }
+            AudioSystem::play(SfxId::UI_CLICK);
+        }
         // Slots in the panel the cursor is currently on.
         const u8 panelSlots =
             (m_invCursorPanel == INV_PANEL_BACKPACK)  ? static_cast<u8>(InventoryUI::BP_COLS * InventoryUI::BP_ROWS) :

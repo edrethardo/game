@@ -1716,6 +1716,9 @@ private:
     // beside the row is what lets a tab flip reset the row in one place.
     u8 m_invCursorQuest = 0;    // selected row within the visible act's quest list
     u8 m_invJournalAct  = 0;    // 0 = ACT I, 1 = ACT II
+    // Where the J key came FROM, so pressing it again goes back there instead of dumping the
+    // player on the backpack. Only meaningful while the Journal is up.
+    u8 m_invPanelBeforeJournal = INV_PANEL_BACKPACK;
     void inventoryCursorToMouse(u32 sw, u32 sh, s32& mx, s32& my) const;
     // True when the inventory highlight + tooltip should follow the cursor (WASD/E or D-pad) rather
     // than the physical mouse. Split-screen P2 (gamepad-only) is always cursor; player 0 follows the
