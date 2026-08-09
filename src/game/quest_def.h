@@ -19,6 +19,19 @@
 
 namespace Quest {
 
+// Capacity, sized for growth rather than for today. `Quest::Progress` (quest_state.h) WILL BE
+// serialized at these sizes once the save format grows its v7 tail — a later commit in this
+// series; today nothing writes them to disk. Enlarging them AFTER that lands costs a
+// SAVE_VERSION bump and another pair of legacy readers, so do the widening now, while it is
+// still free. Ten quests are authored today.
+inline constexpr u32 MAX_QUESTS = 32;   // per-character state arrays are sized to this
+inline constexpr u32 MAX_OBJ    = 4;    // objectives per quest
+
+// completionMask() and actComplete() carry quest completion in a u64, so a quest past bit 63
+// cannot be represented at all — actComplete would never return true for its act and the onward
+// gate would refuse forever. Raising this past 64 means widening those two first.
+static_assert(MAX_QUESTS <= 64, "completionMask()/actComplete() are u64 — quest 64+ is unrepresentable");
+
 // How a quest is satisfied. These three are exactly what the engine can already observe without new
 // bookkeeping — which is why there are three and not ten.
 enum struct Trigger : u8 {
@@ -139,5 +152,12 @@ inline bool actComplete(u64 mask, u8 act) {
     }
     return true;
 }
+
+// The table must fit the per-character state arrays it is indexed against (quest_state.h sizes
+// them to MAX_QUESTS). A 33rd quest would NOT overflow anything — every loop over those arrays is
+// bounded by MAX_QUESTS — it would be silently IGNORED: its completion could never appear in the
+// derived mask, so actComplete() for its act could never return true and the onward gate would
+// refuse forever. Caught here at compile time instead of as a stranded run.
+static_assert(COUNT <= MAX_QUESTS, "QUESTS[] outgrew the per-character state arrays — raise MAX_QUESTS (save bump)");
 
 } // namespace Quest
