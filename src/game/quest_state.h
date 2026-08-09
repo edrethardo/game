@@ -162,4 +162,27 @@ inline void noteActivate(Progress& p, u8 questIdx, u8 fixtureIdx) {
     reevaluate(p, questIdx);
 }
 
+// ---- Quest givers -------------------------------------------------------------------------------
+
+// The quest this giver currently has to hand out: their first non-COMPLETE quest in table order,
+// which is the road's walking order. 0xFF = they have nothing left.
+//
+// One quest at a time on purpose. A giver who dumps their whole act at once turns the Journal into
+// a wall of text on the first conversation and removes any sense of the chain advancing.
+//
+// LOCKED counts as outstanding, not as skippable: a quest the character has never met is exactly
+// what a giver exists to hand over. So does ACTIVE — a quest in progress stays the one that giver
+// talks about until its deed is done.
+inline u8 giverOutstanding(const Progress& p, u8 giverIdx) {
+    // A contract, not a memory fix: the scan below never indexes GIVERS[], so an unknown giver
+    // already falls through to 0xFF. Keep the guard anyway — the day a caller-facing field of
+    // GIVERS[giverIdx] is read here, its absence becomes a real out-of-bounds read.
+    if (giverIdx >= GIVER_COUNT) return 0xFF;
+    for (u32 i = 0; i < COUNT; i++) {
+        if (QUESTS[i].giverIdx != giverIdx) continue;
+        if (p.state[i] != static_cast<u8>(State::COMPLETE)) return static_cast<u8>(i);
+    }
+    return 0xFF;
+}
+
 } // namespace Quest

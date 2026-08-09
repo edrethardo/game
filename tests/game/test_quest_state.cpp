@@ -323,3 +323,41 @@ TEST_CASE("quest progress round-trips through a byte buffer at the serialized si
     REQUIRE(Quest::completionMask(in) == Quest::completionMask(out));
     REQUIRE(in.obj[2][1] == 0b00010001);   // the raw byte, not objectiveProgress — see above
 }
+
+// ---- Which quest a giver is currently holding ---------------------------------------------------
+
+// Giver 0 (Akara) holds quests 0 and 1; giver 1 (Charsi) holds 2, 3 and 4.
+TEST_CASE("a giver offers its first unfinished quest, in table order") {
+    Quest::Progress p{};
+    REQUIRE(Quest::giverOutstanding(p, 0) == 0);
+
+    p.state[0] = static_cast<u8>(Quest::State::COMPLETE);
+    REQUIRE(Quest::giverOutstanding(p, 0) == 1);
+
+    p.state[1] = static_cast<u8>(Quest::State::COMPLETE);
+    REQUIRE(Quest::giverOutstanding(p, 0) == 0xFF);   // nothing left to give
+}
+
+TEST_CASE("a giver with an in-progress quest keeps offering that one") {
+    Quest::Progress p{};
+    Quest::offer(p, 0);
+    Quest::noteTalk(p, 0);
+    REQUIRE(Quest::giverOutstanding(p, 0) == 0);      // ACTIVE, not COMPLETE - still theirs
+}
+
+TEST_CASE("an unknown giver index yields nothing rather than reading out of bounds") {
+    Quest::Progress p{};
+    REQUIRE(Quest::giverOutstanding(p, 200) == 0xFF);
+}
+
+TEST_CASE("each giver's quests all belong to that giver's own act") {
+    for (u32 i = 0; i < Quest::COUNT; i++) {
+        const Quest::QuestDef& q = Quest::QUESTS[i];
+        const Quest::GiverDef& g = Quest::GIVERS[q.giverIdx];
+        CAPTURE(std::string(q.name));
+        CAPTURE(std::string(g.name));
+        // Act 1's hub is the town (98), Act 2's is Null Terminus (61). A giver standing in the
+        // wrong hub can never be reached at the point its quest is relevant.
+        REQUIRE(Quest::actOf(q.zoneFloor) == (g.hubFloor == 98 ? 1 : 2));
+    }
+}
