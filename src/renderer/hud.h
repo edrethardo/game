@@ -4,6 +4,7 @@
 #include "core/math.h"
 
 #include "game/item.h"   // SkillId / ItemSlot / SkillDef — the skill tooltip is typed on them
+#include "game/quest_state.h"  // Quest::Progress — the journal panel is typed on it
 
 struct PlayerInventory;
 struct ItemDef;
@@ -78,6 +79,18 @@ namespace HUD {
     // the 3x3 Tanky/Moderate/Glass x Magic/Melee/Ranged cells. Geometry from
     // InventoryUI::buildGridLayout (single-sourced with the hit-test). mouseX/Y drive hover.
     void drawBuildGrid(u32 sw, u32 sh, u8 autoMode, u8 buildCell, s32 mouseX, s32 mouseY);
+
+    // Quest journal panel (right column of the inventory screen): act tabs, the act's quest list,
+    // and the selected quest's narration + objective rows. Geometry from InventoryUI::journalLayout
+    // (single-sourced with the hit-test).
+    //
+    // `liveQuestIdx` / `liveRemaining` / `liveTotal` carry the CLEAR_ZONE count, which is a property
+    // of the entity pool and is deliberately not stored in Quest::Progress. 0xFF = the player is not
+    // standing in a quest zone, so no live row is drawn.
+    void drawJournalPanel(u32 sw, u32 sh, const Quest::Progress& prog,
+                          u8 selectedRow, u8 actTab,
+                          u8 liveQuestIdx, u16 liveRemaining, u16 liveTotal,
+                          s32 mouseX, s32 mouseY);
     void drawStashPanel(u32 sw, u32 sh, const ItemInstance* items, u8 page,
                         const ItemDef* itemDefs, s32 mouseX, s32 mouseY);
 

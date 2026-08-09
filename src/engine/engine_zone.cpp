@@ -555,6 +555,10 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
         WorldItemSystem::spawn(m_worldItems, gate, rpos, &m_level.grid, 0xFF);
         LOG_INFO("Zone fixture: RETURN GATE -> floor %u", (u32)def.returnFloor);
     }
+
+    // Snapshot the roster AFTER the remembered-state cull, so the Journal's n/m row counts against
+    // what this visit actually spawned rather than what a first visit would have.
+    m_zoneHostilesAtEntry = zoneHostilesAlive();
 }
 
 // --- Act 1 quests ------------------------------------------------------------------------------

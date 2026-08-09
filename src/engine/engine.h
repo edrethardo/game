@@ -1504,6 +1504,10 @@ private:
     // through ground you have already cleared.
     static constexpr u32 ZONE_SLOTS = Zone::FLOOR_MAX - Zone::FLOOR_MIN + 1;
     u8  m_zoneHostilesLeft[ZONE_SLOTS];   // init'd to 0xFF in Engine::init   // 0xFF = never visited; else survivors at last exit
+    // Hostiles present when this zone was built — the denominator of the Journal's
+    // "Hostiles remaining" row. Recorded at spawn time rather than derived, because the roster is
+    // culled by zoneApplyRemembered on re-entry and a live re-count would show a shrinking total.
+    u16 m_zoneHostilesAtEntry = 0;
     u64 m_zoneBossSeenAlive = 0;               // latch: the boss WAS present, so its absence is a kill
     u64 m_zoneBossDead = 0;                    // bit per zone slot — a killed zone boss stays dead
     void zoneRememberState();                  // called while in a zone; records survivors + boss
