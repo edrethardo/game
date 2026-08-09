@@ -1694,18 +1694,28 @@ private:
     // controller reaches it with no dedicated chord. Skipped by the cycle while the mode is off?
     // No: reachable always, so the mode TOGGLE itself is controller-reachable.
     static constexpr u8 INV_PANEL_BUILD       = 4;
-    static constexpr u8 INV_PANEL_COUNT       = 5;   // main-inventory cycle length
+    // Quest journal — also IN the main cycle, so controller and Switch reach it exactly as they
+    // reach the build grid, with no dedicated chord. Appended rather than inserted: STASH moves up
+    // with it, which is free because STASH sits OUTSIDE the cycle (it is entered from the town
+    // stash chest) and its value is only ever "the next free panel id".
+    static constexpr u8 INV_PANEL_JOURNAL     = 5;
+    static constexpr u8 INV_PANEL_COUNT       = 6;   // main-inventory cycle length
     // Stash-mode cursor panel — NOT part of the cycle above. While the stash is open the cursor lives
     // on either the stash grid (this) or the backpack (INV_PANEL_BACKPACK), so a controller/Switch can
     // navigate + transfer without a mouse. Value > CLASS_SKILL, so inventoryCursorToMouse handles it
     // BEFORE its skill-bar branch.
-    static constexpr u8 INV_PANEL_STASH       = 5;
+    static constexpr u8 INV_PANEL_STASH       = 6;
 
     // Park the synthetic cursor on the D-pad-selected slot, so the gamepad drives the SAME hover
     // path the mouse does (items and skills alike) instead of needing its own.
     // Build-grid cursor position while m_invCursorPanel == INV_PANEL_BUILD: 0-8 = grid cells
     // (row*3+col), 9 = the mode-toggle row above the grid.
     u8 m_invCursorBuild = 0;
+    // Journal cursor while m_invCursorPanel == INV_PANEL_JOURNAL. The act tab is part of the
+    // cursor, not of the quest data: which act you are LOOKING at is a UI position, and storing it
+    // beside the row is what lets a tab flip reset the row in one place.
+    u8 m_invCursorQuest = 0;    // selected row within the visible act's quest list
+    u8 m_invJournalAct  = 0;    // 0 = ACT I, 1 = ACT II
     void inventoryCursorToMouse(u32 sw, u32 sh, s32& mx, s32& my) const;
     // True when the inventory highlight + tooltip should follow the cursor (WASD/E or D-pad) rather
     // than the physical mouse. Split-screen P2 (gamepad-only) is always cursor; player 0 follows the

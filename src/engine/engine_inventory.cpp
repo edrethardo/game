@@ -108,6 +108,19 @@ void Engine::inventoryCursorToMouse(u32 sw, u32 sh, s32& mx, s32& my) const {
         return;
     }
 
+    // Journal. Handled BEFORE the skill-bar branch below for the same reason the stash is: its
+    // panel value is > CLASS_SKILL, so without this the cursor would park on the equip skill bar
+    // and the panel would be reachable but unnavigable.
+    if (m_invCursorPanel == INV_PANEL_JOURNAL) {
+        const InventoryUI::JournalRects r = InventoryUI::journalLayout(sw, sh);
+        // Rows DESCEND from listTopY, so row i's centre is listTopY - rowH*(i + 0.5) — the same
+        // inversion hitTestJournal does, which is what makes the pad's hover highlight land on the
+        // row the pad selected.
+        mx = static_cast<s32>(r.listX + r.listW * 0.5f);
+        my = static_cast<s32>(r.listTopY - r.rowH * (static_cast<f32>(m_invCursorQuest) + 0.5f));
+        return;
+    }
+
     if (m_invCursorPanel == INV_PANEL_STASH) {
         const InventoryUI::StashRects r = InventoryUI::stashLayout(sw, sh);
         const u32 col = m_invCursorIndex % InventoryUI::STASH_COLS;
@@ -442,6 +455,29 @@ void Engine::updateInventoryInteraction(f32 dt) {
             return;   // the generic slot handling below is for item panels
         }
 
+        // Journal: D-pad up/down walks the visible act's quest list, left/right flips the act tab.
+        // Read-only by design — there is nothing to activate, so nothing can be mis-pressed.
+        // Placed after the shoulder cycle (like the build panel) so L/R can still leave the panel.
+        if (m_invCursorPanel == INV_PANEL_JOURNAL) {
+            // How many quests the visible act actually has. Derived from the table every frame
+            // rather than cached: the row cursor is only ever meaningful against THIS count, and a
+            // cached one would go stale the moment a quest is appended.
+            u8 rows = 0;
+            for (u32 i = 0; i < Quest::COUNT; i++)
+                if (Quest::actOf(Quest::QUESTS[i].zoneFloor) == m_invJournalAct + 1) rows++;
+
+            if (navU && m_invCursorQuest > 0)        m_invCursorQuest--;
+            if (navD && m_invCursorQuest + 1 < rows) m_invCursorQuest++;
+            // Flipping the act resets the row: a cursor left at row 4 on an act with two quests
+            // would draw no detail pane at all and read as the journal being broken.
+            if (navL && m_invJournalAct > 0) { m_invJournalAct--; m_invCursorQuest = 0; }
+            if (navR && m_invJournalAct < InventoryUI::JOURNAL_TABS - 1) {
+                m_invJournalAct++; m_invCursorQuest = 0;
+            }
+            if (m_invCursorQuest >= rows) m_invCursorQuest = 0;   // safety clamp, same reason
+            return;   // read-only panel — the item actions below have nothing to act on
+        }
+
         // A / E = equip (backpack → equipment) or unequip (equipment → backpack)
         if (equipPressed) {
             if (m_invCursorPanel == 0 && m_invCursorIndex < MAX_INVENTORY_ITEMS) {
@@ -556,9 +592,33 @@ void Engine::updateInventoryInteraction(f32 dt) {
 
         // Left mouse pressed: detect double-click or begin potential drag
         if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT)) {
-            // Build grid first (it overlaps no item panel, so order is cosmetic — but checking it
-            // here keeps a grid click from also starting a phantom drag below).
-            {
+            // The right column hosts EITHER the build grid or the journal, chosen by the active
+            // panel — the same branch the draw side takes. Routing the hit-test the same way is
+            // what stops a click meant for one being eaten by the other: their rects do not
+            // overlap at 16:9 but they graze at 4:3, and only one of them is ever on screen.
+            // Checked before the item hit-test so a click here can't also start a phantom drag.
+            if (m_invCursorPanel == INV_PANEL_JOURNAL) {
+                const InventoryUI::SlotHit jr = InventoryUI::hitTestJournal(sw, sh, mx, my);
+                if (jr.panel == InventoryUI::SlotHit::JOURNAL_TAB &&
+                    jr.index < InventoryUI::JOURNAL_TABS) {
+                    m_invJournalAct  = jr.index;
+                    m_invCursorQuest = 0;      // per-act row cursor — see the nav block
+                    AudioSystem::play(SfxId::UI_CLICK);
+                    return;
+                }
+                if (jr.panel == InventoryUI::SlotHit::JOURNAL_ROW) {
+                    // The hit-test reports any row in the column; only the ones this act actually
+                    // fills are selectable, or the detail pane would draw nothing and read broken.
+                    u8 rows = 0;
+                    for (u32 i = 0; i < Quest::COUNT; i++)
+                        if (Quest::actOf(Quest::QUESTS[i].zoneFloor) == m_invJournalAct + 1) rows++;
+                    if (jr.index < rows) {
+                        m_invCursorQuest = jr.index;
+                        AudioSystem::play(SfxId::UI_CLICK);
+                        return;
+                    }
+                }
+            } else {
                 const InventoryUI::SlotHit bg = InventoryUI::hitTestBuildGrid(sw, sh, mx, my);
                 if (bg.panel == InventoryUI::SlotHit::BUILD_TOGGLE) {
                     PlayerInventory& binv = m_inventories[m_localPlayerIndex];

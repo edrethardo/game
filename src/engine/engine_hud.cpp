@@ -145,10 +145,23 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
                               selSlot, selEquip, invMX, invMY,
                               /*drawEquipment=*/!m_stashOpen);
 
-    // Auto Loot & Equip build grid rides the equipment column; the stash panel would overlap it.
-    if (!m_stashOpen)
-        HUD::drawBuildGrid(sw, sh, m_inventories[m_localPlayerIndex].autoMode,
-                           m_inventories[m_localPlayerIndex].buildCell, invMX, invMY);
+    // The right column hosts EITHER the Auto Loot & Equip build grid or the quest Journal — one
+    // panel at a time, chosen by which one the cursor is on (the mouse hit-test branches the same
+    // way). The stash panel would overlap both, so neither draws in stash mode.
+    if (!m_stashOpen) {
+        if (m_invCursorPanel == INV_PANEL_JOURNAL) {
+            // The CLEAR_ZONE count is a property of the live entity pool, not of saved progress, so
+            // it is passed in rather than stored. 0xFF = not standing in a quest zone -> no live row.
+            const u8 liveIdx = m_level.inZone ? Quest::indexForZone(m_level.zoneFloor) : 0xFF;
+            HUD::drawJournalPanel(sw, sh, m_questProgress[m_localPlayerIndex],
+                                  m_invCursorQuest, m_invJournalAct,
+                                  liveIdx, zoneHostilesAlive(), m_zoneHostilesAtEntry,
+                                  invMX, invMY);
+        } else {
+            HUD::drawBuildGrid(sw, sh, m_inventories[m_localPlayerIndex].autoMode,
+                               m_inventories[m_localPlayerIndex].buildCell, invMX, invMY);
+        }
+    }
 
     // Stash mode: the gold panel paints OVER the equipment side (its interactions are gated off
     // in updateInventoryInteraction while the stash is open) — backpack stays live for deposits.
