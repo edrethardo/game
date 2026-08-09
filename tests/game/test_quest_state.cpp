@@ -126,3 +126,163 @@ TEST_CASE("every quest's deed trigger is one the engine can satisfy") {
         REQUIRE(implemented);
     }
 }
+
+// Quest 0 (zone 53, Free the Allocation) is TALK + CLEAR_ZONE. Quest 1 (zone 55) is TALK + SLAY.
+TEST_CASE("offer moves a locked quest to OFFERED and is idempotent") {
+    Quest::Progress p{};
+    Quest::offer(p, 0);
+    REQUIRE(p.state[0] == static_cast<u8>(Quest::State::OFFERED));
+    Quest::offer(p, 0);
+    REQUIRE(p.state[0] == static_cast<u8>(Quest::State::OFFERED));
+}
+
+TEST_CASE("offer never demotes a quest that is already further along") {
+    Quest::Progress p{};
+    p.state[0] = static_cast<u8>(Quest::State::COMPLETE);
+    Quest::offer(p, 0);
+    REQUIRE(p.state[0] == static_cast<u8>(Quest::State::COMPLETE));
+}
+
+TEST_CASE("talking ticks the TALK objective and advances OFFERED to ACTIVE") {
+    Quest::Progress p{};
+    Quest::offer(p, 0);
+    Quest::noteTalk(p, 0);
+    REQUIRE(p.obj[0][0] == 1);
+    REQUIRE(p.state[0] == static_cast<u8>(Quest::State::ACTIVE));
+}
+
+TEST_CASE("clearing the zone completes a TALK+CLEAR_ZONE quest") {
+    Quest::Progress p{};
+    Quest::offer(p, 0);
+    Quest::noteTalk(p, 0);
+    Quest::noteCleared(p, 0);
+    REQUIRE(p.state[0] == static_cast<u8>(Quest::State::COMPLETE));
+    REQUIRE((Quest::completionMask(p) & 1ull) != 0);
+}
+
+// THE non-blocking rule, stated as a test. A quest whose deed is done in the field completes even
+// though its TALK objective was never ticked. Sabotage check: making TALK a prerequisite fails
+// this by name.
+TEST_CASE("TALK is never a prerequisite - field completion works unspoken") {
+    Quest::Progress p{};
+    Quest::offer(p, 0);
+    Quest::noteCleared(p, 0);              // never talked to anyone
+    REQUIRE(p.obj[0][0] == 0);             // TALK still unticked
+    REQUIRE(p.state[0] == static_cast<u8>(Quest::State::COMPLETE));
+}
+
+// A v6 hero migrates in with COMPLETE states and ZEROED objectives — migrateFromMask has no detail
+// to restore. Re-deriving state from `obj` unconditionally would therefore un-complete every quest
+// they had already finished the moment they walked back into the hub and greeted its giver, and
+// ZoneRoute would re-seal a road they had already walked. COMPLETE is terminal.
+TEST_CASE("a COMPLETE quest is never demoted by a later mutation") {
+    Quest::Progress p{};
+    Quest::migrateFromMask(p, 1ull << 0);   // finished under v6; no objective detail survives
+    REQUIRE(p.obj[0][0] == 0);
+    Quest::noteTalk(p, 0);                  // walks back into town and greets Akara
+    REQUIRE(p.state[0] == static_cast<u8>(Quest::State::COMPLETE));
+    REQUIRE((Quest::completionMask(p) & 1ull) != 0);
+}
+
+TEST_CASE("SLAY matches only its named target") {
+    Quest::Progress p{};
+    Quest::offer(p, 1);
+    Quest::noteKill(p, 1, "Bit Rat");
+    REQUIRE(p.state[1] != static_cast<u8>(Quest::State::COMPLETE));
+    Quest::noteKill(p, 1, "The Garbage Collector");
+    REQUIRE(p.state[1] == static_cast<u8>(Quest::State::COMPLETE));
+}
+
+TEST_CASE("SLAY tolerates a null enemy name") {
+    Quest::Progress p{};
+    Quest::offer(p, 1);
+    Quest::noteKill(p, 1, nullptr);
+    REQUIRE(p.state[1] != static_cast<u8>(Quest::State::COMPLETE));
+}
+
+// ACTIVATE stores WHICH fixtures were used, not how many. A zone is rebuilt from its seed on every
+// entry, so a bare count could not tell which stones were already lit and re-entry would re-light
+// the wrong ones.
+//
+// The objective is LOCATED rather than hard-coded, because the table has none yet: quest 56 (the
+// Cairn Stones) deliberately keeps CLEAR_ZONE until the five stone fixtures exist, since a trigger
+// nothing can fire seals the road to TristRAM. So this pins the inert case today and turns itself
+// into the real bitmask pin the moment the stones are authored — no second edit to remember.
+TEST_CASE("ACTIVATE stores a bitmask and reports popcount progress") {
+    u8 qi = 0xFF, oi = 0xFF;
+    for (u32 i = 0; i < Quest::COUNT && qi == 0xFF; i++)
+        for (u32 o = 0; o < Quest::QUESTS[i].objectiveCount; o++)
+            if (Quest::QUESTS[i].objectives[o].trigger == Quest::Trigger::ACTIVATE) {
+                qi = static_cast<u8>(i); oi = static_cast<u8>(o); break;
+            }
+
+    if (qi == 0xFF) {
+        // Nothing authored yet. Pin the half that IS reachable: a quest owning no ACTIVATE
+        // objective must ignore the hook outright, never bank the bit on some other objective.
+        Quest::Progress p{};
+        Quest::offer(p, 2);
+        Quest::noteActivate(p, 2, 0);
+        Quest::noteActivate(p, 2, 3);
+        for (u32 o = 0; o < Quest::MAX_OBJ; o++) REQUIRE(p.obj[2][o] == 0);
+        REQUIRE(p.state[2] != static_cast<u8>(Quest::State::COMPLETE));
+        return;
+    }
+
+    const u8 need = Quest::QUESTS[qi].objectives[oi].required;
+    CAPTURE(std::string(Quest::QUESTS[qi].name));
+
+    Quest::Progress p{};
+    Quest::offer(p, qi);
+    Quest::noteActivate(p, qi, 0);
+    Quest::noteActivate(p, qi, 0);                  // repeat must not double-count
+    REQUIRE(Quest::objectiveProgress(p, qi, oi) == 1);
+    if (need > 1) REQUIRE(p.state[qi] != static_cast<u8>(Quest::State::COMPLETE));
+
+    for (u8 f = 1; f < need; f++) Quest::noteActivate(p, qi, f);
+    REQUIRE(Quest::objectiveProgress(p, qi, oi) == need);
+    REQUIRE(p.state[qi] == static_cast<u8>(Quest::State::COMPLETE));
+
+    // A fixture ordinal past the quest's own count is not one it owns.
+    if (need < 8) {
+        Quest::noteActivate(p, qi, need);
+        REQUIRE(Quest::objectiveProgress(p, qi, oi) == need);
+    }
+}
+
+TEST_CASE("out-of-range quest and fixture indices are ignored, not written") {
+    Quest::Progress p{};
+    Quest::offer(p, 200);
+    Quest::noteTalk(p, 200);
+    Quest::noteActivate(p, 2, 99);
+    REQUIRE(Quest::completionMask(p) == 0ull);
+    REQUIRE(Quest::objectiveProgress(p, 2, 1) == 0);
+}
+
+// The never-strand invariant, walked over the whole table: doing every quest's deed in authored
+// order, with nobody ever spoken to, must finish both acts. If any quest could not complete this
+// way, a player who never found its giver would be permanently blocked on the road.
+TEST_CASE("every quest completes without ever talking to a giver") {
+    Quest::Progress p{};
+    for (u32 i = 0; i < Quest::COUNT; i++) {
+        Quest::offer(p, static_cast<u8>(i));
+        const Quest::QuestDef& q = Quest::QUESTS[i];
+        for (u32 o = 0; o < q.objectiveCount; o++) {
+            switch (q.objectives[o].trigger) {
+                case Quest::Trigger::CLEAR_ZONE: Quest::noteCleared(p, static_cast<u8>(i)); break;
+                case Quest::Trigger::REACH:      Quest::noteReached(p, static_cast<u8>(i)); break;
+                case Quest::Trigger::SLAY:
+                    Quest::noteKill(p, static_cast<u8>(i), q.objectives[o].target); break;
+                case Quest::Trigger::ACTIVATE:
+                    for (u8 f = 0; f < q.objectives[o].required; f++)
+                        Quest::noteActivate(p, static_cast<u8>(i), f);
+                    break;
+                case Quest::Trigger::TALK:  break;   // deliberately never fired
+                default: break;
+            }
+        }
+        CAPTURE(std::string(q.name));
+        REQUIRE(p.state[i] == static_cast<u8>(Quest::State::COMPLETE));
+    }
+    REQUIRE(Quest::actComplete(Quest::completionMask(p), 1));
+    REQUIRE(Quest::actComplete(Quest::completionMask(p), 2));
+}

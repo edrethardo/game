@@ -59,4 +59,107 @@ inline void migrateFromMask(Progress& p, u64 legacyMask) {
         if (legacyMask & (1ull << i)) p.state[i] = static_cast<u8>(State::COMPLETE);
 }
 
+
+// ---- Reading progress -------------------------------------------------------------------------
+
+// Stored progress for one objective.
+//
+// A CLEAR_ZONE objective returns 0 here by design: it has no stored counterpart, and the Journal
+// supplies the live remaining-hostile count itself. An ACTIVATE objective returns the POPCOUNT of
+// its bitmask, since the byte records which fixtures were used rather than how many.
+inline u8 objectiveProgress(const Progress& p, u8 questIdx, u8 objIdx) {
+    if (questIdx >= COUNT || objIdx >= QUESTS[questIdx].objectiveCount) return 0;
+    const u8 raw = p.obj[questIdx][objIdx];
+    if (QUESTS[questIdx].objectives[objIdx].trigger != Trigger::ACTIVATE) return raw;
+    u8 n = 0;
+    for (u8 b = 0; b < 8; b++) if (raw & (1u << b)) n++;
+    return n;
+}
+
+inline bool objectiveDone(const Progress& p, u8 questIdx, u8 objIdx) {
+    if (questIdx >= COUNT || objIdx >= QUESTS[questIdx].objectiveCount) return false;
+    return objectiveProgress(p, questIdx, objIdx) >= QUESTS[questIdx].objectives[objIdx].required;
+}
+
+// ---- Advancing --------------------------------------------------------------------------------
+
+// Re-derive a quest's state from its objectives. Called after every mutation so `state` can never
+// disagree with `obj` — the same single-source discipline the derived mask follows.
+//
+// TALK is EXCLUDED from the completion test on purpose. A quest completes on its deed alone; the
+// conversation is narration, not permission. See the design doc's "TALK is never a prerequisite":
+// this is where that rule actually lives, and test_quest_state pins it by name.
+inline void reevaluate(Progress& p, u8 questIdx) {
+    if (questIdx >= COUNT) return;
+    if (p.state[questIdx] == static_cast<u8>(State::LOCKED)) return;
+    // COMPLETE is terminal, and that is not tidiness. A v6 hero migrates in COMPLETE with `obj`
+    // zeroed — migrateFromMask has no detail to restore — so re-deriving would un-complete every
+    // quest they had already finished the first time they greeted its giver, re-sealing a road
+    // they had already walked.
+    if (p.state[questIdx] == static_cast<u8>(State::COMPLETE)) return;
+
+    const QuestDef& q = QUESTS[questIdx];
+    bool allDeedsDone = true;
+    bool anyProgress  = false;
+    for (u32 o = 0; o < q.objectiveCount; o++) {
+        const bool done = objectiveDone(p, questIdx, static_cast<u8>(o));
+        if (done) anyProgress = true;
+        if (q.objectives[o].trigger == Trigger::TALK) continue;
+        if (!done) allDeedsDone = false;
+    }
+
+    if (allDeedsDone)      p.state[questIdx] = static_cast<u8>(State::COMPLETE);
+    else if (anyProgress)  p.state[questIdx] = static_cast<u8>(State::ACTIVE);
+}
+
+// Make a quest known. Never demotes: a COMPLETE quest re-offered by walking back into its zone
+// must stay complete.
+inline void offer(Progress& p, u8 questIdx) {
+    if (questIdx >= COUNT) return;
+    if (p.state[questIdx] == static_cast<u8>(State::LOCKED))
+        p.state[questIdx] = static_cast<u8>(State::OFFERED);
+}
+
+// Set the first objective of `trigger` kind whose target matches, then re-derive the state.
+// Internal; the named hooks below are what callers use.
+inline void satisfy(Progress& p, u8 questIdx, Trigger trigger, const char* target) {
+    if (questIdx >= COUNT) return;
+    offer(p, questIdx);                                   // reaching a deed implies knowing of it
+    const QuestDef& q = QUESTS[questIdx];
+    for (u32 o = 0; o < q.objectiveCount; o++) {
+        if (q.objectives[o].trigger != trigger) continue;
+        if (trigger == Trigger::SLAY) {
+            if (!target || !q.objectives[o].target) continue;
+            // Hand-rolled compare: <cstring> would be the only include this header needs, and the
+            // point of it being engine-free is that it drags nothing in.
+            const char* a = target; const char* b = q.objectives[o].target;
+            while (*a && *a == *b) { a++; b++; }
+            if (*a != *b) continue;
+        }
+        p.obj[questIdx][o] = q.objectives[o].required;
+        break;
+    }
+    reevaluate(p, questIdx);
+}
+
+inline void noteTalk   (Progress& p, u8 questIdx)                     { satisfy(p, questIdx, Trigger::TALK,       nullptr); }
+inline void noteReached(Progress& p, u8 questIdx)                     { satisfy(p, questIdx, Trigger::REACH,      nullptr); }
+inline void noteCleared(Progress& p, u8 questIdx)                     { satisfy(p, questIdx, Trigger::CLEAR_ZONE, nullptr); }
+inline void noteKill   (Progress& p, u8 questIdx, const char* enemy)  { satisfy(p, questIdx, Trigger::SLAY,       enemy);   }
+
+// One fixture of an ACTIVATE objective. `fixtureIdx` is the fixture's ordinal within the quest
+// (0..required-1) and becomes a bit, so re-touching a stone cannot double-count it.
+inline void noteActivate(Progress& p, u8 questIdx, u8 fixtureIdx) {
+    if (questIdx >= COUNT || fixtureIdx >= 8) return;
+    offer(p, questIdx);
+    const QuestDef& q = QUESTS[questIdx];
+    for (u32 o = 0; o < q.objectiveCount; o++) {
+        if (q.objectives[o].trigger != Trigger::ACTIVATE) continue;
+        if (fixtureIdx >= q.objectives[o].required) return;   // not a fixture this quest owns
+        p.obj[questIdx][o] |= static_cast<u8>(1u << fixtureIdx);
+        break;
+    }
+    reevaluate(p, questIdx);
+}
+
 } // namespace Quest
