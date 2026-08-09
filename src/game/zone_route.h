@@ -182,7 +182,11 @@ enum struct Task : u8 {
 inline Task taskFor(u8 zoneFloor, u64 questMask) {
     const Quest::QuestDef* q = Quest::forZone(zoneFloor);
     if (!q || Quest::isComplete(questMask, zoneFloor)) return Task::TRAVEL;
-    switch (q->trigger) {
+    // The DEED objective, not objective 0 — every quest opens with a TALK step, which asks nothing
+    // of the bot. ACTIVATE falls through to TRAVEL: walking to the fixtures IS the task.
+    const Quest::ObjectiveDef* deed = Quest::deedObjective(*q);
+    if (!deed) return Task::TRAVEL;
+    switch (deed->trigger) {
         case Quest::Trigger::CLEAR_ZONE: return Task::CLEAR_ZONE;
         case Quest::Trigger::SLAY:       return Task::SLAY;
         default:                         return Task::TRAVEL;

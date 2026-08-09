@@ -79,15 +79,15 @@ TEST_CASE("the road onward is SHUT until the local quest is done") {
     CHECK_FALSE(ZoneRoute::linkOpen(56, 57, 0));
 
     u64 m = 0;
-    m |= (1ull << Quest::bitFor(56));                       // Align the Standing Stones
+    m |= (1ull << Quest::indexForZone(56));                       // Align the Standing Stones
     CHECK(ZoneRoute::linkOpen(56, 57, m));                  // ...the portal opens
     CHECK_FALSE(ZoneRoute::linkOpen(56, 58, m));            // ...but the road still waits on TristRAM
-    m |= (1ull << Quest::bitFor(57));                       // The Search for Deckard Cache
+    m |= (1ull << Quest::indexForZone(57));                       // The Search for Deckard Cache
     CHECK(ZoneRoute::linkOpen(56, 58, m));
 
     // Act 2's finale is behind Piccadilly's own quest — the rift-forcing beat.
     CHECK_FALSE(ZoneRoute::linkOpen(65, 66, 0));
-    CHECK(ZoneRoute::linkOpen(65, 66, 1ull << Quest::bitFor(65)));
+    CHECK(ZoneRoute::linkOpen(65, 66, 1ull << Quest::indexForZone(65)));
 }
 
 TEST_CASE("going BACK is never gated") {
@@ -136,7 +136,7 @@ TEST_CASE("the in-zone task matches what the quest actually asks") {
     CHECK(ZoneRoute::taskFor(52, 0) == ZoneRoute::Task::TRAVEL);      // hosts no quest at all
 
     // A finished quest stops asking, or the bot would grind a cleared zone forever.
-    CHECK(ZoneRoute::taskFor(53, 1ull << Quest::bitFor(53)) == ZoneRoute::Task::TRAVEL);
+    CHECK(ZoneRoute::taskFor(53, 1ull << Quest::indexForZone(53)) == ZoneRoute::Task::TRAVEL);
 }
 
 TEST_CASE("every SLAY objective names the boss its zone actually spawns") {
@@ -144,12 +144,13 @@ TEST_CASE("every SLAY objective names the boss its zone actually spawns") {
     // "complete" the zone by killing a random mob, or never complete at all.
     for (u32 i = 0; i < Quest::COUNT; i++) {
         const Quest::QuestDef& q = Quest::QUESTS[i];
-        if (q.trigger != Quest::Trigger::SLAY) continue;
+        const Quest::ObjectiveDef* deed = Quest::deedObjective(q);
+        if (!deed || deed->trigger != Quest::Trigger::SLAY) continue;
         const Zone::ZoneDef* z = Zone::find(q.zoneFloor);
         CAPTURE(q.name);
         REQUIRE(z != nullptr);
         REQUIRE(z->boss != nullptr);
-        CHECK(std::string(z->boss) == std::string(q.target));
+        CHECK(std::string(z->boss) == std::string(deed->target));
     }
 }
 
@@ -170,7 +171,7 @@ TEST_CASE("zone route dump" * doctest::skip()) {
             const Quest::QuestDef* q = Quest::forZone(goal);
             MESSAGE("  DO   [" << (int)at << "] " << std::string(Zone::find(at)->name)
                     << "  quest='" << std::string(q->name) << "'");
-            mask |= (1ull << Quest::bitFor(goal));
+            mask |= (1ull << Quest::indexForZone(goal));
             continue;
         }
         const ZoneRoute::Hop h = ZoneRoute::nextHop(at, goal, mask);

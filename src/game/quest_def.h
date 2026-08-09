@@ -1,14 +1,17 @@
-// quest_def.h — the Act 1 quest chain: what each quest asks, where it happens, and how it completes.
+// quest_def.h — the act quest chain: what each quest asks, who asks it, and how each step completes.
 //
 // A parody of Diablo 2's Act 1 quest line, beat for beat, in this game's voice — the running gag
-// being that the dungeon is software and the "corruption" is a system falling over. D2 gives you six
-// Act 1 quests; this ships the five that map onto zones the act actually has.
+// being that the dungeon is software and the "corruption" is a system falling over. Act 2 follows
+// Hellgate London's shape underneath London.
 //
-// Deliberately SMALL. This is not a quest engine: there is no dialogue tree, no journal UI, no
-// prerequisite graph, no rewards table. Each quest is (a) a place, (b) one of three completion
-// triggers the engine can already answer, and (c) a per-character completion bit. That covers the
-// whole act, and everything it does NOT do is a thing that would have to be designed rather than
-// guessed at. When Act 2 needs escorts or fetch chains, this is the place to grow — not before.
+// A quest is (a) a place, (b) a NAMED GIVER who offers it, (c) an ordered list of OBJECTIVES, each
+// satisfied by something the engine can already observe, and (d) a narration paragraph for the
+// Journal. Objective 0 is always TALK: every D2 quest opens by speaking to somebody, and it gives
+// the Journal a first row that is true the moment the quest is known.
+//
+// Still deliberately SMALL: no dialogue TREE (a giver has one line), no prerequisite graph (the
+// chain is the road's own order), no rewards table. Those would have to be designed rather than
+// guessed at.
 //
 // Header-only and engine-free (the free_play.h / zone_def.h pattern) so the rules unit-test without a
 // GL or engine context.
@@ -32,21 +35,50 @@ inline constexpr u32 MAX_OBJ    = 4;    // objectives per quest
 // gate would refuse forever. Raising this past 64 means widening those two first.
 static_assert(MAX_QUESTS <= 64, "completionMask()/actComplete() are u64 — quest 64+ is unrepresentable");
 
-// How a quest is satisfied. These three are exactly what the engine can already observe without new
-// bookkeeping — which is why there are three and not ten.
+// How one OBJECTIVE is satisfied. These are exactly what the engine can already observe without
+// new bookkeeping, plus ACTIVATE for the Cairn Stones.
 enum struct Trigger : u8 {
-    CLEAR_ZONE,   // kill every hostile in the quest's zone (D2's "Den of Evil" beat)
-    SLAY,         // kill the named champion/boss in the quest's zone
-    REACH,        // simply arrive — the quest is finding the place at all
+    CLEAR_ZONE,   // every hostile in the quest's zone is dead  (live count, never stored)
+    SLAY,         // the named enemy died                        (boolean)
+    REACH,        // the quest's zone was entered                (boolean)
+    TALK,         // the giver was spoken to                     (boolean, NEVER a prerequisite)
+    ACTIVATE,     // N world fixtures interacted with            (bitmask, stored)
     COUNT
 };
 
-struct QuestDef {
-    u8          zoneFloor;   // where it happens (a Zone::ZONES floor)
-    const char* name;        // player-facing title
-    const char* blurb;       // one line, shown when it is offered and when it completes
+struct ObjectiveDef {
     Trigger     trigger;
-    const char* target;      // SLAY: the enemy name. Otherwise unused ("").
+    const char* text;      // journal row label: "Hostiles remaining", "Stones aligned"
+    const char* target;    // enemy name for SLAY, fixture tag for ACTIVATE, "" otherwise
+    u8          required;  // 1 for a boolean step; 5 for the Cairn Stones
+};
+
+// A quest giver: a named NPC standing in an act hub. GiverDef exists rather than deriving the
+// giver straight from the act so an act can field two or three the way D2's Rogue Encampment
+// fields Akara, Kashya and Charsi — one authored byte, no duplicated fact (the ACT is still
+// derived, from the giver's own hubFloor).
+struct GiverDef {
+    u8          hubFloor;  // 98 = the town (Act 1), 61 = Null Terminus (Act 2)
+    const char* name;      // interact prompt, nameplate, journal attribution
+    const char* greeting;  // the one short line spoken to chat on talk
+};
+
+inline constexpr GiverDef GIVERS[] = {
+    { 98, "Akara, the Allocator",   "You came back. Good. Something here still will not free." },
+    { 98, "Charsi, the Forgemaid",  "Steel I can fix. What is out there, I cannot." },
+    { 61, "The Signalman",          "Mind the gap. Mind everything, really." },
+    { 61, "Kashya of the Platform", "We hold this platform. Nothing else down here is held." },
+};
+inline constexpr u32 GIVER_COUNT = sizeof(GIVERS) / sizeof(GIVERS[0]);
+
+struct QuestDef {
+    u8           zoneFloor;
+    const char*  name;
+    const char*  blurb;         // the one-line offer; still goes to chat
+    const char*  narration;     // the journal body. No length limit — the Journal wraps it.
+    u8           giverIdx;      // index into GIVERS[]
+    u8           objectiveCount;
+    ObjectiveDef objectives[MAX_OBJ];
 };
 
 // ACT 1, in walking order. The parody names carry the joke; the BEATS are D2's.
@@ -54,65 +86,99 @@ struct QuestDef {
 //   D2                          here
 //   Den of Evil (clear it)   -> Free the Allocation
 //   Sisters' Burial Grounds  -> The Rebaser        (Blood Raven raises the dead; a rebase rewrites it)
-//   Tools of the Trade       -> Restore the Toolchain
+//   The Cairn Stones         -> Align the Standing Stones
 //   The Search for Cain      -> The Search for Deckard Cache   (the pun the whole act was built for)
-//   Sisters to the Slaughter -> Terminal Access     (the act boss, at the tube mouth)
+//   Sisters to the Slaughter -> Terminal Access     (the tube mouth, the act's epilogue)
+//
+// ORDER IS APPEND-ONLY. A row's POSITION is its slot in Progress::state and its bit in the derived
+// completion mask, so resorting this table silently reassigns every saved hero's progress.
 inline constexpr QuestDef QUESTS[] = {
     { 53, "Free the Allocation",
           "Something is still holding the Den. Clear it.",
-          Trigger::CLEAR_ZONE, "" },
+          "The Den was freed once and never released. Whatever holds it now has held it since "
+          "before anyone here kept records. Go down, and let it go.",
+          /*giver*/ 0, /*objCount*/ 2,
+          { { Trigger::TALK,       "Speak to Akara",        "", 1 },
+            { Trigger::CLEAR_ZONE, "Hostiles remaining",    "", 1 } } },
 
     { 55, "The Rebaser",
           "The graveyard keeps bringing its history back. Stop whatever is rewriting it.",
-          Trigger::SLAY, "The Garbage Collector" },
+          "The graves do not stay written. Every night the history is replayed onto them and "
+          "whatever was buried comes back with it. Find what is doing the rewriting, and stop it.",
+          /*giver*/ 0, /*objCount*/ 2,
+          { { Trigger::TALK, "Speak to Akara",          "",                      1 },
+            { Trigger::SLAY, "Slay The Garbage Collector", "The Garbage Collector", 1 } } },
 
-    // D2's Cairn Stones beat. Deckard Cain is not FOUND by walking to Tristram — the stones in the
-    // Stony Field are what open the way, which is why this quest sits here and the portal stands in
-    // this field. The stones read as monuments to abandoned features, so "getting them to agree" is
-    // the same joke as the zone's name.
+    // D2's Cairn Stones beat. The five stones are authored fixtures (Phase 4) rather than a
+    // clear-the-zone stand-in: the quest is literally called "Align the Standing Stones", and
+    // "kill everything here" was the weakest beat in Act 1.
     { 56, "Align the Standing Stones",
-          "Monuments to abandoned features, and none of them agree. Clear the field and they will.",
-          Trigger::CLEAR_ZONE, "" },
+          "Monuments to abandoned features, and none of them agree. Align them.",
+          "Five stones, each raised for something that was going to be finished. They disagree "
+          "about what the field was for, and while they disagree the way to TristRAM stays shut. "
+          "Touch each in turn and let them settle it.",
+          /*giver*/ 1, /*objCount*/ 2,
+          { { Trigger::TALK,     "Speak to Charsi", "",      1 },
+            { Trigger::ACTIVATE, "Stones aligned",  "cairn", 5 } } },
 
-    // ACT 1's CLIMAX. D2 puts Griswold in the ruins of the town he used to serve; the beat lands
-    // harder here because TristRAM's whole conceit is a village restored from backup once too
-    // often — its smith is what the last restore actually produced. A SLAY quest, not the REACH it
-    // used to be: arriving somewhere is a weak note to end an act on.
     { 57, "The Search for Deckard Cache",
           "The village was restored from backup once too often. Something in the forge came back wrong.",
-          Trigger::SLAY, "Griswald, the Unfinished Build" },
+          "TristRAM has been restored from backup more times than anyone kept count of. Each "
+          "restore came back a little further from the village that was saved. The smith came "
+          "back worst of all.",
+          /*giver*/ 1, /*objCount*/ 2,
+          { { Trigger::TALK, "Speak to Charsi",                    "",                              1 },
+            { Trigger::SLAY, "Slay Griswald, the Unfinished Build", "Griswald, the Unfinished Build", 1 } } },
 
-    // The way onward. Deliberately a REACH now that Griswald carries the act's fight: the station is
-    // the epilogue and the door to Act 2, not a second climax competing with the first.
     { 59, "Terminal Access",
           "The road ends at a boarded station. Find the way down.",
-          Trigger::REACH, "" },
+          "The road out of the fields ends at a station nobody has boarded a train from in a very "
+          "long time. It is boarded, not locked. There is a difference, and it matters.",
+          /*giver*/ 1, /*objCount*/ 2,
+          { { Trigger::TALK,  "Speak to Charsi",              "", 1 },
+            { Trigger::REACH, "Reach Whitechapel Terminal",   "", 1 } } },
 
     // --- ACT 2: "Hellgate: Localhost" ---
-    // Hellgate London's shape: the survivors are underground, the tunnels belong to the demons, and
-    // the rift is the thing you eventually have to close. The beats are its, the names are ours.
     { 61, "Signal Restored",
           "Somebody down here still has the lights on. Find them.",
-          Trigger::REACH, "" },
+          "London fell and the survivors went underground. One platform still has power, which "
+          "means somebody down there is still running it. Find them before whatever else is in "
+          "the tunnels does.",
+          /*giver*/ 2, /*objCount*/ 2,
+          { { Trigger::TALK,  "Speak to the Signalman", "", 1 },
+            { Trigger::REACH, "Reach Null Terminus",    "", 1 } } },
 
     { 62, "Break the Loop",
           "The Circle Line is running, and it is not carrying passengers. Clear it.",
-          Trigger::CLEAR_ZONE, "" },
+          "The Circle Line never stopped running. It has no passengers, no drivers and no "
+          "timetable, and it has been going round since the gate opened. Break it.",
+          /*giver*/ 2, /*objCount*/ 2,
+          { { Trigger::TALK,       "Speak to the Signalman", "", 1 },
+            { Trigger::CLEAR_ZONE, "Hostiles remaining",     "", 1 } } },
 
     { 64, "Insufficient Funds",
           "Something has been drawing on Bank for a long time. Settle it.",
-          Trigger::SLAY, "The Perpetual Commuter" },
+          "Something has been drawing on Bank Station since before the gate, and the balance has "
+          "never once been questioned. Go and question it.",
+          /*giver*/ 3, /*objCount*/ 2,
+          { { Trigger::TALK, "Speak to Kashya",              "",                       1 },
+            { Trigger::SLAY, "Slay The Perpetual Commuter",  "The Perpetual Commuter", 1 } } },
 
-    // The rift-opening beat, and Act 2's answer to the Cairn Stones. Piccadilly is where the gate
-    // is forced; until the circus is cleared there is nothing to force it with. "Buffer Overflow"
-    // is already the zone's joke, so the quest that breaks it open is the obvious escalation.
     { 65, "Privilege Escalation",
           "The gate will not open while the circus is this crowded. Make room, then force it.",
-          Trigger::CLEAR_ZONE, "" },
+          "The rift at Piccadilly is held shut by everything crowded around it. Clear the circus "
+          "and it can be forced. It should not be possible to force it. It is.",
+          /*giver*/ 3, /*objCount*/ 2,
+          { { Trigger::TALK,       "Speak to Kashya",    "", 1 },
+            { Trigger::CLEAR_ZONE, "Hostiles remaining", "", 1 } } },
 
     { 66, "Kill -9",
           "The gate is running on this machine. Terminate it.",
-          Trigger::SLAY, "Signal Failure" },
+          "The gate is not a door. It is a process, and it is running on this machine. It will "
+          "not close politely. Terminate it.",
+          /*giver*/ 3, /*objCount*/ 2,
+          { { Trigger::TALK, "Speak to Kashya",       "",               1 },
+            { Trigger::SLAY, "Slay Signal Failure",   "Signal Failure", 1 } } },
 };
 
 inline constexpr u32 COUNT = sizeof(QUESTS) / sizeof(QUESTS[0]);
@@ -125,16 +191,28 @@ inline const QuestDef* forZone(u8 zoneFloor) {
     return nullptr;
 }
 
-// Bit index for the per-character completion mask. Table POSITION, like the waypoint mask, which
-// makes QUESTS effectively append-only: reordering it silently reassigns every saved hero's progress.
-inline u8 bitFor(u8 zoneFloor) {
+// The objective that carries the QUEST — the first non-TALK step. Objective 0 is always "speak to
+// the giver", which is never what a consumer means by asking what a quest wants: the engine's
+// SLAY/CLEAR_ZONE/REACH hooks and the bot's task router are all asking about the DEED. Derived
+// rather than stored as a second field, so it cannot disagree with the objective list it describes.
+// nullptr only for a quest authored with nothing but a TALK step, which the data lint forbids.
+inline const ObjectiveDef* deedObjective(const QuestDef& q) {
+    for (u32 o = 0; o < q.objectiveCount; o++)
+        if (q.objectives[o].trigger != Trigger::TALK) return &q.objectives[o];
+    return nullptr;
+}
+
+// The quest's row in QUESTS[], which is ALSO its slot in Progress::state and its bit in the derived
+// mask. That makes QUESTS[] effectively append-only: reordering it silently reassigns every saved
+// hero's progress. 0xFF = this zone hosts no quest.
+inline u8 indexForZone(u8 zoneFloor) {
     for (u32 i = 0; i < COUNT; i++)
         if (QUESTS[i].zoneFloor == zoneFloor) return static_cast<u8>(i);
     return 0xFF;
 }
 
 inline bool isComplete(u64 mask, u8 zoneFloor) {
-    const u8 b = bitFor(zoneFloor);
+    const u8 b = indexForZone(zoneFloor);
     return b != 0xFF && (mask & (1ull << b)) != 0;
 }
 

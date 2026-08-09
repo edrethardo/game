@@ -565,7 +565,7 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
 void Engine::questComplete(u8 zoneFloor) {
     const Quest::QuestDef* q = Quest::forZone(zoneFloor);
     if (!q) return;
-    const u8 bit = Quest::bitFor(zoneFloor);
+    const u8 bit = Quest::indexForZone(zoneFloor);
     if (bit == 0xFF) return;
     if (m_questMask[m_localPlayerIndex] & (1ull << bit)) return;   // already done — stay silent
 
@@ -589,21 +589,25 @@ void Engine::questOnZoneEnter(u8 zoneFloor) {
     if (!q) return;
     if (Quest::isComplete(m_questMask[m_localPlayerIndex], zoneFloor)) return;
 
-    if (q->trigger == Quest::Trigger::REACH) { questComplete(zoneFloor); return; }
+    // The quest's DEED — objective 0 is always the TALK step, which is never what "does arriving
+    // finish this?" is asking about.
+    const Quest::ObjectiveDef* deed = Quest::deedObjective(*q);
+    if (deed && deed->trigger == Quest::Trigger::REACH) { questComplete(zoneFloor); return; }
     addChatMessage("", q->blurb, Vec3{0.75f, 0.8f, 0.9f});
     // Logged as well as shown. A chat-only offer is invisible to a soak and to any after-the-fact
     // check of whether the chain actually armed — the same blind spot that hid the credits park and
     // the dead legendaries until a log line was added.
     LOG_INFO("[QUEST] offered: %s (%s)", q->name,
-             q->trigger == Quest::Trigger::SLAY ? q->target : "clear the zone");
+             (deed && deed->trigger == Quest::Trigger::SLAY) ? deed->target : "clear the zone");
 }
 
 // SLAY triggers. Called from the death path with the dying enemy's def name.
 void Engine::questOnEnemyKilled(const char* enemyName) {
     if (!m_level.inZone || !enemyName) return;
     const Quest::QuestDef* q = Quest::forZone(m_level.zoneFloor);
-    if (!q || q->trigger != Quest::Trigger::SLAY) return;
-    if (std::strcmp(enemyName, q->target) != 0) return;
+    const Quest::ObjectiveDef* deed = q ? Quest::deedObjective(*q) : nullptr;
+    if (!deed || deed->trigger != Quest::Trigger::SLAY) return;
+    if (std::strcmp(enemyName, deed->target) != 0) return;
     questComplete(m_level.zoneFloor);
 }
 
@@ -613,7 +617,8 @@ void Engine::questOnEnemyKilled(const char* enemyName) {
 void Engine::questCheckZoneCleared() {
     if (!m_level.inZone) return;
     const Quest::QuestDef* q = Quest::forZone(m_level.zoneFloor);
-    if (!q || q->trigger != Quest::Trigger::CLEAR_ZONE) return;
+    const Quest::ObjectiveDef* deed = q ? Quest::deedObjective(*q) : nullptr;
+    if (!deed || deed->trigger != Quest::Trigger::CLEAR_ZONE) return;
     if (Quest::isComplete(m_questMask[m_localPlayerIndex], m_level.zoneFloor)) return;
 
     for (u32 a = 0; a < m_entities.activeCount; a++) {

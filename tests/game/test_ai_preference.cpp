@@ -147,9 +147,10 @@ TEST_CASE("every zone boss is a unique enemy, and every unique enemy is a zone b
     // And every SLAY objective must name one of them, or the quest has no guaranteed target.
     for (u32 i = 0; i < Quest::COUNT; i++) {
         const Quest::QuestDef& q = Quest::QUESTS[i];
-        if (q.trigger != Quest::Trigger::SLAY) continue;
-        CAPTURE(q.name); CAPTURE(q.target);
-        CHECK(zoneBosses.count(q.target) == 1);
+        const Quest::ObjectiveDef* deed = Quest::deedObjective(q);
+        if (!deed || deed->trigger != Quest::Trigger::SLAY) continue;
+        CAPTURE(q.name); CAPTURE(deed->target);
+        CHECK(zoneBosses.count(deed->target) == 1);
     }
 }
 

@@ -60,3 +60,50 @@ TEST_CASE("migration ignores bits above the quest table") {
         for (u32 o = 0; o < Quest::MAX_OBJ; o++)
             REQUIRE(p.obj[q][o] == 0);
 }
+
+// Every quest must carry at least one objective, or the Journal has an empty body and the quest
+// can never complete. A data lint, not a logic test — the kind that catches an authoring slip.
+TEST_CASE("every authored quest has at least one objective and a narration") {
+    for (u32 i = 0; i < Quest::COUNT; i++) {
+        const Quest::QuestDef& q = Quest::QUESTS[i];
+        CAPTURE(q.name);
+        REQUIRE(q.objectiveCount >= 1);
+        REQUIRE(q.objectiveCount <= Quest::MAX_OBJ);
+        REQUIRE(q.narration != nullptr);
+        REQUIRE(q.narration[0] != '\0');
+        REQUIRE(q.giverIdx < Quest::GIVER_COUNT);
+    }
+}
+
+// Every quest keeps a TALK objective, and it is always objective 0 — the Journal draws them in
+// order and "speak to the giver" is the first beat of every D2 quest.
+TEST_CASE("every quest opens with a TALK objective") {
+    for (u32 i = 0; i < Quest::COUNT; i++) {
+        CAPTURE(Quest::QUESTS[i].name);
+        REQUIRE(Quest::QUESTS[i].objectives[0].trigger == Quest::Trigger::TALK);
+    }
+}
+
+// A SLAY objective's target must be a non-empty name, or the kill hook can never match it.
+TEST_CASE("SLAY objectives name a target") {
+    for (u32 i = 0; i < Quest::COUNT; i++) {
+        for (u32 o = 0; o < Quest::QUESTS[i].objectiveCount; o++) {
+            const Quest::ObjectiveDef& od = Quest::QUESTS[i].objectives[o];
+            if (od.trigger != Quest::Trigger::SLAY) continue;
+            CAPTURE(Quest::QUESTS[i].name);
+            REQUIRE(od.target != nullptr);
+            REQUIRE(od.target[0] != '\0');
+        }
+    }
+}
+
+// Each giver must actually have quests, or an NPC stands in the hub with nothing to say.
+TEST_CASE("every giver hands out at least one quest") {
+    for (u32 g = 0; g < Quest::GIVER_COUNT; g++) {
+        bool found = false;
+        for (u32 i = 0; i < Quest::COUNT && !found; i++)
+            if (Quest::QUESTS[i].giverIdx == g) found = true;
+        CAPTURE(Quest::GIVERS[g].name);
+        REQUIRE(found);
+    }
+}

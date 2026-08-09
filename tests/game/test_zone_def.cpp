@@ -208,11 +208,26 @@ TEST_CASE("every quest hangs off a real zone, one per zone") {
         for (u32 j = i + 1; j < Quest::COUNT; j++)
             CHECK_MESSAGE(Quest::QUESTS[j].zoneFloor != q.zoneFloor,
                           "two quests share zone ", (u32)q.zoneFloor);
-        // A SLAY quest with no target can never complete — the silent failure this pins.
-        if (q.trigger == Quest::Trigger::SLAY)
-            CHECK_MESSAGE(std::strlen(q.target) > 0, "SLAY quest '", q.name, "' has no target");
-        else
-            CHECK(std::strlen(q.target) == 0);
+        // An objective whose target the trigger USES must name something, or it can never
+        // complete — the silent failure this pins. SLAY names an enemy, ACTIVATE a fixture tag;
+        // every other trigger must leave it empty rather than carry a stale string.
+        REQUIRE(q.narration != nullptr);
+        CHECK(std::strlen(q.narration) > 0);
+        for (u32 o = 0; o < q.objectiveCount; o++) {
+            const Quest::ObjectiveDef& od = q.objectives[o];
+            // Non-null BEFORE strlen, and it is the real lint: an objectiveCount larger than the
+            // number of objectives actually authored leaves value-initialised slots whose strings
+            // are null, which is exactly the authoring slip that would read as a missing journal
+            // row rather than as an error.
+            REQUIRE(od.text != nullptr);
+            REQUIRE(od.target != nullptr);
+            REQUIRE(od.required >= 1);
+            CAPTURE(od.text);
+            if (od.trigger == Quest::Trigger::SLAY || od.trigger == Quest::Trigger::ACTIVATE)
+                CHECK_MESSAGE(std::strlen(od.target) > 0, "quest '", q.name, "' has an untargeted objective");
+            else
+                CHECK(std::strlen(od.target) == 0);
+        }
     }
     CHECK(Quest::COUNT <= 64);   // the completion mask is a u64
 }
@@ -224,14 +239,14 @@ TEST_CASE("quest completion bits round-trip and gate the act") {
     for (u32 i = 0; i < Quest::COUNT; i++) {
         const u8 f = Quest::QUESTS[i].zoneFloor;
         CHECK_FALSE(Quest::isComplete(mask, f));
-        mask |= (1ull << Quest::bitFor(f));
+        mask |= (1ull << Quest::indexForZone(f));
         CHECK(Quest::isComplete(mask, f));
     }
     CHECK(Quest::actComplete(mask, 1));
     CHECK(Quest::actComplete(mask, 2));
     // A zone with no quest is never "complete" — it must not read as a satisfied objective.
     CHECK_FALSE(Quest::isComplete(mask, 52));
-    CHECK(Quest::bitFor(52) == 0xFF);
+    CHECK(Quest::indexForZone(52) == 0xFF);
 }
 
 // Act 1 must END on a quest, or finishing the walk has no payoff. The act's CLIMAX is the
@@ -241,11 +256,13 @@ TEST_CASE("quest completion bits round-trip and gate the act") {
 TEST_CASE("the act ends on a boss fight, then a doorway") {
     const Quest::QuestDef* climax = Quest::forZone(57);   // TristRAM
     REQUIRE(climax != nullptr);
-    CHECK(climax->trigger == Quest::Trigger::SLAY);
+    REQUIRE(Quest::deedObjective(*climax) != nullptr);
+    CHECK(Quest::deedObjective(*climax)->trigger == Quest::Trigger::SLAY);
 
     const Quest::QuestDef* last = Quest::forZone(59);     // Whitechapel Terminal
     REQUIRE(last != nullptr);
-    CHECK(last->trigger == Quest::Trigger::REACH);
+    REQUIRE(Quest::deedObjective(*last) != nullptr);
+    CHECK(Quest::deedObjective(*last)->trigger == Quest::Trigger::REACH);
 }
 
 // A SLAY quest names its victim as a STRING and the zone that hosts the fight names its boss as
@@ -258,16 +275,18 @@ TEST_CASE("a zone boss and its SLAY quest name the same enemy") {
         const Zone::ZoneDef& z = Zone::ZONES[i];
         const Quest::QuestDef* q = Quest::forZone(z.floor);
         const bool hasBoss = z.boss && z.boss[0];
+        const Quest::ObjectiveDef* deed = q ? Quest::deedObjective(*q) : nullptr;
         if (hasBoss) {
             REQUIRE(q != nullptr);
-            CHECK(q->trigger == Quest::Trigger::SLAY);
-            CHECK(std::strcmp(q->target, z.boss) == 0);
+            REQUIRE(deed != nullptr);
+            CHECK(deed->trigger == Quest::Trigger::SLAY);
+            CHECK(std::strcmp(deed->target, z.boss) == 0);
         }
         // The converse: a SLAY quest whose target is a zone BOSS must be hosted by the zone that
         // spawns it. (A SLAY may also target a champion the content spawner seeds, which is why
         // this only fires when the zone declares a boss of its own.)
-        if (q && q->trigger == Quest::Trigger::SLAY && hasBoss)
-            CHECK(std::strcmp(q->target, z.boss) == 0);
+        if (deed && deed->trigger == Quest::Trigger::SLAY && hasBoss)
+            CHECK(std::strcmp(deed->target, z.boss) == 0);
     }
 }
 
