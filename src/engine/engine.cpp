@@ -1119,8 +1119,9 @@ void Engine::addChatMessage(const char* speaker, const char* msg, Vec3 color) {
     for (u32 i = MAX_CHAT_LINES - 1; i > 0; i--) {
         m_chatLog[i] = m_chatLog[i - 1];
     }
-    // Format "Speaker: message" into line 0
-    std::snprintf(m_chatLog[0].text, CHAT_LINE_LEN, "%s: %s", speaker, msg);
+    // Format into line 0 through the pure rule, which is what stops a speakerless line (quest
+    // offers, act completions, gate refusals, pickup names) from picking up a leading ": ".
+    Chat::format(m_chatLog[0].text, CHAT_LINE_LEN, speaker, msg);
     m_chatLog[0].color = color;
     m_chatLog[0].timer = 10.0f; // visible for 10 seconds
 }
