@@ -22,11 +22,10 @@
 
 namespace Quest {
 
-// Capacity, sized for growth rather than for today. `Quest::Progress` (quest_state.h) WILL BE
-// serialized at these sizes once the save format grows its v7 tail — a later commit in this
-// series; today nothing writes them to disk. Enlarging them AFTER that lands costs a
-// SAVE_VERSION bump and another pair of legacy readers, so do the widening now, while it is
-// still free. Ten quests are authored today.
+// Capacity, sized for growth rather than for today. `Quest::Progress` (quest_state.h) IS serialized
+// at these sizes in the SAVE_VERSION 7 per-player tail, so enlarging either one now costs a version
+// bump and another pair of legacy readers — which is exactly why the widening was done up front,
+// while v7 was still unreleased and it was free. Ten quests are authored today.
 inline constexpr u32 MAX_QUESTS = 32;   // per-character state arrays are sized to this
 inline constexpr u32 MAX_OBJ    = 4;    // objectives per quest
 
