@@ -228,6 +228,9 @@ struct Entity {
 
     // Identity — stable name for game logic (boss reactions, quests, etc.)
     const char* nameTag = nullptr;  // e.g. "butcher", "lich_lord" (nullptr = anonymous)
+    // Quest-giver index into Quest::GIVERS, or 0xFF for every other entity. Transient pool state —
+    // Entity is never serialized, so this costs static memory and nothing on the wire.
+    u8 questGiver = 0xFF;
 
     // Rendering
     u8  meshId     = 0;  // index into Engine::m_meshDefs

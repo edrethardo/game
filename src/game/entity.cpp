@@ -96,6 +96,9 @@ EntityHandle EntitySystem::spawn(EntityPool& pool, Vec3 position, Vec3 halfExten
     e.champNameIdx   = 0;
     e.enemyDefIdx    = 0xFF;   // recycled slot must not inherit the previous monster's identity
     e.lifeTimer      = 0.0f;   // recycled slot must not inherit a goblin's escape countdown
+    // ...nor a despawned quest giver's ROLE: a monster recycling that slot would otherwise offer
+    // "Speak to Akara" and hand out quests. Giver spawn sites stamp this AFTER spawn.
+    e.questGiver     = 0xFF;
 
     // Add to active list
     pool.activeList[pool.activeCount++] = idx;

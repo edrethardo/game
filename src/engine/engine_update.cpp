@@ -2297,6 +2297,7 @@ void Engine::resolveInteractTargets(InteractState& st) {
     st.stashIdx = -1;
     st.waypointIdx = -1;
     st.zoneGateIdx = -1;
+    st.npcIdx = -1;
     st.nearTownPortal = false;
     st.nearExit = false;
     if (m_inventoryOpen) return;
@@ -2389,6 +2390,30 @@ void Engine::resolveInteractTargets(InteractState& st) {
         if (score > bestMimic) { bestMimic = score; st.mimicIdx = static_cast<s32>(i); }
     }
 
+    // Quest givers are ENTITIES, not world items, so they need their own pass. Scored by the SAME
+    // aim-then-distance rule the item pass uses, so the prompt the player sees and the target the
+    // button acts on are chosen once, by one rule, and can never name different NPCs.
+    f32 bestGiver = -2.0f;   // below any real score: dot bottoms out at INTERACT_MIN_DOT, not -1
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        const u32 i = m_entities.activeList[a];
+        const Entity& e = m_entities.entities[i];
+        // questGiver first: it is the cheapest reject and almost nothing in the pool is a giver.
+        if (e.questGiver == 0xFF || (e.flags & ENT_DEAD)) continue;
+
+        Vec3 to = e.position - m_localPlayer.position;
+        f32 hDist = sqrtf(to.x * to.x + to.z * to.z);
+        f32 gdot = (hDist > 0.01f && hLen > 0.01f)
+                 ? (fwd.x * to.x + fwd.z * to.z) / (hDist * hLen)
+                 : 1.0f;
+        if (!Interact::inReach(hDist, gdot, GameConst::INTERACT_RANGE,
+                               GameConst::INTERACT_GRAB_RADIUS, GameConst::INTERACT_MIN_DOT,
+                               fabsf(to.y)))
+            continue;
+
+        f32 gscore = gdot - hDist * 0.1f;
+        if (gscore > bestGiver) { bestGiver = gscore; st.npcIdx = static_cast<s32>(i); }
+    }
+
     st.nearExit = m_level.floorDoorActive &&
                   lengthSq(m_level.floorDoorPos - m_localPlayer.position) < 4.0f;
     st.nearPortal = m_level.sourcePortalActive &&
@@ -2426,7 +2451,8 @@ void Engine::updatePlayerPickup(f32 dt) {
     // Overworld fixtures ride the ITEM class (a TAP), like the stash: they are things you walk up
     // to and press once, and putting them here means interact.h's Target enum needs no new value.
     const bool hasItemClass  = (st.itemIdx >= 0) || (st.chestIdx >= 0) || (st.mimicIdx >= 0) ||
-                               (st.stashIdx >= 0) || (st.waypointIdx >= 0) || (st.zoneGateIdx >= 0);
+                               (st.stashIdx >= 0) || (st.waypointIdx >= 0) ||
+                               (st.zoneGateIdx >= 0) || (st.npcIdx >= 0);
     const bool down = !m_inventoryOpen && Input::isActionDown(GameAction::PICKUP);
     const Interact::Intent intent =
         Interact::poll(st.hold, down, hasHoldTarget, dt, GameConst::INTERACT_HOLD_SEC);
@@ -2455,6 +2481,16 @@ void Engine::updatePlayerPickup(f32 dt) {
     // change itself is host-decided and broadcast (a client's enterZone request is ignored — see
     // updateZoneTransitions). Routing them through CL_PICKUP_ITEM would instead CONSUME the fixture,
     // which is exactly wrong for a waypoint that must still be there when you come back.
+    // Talking is LOCAL on every role, for the same reason. It grants nothing and mutates no world
+    // state: it records a per-character objective and opens a UI. Routing it through the server
+    // would be a packet that could only ever tell the host something about a client's own journal.
+    // The st.itemIdx guard keeps real loot at your feet winning the button, matching the tier rule
+    // the item scoring already applies.
+    if (wantItem && st.npcIdx >= 0 && st.itemIdx < 0) {
+        talkToGiver(st.npcIdx);
+        return;
+    }
+
     if (wantItem && (st.waypointIdx >= 0 || st.zoneGateIdx >= 0)) {
         if (st.waypointIdx >= 0) touchWaypoint(st.waypointIdx);
         else                     enterZoneGate(st.zoneGateIdx);

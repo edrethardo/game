@@ -1387,6 +1387,10 @@ private:
         // consumed; a zone gate walks you through to the floor named in its itemLevel byte.
         s32  waypointIdx = -1;
         s32  zoneGateIdx = -1;
+        // Best aimed quest giver (ENTITY pool index, -1 = none). Item-class for the tap/hold rule
+        // like the other fixtures — you walk up to an NPC and press once — but real loot at your
+        // feet still wins the button.
+        s32  npcIdx = -1;
         bool nearTownPortal = false; // standing in the town's to-dungeon portal
         Interact::HoldState hold;    // tap/hold machine state (see game/interact.h)
     };
@@ -1539,6 +1543,9 @@ private:
     void questCheckZoneCleared();
     u16  zoneHostilesAlive() const;   // live hostiles in the current zone (quest poll + journal row)
     void questAnnounce(u8 questIdx, bool wasComplete);
+    // Talk to the quest giver at this ENTITY pool index. Resolved LOCALLY on every network role:
+    // it grants nothing and mutates no world state, so there is nothing for the server to arbitrate.
+    void talkToGiver(s32 entityIdx);
     // Recompute m_questMask[lane] from m_questProgress[lane]. Call after ANY progress mutation —
     // the two must never be allowed to disagree.
     void refreshQuestMask(u8 lane);

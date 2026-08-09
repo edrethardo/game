@@ -24,7 +24,9 @@ static constexpr f32 INTERACT_VERTICAL_REACH = 2.0f;
 enum struct Intent : u8 { NONE, TAP, HOLD };
 
 // What that intent should act on, given what is in reach.
-enum struct Target : u8 { NONE, ITEM, SHRINE, EXIT };
+// NPC is APPENDED, never inserted: this enum is a per-frame resolve and is not serialized today,
+// but appending costs nothing and a future serialization cannot then inherit a reordered set.
+enum struct Target : u8 { NONE, ITEM, SHRINE, EXIT, NPC };
 
 // Per-player button state. Lives in the caller; poll() owns it.
 struct HoldState {

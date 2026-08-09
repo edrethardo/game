@@ -1035,6 +1035,19 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
         drawPrompt("Enter the Dungeon", {0.5f, 1.0f, 0.5f}, static_cast<f32>(sh) * 0.4f);
     }
 
+    // "Speak to <name>" — the giver's own name, so the player knows WHO they are walking up to
+    // before pressing anything. Same shape and screen height as the stash prompt above: both are
+    // hub fixtures the player walks between. Suppressed while loot is in reach, because the item
+    // wins the tap and a prompt offering what the button will not do is worse than none.
+    if (st.npcIdx >= 0 && st.itemIdx < 0 && m_gameState == GameState::IN_GAME) {
+        const Entity& g = m_entities.entities[st.npcIdx];
+        if (g.questGiver < Quest::GIVER_COUNT) {
+            char prompt[96];
+            std::snprintf(prompt, sizeof(prompt), "Speak to %s", Quest::GIVERS[g.questGiver].name);
+            drawPrompt(prompt, {0.75f, 0.85f, 1.0f}, static_cast<f32>(sh) * 0.45f);
+        }
+    }
+
     // Shrine. A shrine you cannot tell is interactable is just scenery, and the prompt is the only
     // place the player learns which of the three it is before spending it.
     if (st.shrineIdx >= 0 && m_gameState == GameState::IN_GAME) {

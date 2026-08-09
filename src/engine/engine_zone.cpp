@@ -604,6 +604,17 @@ void Engine::questAnnounce(u8 questIdx, bool wasComplete) {
     }
 }
 
+// Talk to the quest giver standing at this ENTITY pool index.
+//
+// STUB — the conversation itself (the greeting line, the TALK objective, the offer of whatever
+// Quest::giverOutstanding names) lands in the next step. It is declared and called now so the
+// interact plumbing that finds the NPC can be built and exercised on its own.
+//
+// It is resolved LOCALLY on every network role, exactly like a waypoint: talking grants nothing
+// and changes no world state, so there is nothing for the server to arbitrate — no wire change.
+void Engine::talkToGiver(s32 /*entityIdx*/) {
+}
+
 // Offered on arrival. REACH quests take their objective from the same event — finding the place
 // WAS the task — so arrival both offers and advances.
 void Engine::questOnZoneEnter(u8 zoneFloor) {
