@@ -1276,6 +1276,34 @@ when a content/constant change knocks a floor out of band.
 
 **Assets are GENERATED, not committed** (`assets/meshes/*.obj` is gitignored). The mesh table is `src/engine/asset_manifest.h`; `tools/build_assets.py` **hard-fails** if the engine names a mesh it doesn't generate, so a mesh added to one and not the other can no longer ship as an invisible fallback cube. Adding a mesh means editing **both**. (Full trap: `engine-how-to` → Pitfalls.)
 
+## Repo context graph (graft)
+
+**Always `/home/aaron/.local/bin/graft`. Never `npx @nanonets/graft`.** The local shim execs Aaron's
+fork (`node /home/aaron/code/Graft-fork/dist/cli.js`), the only build that parses C/C++. npx fetches
+published 0.9.0, which does not — and it does not just fail, it **auto-refreshes
+`graft/.graph/wiring.json` down to 865 Python/JS nodes and destroys the C++ graph**. Recovery is one
+free `graft build` with the local binary. `.mcp.json` / `opencode.json` pin the absolute path because
+a bare `graft` needs `~/.local/bin` on PATH, which a spawned MCP server does not inherit.
+
+**Rebuilding.** `graft build` (wiring graph) is free — no LLM, seconds from cache. Only
+`graft build --deep` (concept cards + summaries) calls the model, and it **must** go through the
+no-think shim: vLLM at `192.168.2.219:8000` runs with thinking ON, and Qwen's reasoning preamble
+measured **1 completion/min vs 85/min** through the shim.
+
+```bash
+./tools/graft_deep.sh        # starts the shim if down, waits for it, then builds --deep
+                             # refuses to run rather than build against a thinking endpoint
+```
+
+`tools/nothink_proxy.py` (port 8011) injects `chat_template_kwargs {"enable_thinking": false}` per
+request, so the server itself is never reconfigured. The repo `.env` (gitignored) already points
+graft at it, so a bare `graft build --deep` picks it up with no flags.
+
+**Known gap:** `Namespace::function()` call edges are missed. `callers` resolves plain calls,
+`this->` and `Class::method` with no false positives — but this engine is "systems are namespaces of
+free functions", so ~a third of calls (`Combat::`, `Input::`, `ZoneRoute::`) have no edges. **An
+empty trace is not proof nothing calls a symbol**; confirm with `graft grep`.
+
 ## Architecture
 
 **Data-driven hybrid.** JSON in `assets/config/` defines content (items, affixes, skills, enemies, weapons, materials). C++ systems load defs at startup into fixed-size arrays and consume them at runtime. Asset name strings are resolved to integer IDs (mesh IDs, material IDs) once after init — runtime code never touches strings.
