@@ -5,6 +5,8 @@
 // that the act's rules are testable without booting anything.
 #include "../../external/doctest/doctest.h"
 #include "game/quest_state.h"
+#include <string>   // CAPTURE renders a bare const char* as a POINTER, not the text
+
 
 TEST_CASE("quest progress starts empty and reports nothing complete") {
     Quest::Progress p{};
@@ -66,7 +68,7 @@ TEST_CASE("migration ignores bits above the quest table") {
 TEST_CASE("every authored quest has at least one objective and a narration") {
     for (u32 i = 0; i < Quest::COUNT; i++) {
         const Quest::QuestDef& q = Quest::QUESTS[i];
-        CAPTURE(q.name);
+        CAPTURE(std::string(q.name));
         REQUIRE(q.objectiveCount >= 1);
         REQUIRE(q.objectiveCount <= Quest::MAX_OBJ);
         REQUIRE(q.narration != nullptr);
@@ -79,7 +81,7 @@ TEST_CASE("every authored quest has at least one objective and a narration") {
 // order and "speak to the giver" is the first beat of every D2 quest.
 TEST_CASE("every quest opens with a TALK objective") {
     for (u32 i = 0; i < Quest::COUNT; i++) {
-        CAPTURE(Quest::QUESTS[i].name);
+        CAPTURE(std::string(Quest::QUESTS[i].name));
         REQUIRE(Quest::QUESTS[i].objectives[0].trigger == Quest::Trigger::TALK);
     }
 }
@@ -90,7 +92,7 @@ TEST_CASE("SLAY objectives name a target") {
         for (u32 o = 0; o < Quest::QUESTS[i].objectiveCount; o++) {
             const Quest::ObjectiveDef& od = Quest::QUESTS[i].objectives[o];
             if (od.trigger != Quest::Trigger::SLAY) continue;
-            CAPTURE(Quest::QUESTS[i].name);
+            CAPTURE(std::string(Quest::QUESTS[i].name));
             REQUIRE(od.target != nullptr);
             REQUIRE(od.target[0] != '\0');
         }
@@ -103,7 +105,7 @@ TEST_CASE("every giver hands out at least one quest") {
         bool found = false;
         for (u32 i = 0; i < Quest::COUNT && !found; i++)
             if (Quest::QUESTS[i].giverIdx == g) found = true;
-        CAPTURE(Quest::GIVERS[g].name);
+        CAPTURE(std::string(Quest::GIVERS[g].name));
         REQUIRE(found);
     }
 }
@@ -116,7 +118,7 @@ TEST_CASE("every giver hands out at least one quest") {
 TEST_CASE("every quest's deed trigger is one the engine can satisfy") {
     for (u32 i = 0; i < Quest::COUNT; i++) {
         const Quest::ObjectiveDef* deed = Quest::deedObjective(Quest::QUESTS[i]);
-        CAPTURE(Quest::QUESTS[i].name);
+        CAPTURE(std::string(Quest::QUESTS[i].name));
         REQUIRE(deed != nullptr);
         const bool implemented = deed->trigger == Quest::Trigger::CLEAR_ZONE
                               || deed->trigger == Quest::Trigger::SLAY
