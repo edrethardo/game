@@ -21,6 +21,7 @@
 #include "game/item.h"
 #include "game/zone_def.h"      // Zone::ZoneDef / Dir — the overworld zone graph (sentinel floors 52-96)
 #include "game/quest_def.h"     // Quest::QuestDef — the Act 1 chain
+#include "game/quest_state.h"   // Quest::Progress — the per-character authority
 #include "game/stash.h"
 #include "game/arena.h"   // PvP deathmatch rules (Arena mode, floor 97)
 #include "game/combat.h"  // Combat::PvpHit/PvpHitOutcome — the arena's atomic hit apply
@@ -1531,7 +1532,11 @@ private:
     void questOnZoneEnter(u8 zoneFloor);
     void questOnEnemyKilled(const char* enemyName);
     void questCheckZoneCleared();
-    void questComplete(u8 zoneFloor);
+    u16  zoneHostilesAlive() const;   // live hostiles in the current zone (quest poll + journal row)
+    void questAnnounce(u8 questIdx, bool wasComplete);
+    // Recompute m_questMask[lane] from m_questProgress[lane]. Call after ANY progress mutation —
+    // the two must never be allowed to disagree.
+    void refreshQuestMask(u8 lane);
     u32  waypointDestinations(u8* outFloors, u32 maxOut) const;
 
     // --- Shared world-entry ritual (engine_world.cpp) -------------------------------------------
@@ -2039,6 +2044,10 @@ private:
     // the waypoint mask — v6 is unreleased, so widening its tail now costs nothing, whereas adding a
     // second version later would mean two conditional reads in every reader forever.
     u64 m_questMask[MAX_LOCAL_PLAYERS] = {0, 0};
+    // The AUTHORITY for quest progress; m_questMask above is a cache derived from it. Kept as a
+    // cache rather than deleted because ~a dozen consumers (ZoneRoute, the gate refusals, the
+    // autoplay act branch) take a plain u64 and have no reason to learn a new type.
+    Quest::Progress m_questProgress[MAX_LOCAL_PLAYERS] = {};
 
     // Per-lane origin (runtime only, not persisted): true if this lane's character
     // was loaded from a save (Continue / network join), false if it's a fresh New

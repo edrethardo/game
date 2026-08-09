@@ -24,7 +24,7 @@
 #include "audio/audio.h"
 #include "platform/input.h"
 #include "core/log.h"
-#include <cstring>   // strcmp — SLAY quests match on the enemy def name
+#include <cstring>   // strcmp — the named zone boss is resolved against the enemy def table
 
 namespace {
 
@@ -562,72 +562,109 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
 // is a UI project, and the act reads perfectly well as "you are told what this place wants, and told
 // when you have done it". Everything below is three small hooks on events the engine already fires.
 
-void Engine::questComplete(u8 zoneFloor) {
-    const Quest::QuestDef* q = Quest::forZone(zoneFloor);
-    if (!q) return;
-    const u8 bit = Quest::indexForZone(zoneFloor);
-    if (bit == 0xFF) return;
-    if (m_questMask[m_localPlayerIndex] & (1ull << bit)) return;   // already done — stay silent
+// The mask is a CACHE of m_questProgress. Every mutation goes through here, so the two cannot
+// drift — the failure shape this codebase keeps rediscovering (see CLAUDE.md's "one fact stored
+// twice" thread).
+void Engine::refreshQuestMask(u8 lane) {
+    if (lane >= MAX_LOCAL_PLAYERS) return;
+    // ADOPT before deriving. Two writers still set the mask directly and neither can be reached
+    // from here: the save load (until SAVE_VERSION 7 carries Progress itself) and the
+    // --quests-done dev door. Deriving straight from an empty Progress would silently UN-complete
+    // their acts on the first zone entry — measured as `[ZONEX] refused 56 -> 58 (quest gate)`,
+    // i.e. the onward road sealed — and the next autosave would write that loss back permanently.
+    // migrateFromMask only ever ADDS completions, so the mask is monotonic across a refresh and
+    // this can never lose progress; it becomes a no-op once both writers hand over Progress.
+    Quest::migrateFromMask(m_questProgress[lane], m_questMask[lane]);
+    m_questMask[lane] = Quest::completionMask(m_questProgress[lane]);
+}
 
-    m_questMask[m_localPlayerIndex] |= (1ull << bit);
-    addChatMessage("", q->name, Vec3{1.0f, 0.85f, 0.35f});
-    LOG_INFO("[QUEST] complete: %s", q->name);
+// Announce a quest's completion once, when it crosses into COMPLETE. Callers mutate progress and
+// then call this; it is a no-op if the quest did not just finish.
+void Engine::questAnnounce(u8 questIdx, bool wasComplete) {
+    if (questIdx >= Quest::COUNT) return;
+    const u8 lane = m_localPlayerIndex;
+    const bool nowComplete = Quest::isComplete(m_questMask[lane], Quest::QUESTS[questIdx].zoneFloor);
+    if (!nowComplete || wasComplete) return;
+
+    const Quest::QuestDef& q = Quest::QUESTS[questIdx];
+    addChatMessage("", q.name, Vec3{1.0f, 0.85f, 0.35f});
+    LOG_INFO("[QUEST] complete: %s", q.name);
     AudioSystem::play(SfxId::LEVEL_UP);
 
-    const u8 act = Quest::actOf(zoneFloor);
-    if (Quest::actComplete(m_questMask[m_localPlayerIndex], act)) {
-        addChatMessage("", act == 1 ? "Act 1 complete — the platform is open."
-                                    : "Act 2 complete — the gate is closed.",
+    const u8 act = Quest::actOf(q.zoneFloor);
+    if (Quest::actComplete(m_questMask[lane], act)) {
+        addChatMessage("", act == 1 ? "Act 1 complete - the platform is open."
+                                    : "Act 2 complete - the gate is closed.",
                        Vec3{1.0f, 0.95f, 0.6f});
         LOG_INFO("[QUEST] ACT %u COMPLETE", static_cast<u32>(act));
     }
 }
 
-// Offered on arrival, and REACH quests complete on arrival too — finding the place was the task.
+// Offered on arrival. REACH quests take their objective from the same event — finding the place
+// WAS the task — so arrival both offers and advances.
 void Engine::questOnZoneEnter(u8 zoneFloor) {
-    const Quest::QuestDef* q = Quest::forZone(zoneFloor);
-    if (!q) return;
-    if (Quest::isComplete(m_questMask[m_localPlayerIndex], zoneFloor)) return;
+    const u8 idx = Quest::indexForZone(zoneFloor);
+    if (idx == 0xFF) return;
+    const u8 lane = m_localPlayerIndex;
+    const bool wasComplete = Quest::isComplete(m_questMask[lane], zoneFloor);
 
-    // The quest's DEED — objective 0 is always the TALK step, which is never what "does arriving
-    // finish this?" is asking about.
-    const Quest::ObjectiveDef* deed = Quest::deedObjective(*q);
-    if (deed && deed->trigger == Quest::Trigger::REACH) { questComplete(zoneFloor); return; }
-    addChatMessage("", q->blurb, Vec3{0.75f, 0.8f, 0.9f});
-    // Logged as well as shown. A chat-only offer is invisible to a soak and to any after-the-fact
-    // check of whether the chain actually armed — the same blind spot that hid the credits park and
-    // the dead legendaries until a log line was added.
-    LOG_INFO("[QUEST] offered: %s (%s)", q->name,
-             (deed && deed->trigger == Quest::Trigger::SLAY) ? deed->target : "clear the zone");
+    Quest::offer(m_questProgress[lane], idx);
+    Quest::noteReached(m_questProgress[lane], idx);
+    refreshQuestMask(lane);
+
+    if (!wasComplete && !Quest::isComplete(m_questMask[lane], zoneFloor)) {
+        const Quest::QuestDef& q = Quest::QUESTS[idx];
+        addChatMessage("", q.blurb, Vec3{0.75f, 0.8f, 0.9f});
+        // Logged as well as shown. A chat-only offer is invisible to a soak and to any
+        // after-the-fact check of whether the chain actually armed — the blind spot that hid the
+        // credits park and the dead legendaries until a log line was added.
+        LOG_INFO("[QUEST] offered: %s (giver %s)", q.name, Quest::GIVERS[q.giverIdx].name);
+    }
+    questAnnounce(idx, wasComplete);
 }
 
-// SLAY triggers. Called from the death path with the dying enemy's def name.
+// SLAY. Called from handleDeathPreamble — the ONE choke every enemy death funnels through — so no
+// kill route (a proc, a pet, a thorns reflect) can miss an objective.
 void Engine::questOnEnemyKilled(const char* enemyName) {
     if (!m_level.inZone || !enemyName) return;
-    const Quest::QuestDef* q = Quest::forZone(m_level.zoneFloor);
-    const Quest::ObjectiveDef* deed = q ? Quest::deedObjective(*q) : nullptr;
-    if (!deed || deed->trigger != Quest::Trigger::SLAY) return;
-    if (std::strcmp(enemyName, deed->target) != 0) return;
-    questComplete(m_level.zoneFloor);
+    const u8 idx = Quest::indexForZone(m_level.zoneFloor);
+    if (idx == 0xFF) return;
+    const u8 lane = m_localPlayerIndex;
+    const bool wasComplete = Quest::isComplete(m_questMask[lane], m_level.zoneFloor);
+
+    Quest::noteKill(m_questProgress[lane], idx, enemyName);
+    refreshQuestMask(lane);
+    questAnnounce(idx, wasComplete);
 }
 
-// CLEAR_ZONE triggers. Polled rather than event-driven because "no hostiles left" is a property of
-// the pool, not of any one death — a summoner's last minion and the summoner itself can die on the
+// Live hostile count in the current zone. Used by BOTH the CLEAR_ZONE completion poll and the
+// Journal's progress row, so the number the player reads and the number that completes the quest
+// are the same number.
+u16 Engine::zoneHostilesAlive() const {
+    u16 n = 0;
+    for (u32 a = 0; a < m_entities.activeCount; a++) {
+        const Entity& e = m_entities.entities[m_entities.activeList[a]];
+        if (e.flags & (ENT_DEAD | ENT_FRIENDLY)) continue;
+        if (e.npcClass != NpcClass::NONE) continue;   // friendly class NPCs are not hostiles
+        n++;
+    }
+    return n;
+}
+
+// CLEAR_ZONE. Polled rather than event-driven because "no hostiles left" is a property of the
+// pool, not of any one death — a summoner's last minion and the summoner itself can die on the
 // same tick, and an event-per-death would have to re-scan anyway.
 void Engine::questCheckZoneCleared() {
     if (!m_level.inZone) return;
-    const Quest::QuestDef* q = Quest::forZone(m_level.zoneFloor);
-    const Quest::ObjectiveDef* deed = q ? Quest::deedObjective(*q) : nullptr;
-    if (!deed || deed->trigger != Quest::Trigger::CLEAR_ZONE) return;
-    if (Quest::isComplete(m_questMask[m_localPlayerIndex], m_level.zoneFloor)) return;
+    const u8 idx = Quest::indexForZone(m_level.zoneFloor);
+    if (idx == 0xFF) return;
+    const u8 lane = m_localPlayerIndex;
+    if (Quest::isComplete(m_questMask[lane], m_level.zoneFloor)) return;
+    if (zoneHostilesAlive() > 0) return;
 
-    for (u32 a = 0; a < m_entities.activeCount; a++) {
-        const Entity& e = m_entities.entities[m_entities.activeList[a]];
-        if (e.flags & ENT_DEAD) continue;
-        if (e.flags & ENT_FRIENDLY) continue;   // NPCs and pets are not the garrison
-        return;                                  // something still lives — not cleared
-    }
-    questComplete(m_level.zoneFloor);
+    Quest::noteCleared(m_questProgress[lane], idx);
+    refreshQuestMask(lane);
+    questAnnounce(idx, /*wasComplete*/ false);
 }
 
 // --- Waypoints -----------------------------------------------------------------------------------
