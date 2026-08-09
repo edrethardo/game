@@ -85,16 +85,26 @@ extern bool s_engineSlain;    // secret superboss — Engine defeated this sessi
 //             them including the slot-list scan that never needs the field, whereas the per-player
 //             tail has one writer and two readers. Not inside PlayerInventory either — that would
 //             break its size static_assert and force a fourth Legacy mirror struct.
-static constexpr u32 SAVE_VERSION           = 6;
-static constexpr u32 SAVE_VERSION_LEGACY_V5 = 5;   // same layout minus the mask (reads as 0)
+// Version 7 = the per-character QUEST PROGRESS tail (Quest::Progress — state[32] + obj[32][4], 160 B)
+//             appended after the v6 waypoint/quest masks. Same reasoning as v6: appended to the
+//             PER-PLAYER tail, so the header's three readers are untouched and no existing struct
+//             changes size (every layout static_assert below stays green).
+//             The MIGRATION is the load-bearing half. A v6 file carries completions as the single
+//             u64 questMask and nothing else; reading the absent v7 tail as zeros instead of running
+//             Quest::migrateFromMask would silently un-complete BOTH ACTS for every hero who has
+//             played them — and the next autosave would write that loss back permanently. There is
+//             no recovery from that for a player, which is why the legacy branch is explicit.
+static constexpr u32 SAVE_VERSION           = 7;
+static constexpr u32 SAVE_VERSION_LEGACY_V6 = 6;   // same layout minus the quest-progress tail
+static constexpr u32 SAVE_VERSION_LEGACY_V5 = 5;   // ...minus the waypoint/quest masks too
 static constexpr u32 SAVE_VERSION_LEGACY_V4 = 4;   // same layout — read as-is, migrates on next save
 static constexpr u32 SAVE_VERSION_LEGACY_V3 = 3;
 static constexpr u32 SAVE_VERSION_LEGACY_V2 = 2;
 
 // True for any version this build can read (the current one or a supported legacy one).
 static bool saveVersionReadable(u32 ver) {
-    return ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V5 ||
-           ver == SAVE_VERSION_LEGACY_V4 ||
+    return ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V6 ||
+           ver == SAVE_VERSION_LEGACY_V5 || ver == SAVE_VERSION_LEGACY_V4 ||
            ver == SAVE_VERSION_LEGACY_V3 || ver == SAVE_VERSION_LEGACY_V2;
 }
 
@@ -139,10 +149,12 @@ static_assert(sizeof(QuickbarState)           == 36,   "QuickbarState layout dri
 // v2 reads the legacy mirror and maps it (GLOVES starts empty; bonus caches are rebuilt by
 // applySavedCharToLane → recalculateStats, so only items/backpack need copying).
 static bool readPlayerInventory(FILE* f, PlayerInventory& out, u32 ver) {
-    // v5 and v4 share one layout (v5 only widened the difficulty and rarity VALUE ranges), so both
-    // read the struct directly. Keying this on `== SAVE_VERSION` alone is a trap when a bump adds no
-    // fields: every v4 save would fall past the legacy branches below and fail to load outright.
-    if (ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V5 || ver == SAVE_VERSION_LEGACY_V4)
+    // v7, v6, v5 and v4 all share ONE PlayerInventory layout (v5 widened only the difficulty and
+    // rarity VALUE ranges; v6 and v7 appended to the per-player tail OUTSIDE this struct), so all
+    // four read it directly. Keying this on `== SAVE_VERSION` alone is a trap when a bump adds no
+    // fields: every older save would fall past the legacy branches below and fail to load outright.
+    if (ver == SAVE_VERSION || ver == SAVE_VERSION_LEGACY_V6 ||
+        ver == SAVE_VERSION_LEGACY_V5 || ver == SAVE_VERSION_LEGACY_V4)
         return std::fread(&out, sizeof(PlayerInventory), 1, f) == 1;
     if (ver == SAVE_VERSION_LEGACY_V3) {
         // v3: identical up to the v4 tail — items copy 1:1, autoMode/buildCell keep their
@@ -340,6 +352,11 @@ void Engine::saveCharacter(u8 lane, u8 slot) {
     // the Act 1 quests it has completed (one bit per QUESTS[] row).
     std::fwrite(&m_waypointMask[lane], sizeof(u64), 1, f);
     std::fwrite(&m_questMask[lane],    sizeof(u64), 1, f);
+    // v7 tail: the per-quest state + objective bytes. Appended AFTER questMask, which therefore
+    // stays in the file by construction — removing it would shift the v6 portion's layout and
+    // break the legacy reader it exists to serve.
+    std::fwrite(m_questProgress[lane].state, sizeof(u8), Quest::MAX_QUESTS, f);
+    std::fwrite(m_questProgress[lane].obj,   sizeof(u8), Quest::MAX_QUESTS * Quest::MAX_OBJ, f);
 
     // Only promote the temp over the real slot if every write succeeded (ferror catches a disk-full
     // or I/O error along the way). On any failure, drop the temp and keep the previous good save.
@@ -436,6 +453,14 @@ void Engine::applySavedCharToLane(u8 lane, const SavedChar& ps) {
     if (lane >= MAX_LOCAL_PLAYERS) return;
     m_waypointMask[lane] = ps.waypointMask;   // v6; 0 on any older save (nothing discovered)
     m_questMask[lane]    = ps.questMask;      // v6; 0 on any older save (nothing completed)
+    // v7. On a v6-or-older file the reader has already reconstructed this from questMask, so this
+    // assignment is the ONE place the acts survive the format bump.
+    m_questProgress[lane] = ps.questProgress;
+    // The mask is a CACHE — never trust the file's copy. Re-deriving it from the state we just
+    // adopted means a hand-edited or half-migrated file cannot present a mask its state disagrees
+    // with. (refreshQuestMask folds the mask back in first, which only ever ADDS completions, so
+    // the legacy path stays safe while the --quests-done dev door still writes the mask raw.)
+    refreshQuestMask(lane);
 
     // Restore the BASE max HP. maxHealth itself is derived (base + gear + buffs) and is recomputed
     // below — never trusted from disk.
@@ -565,9 +590,20 @@ bool Engine::loadGame(u8 slot) {
         for (u32 s = 0; s < 4; s++) pok = pok && readSkillLegacy(f, ps.classSkills[s], wideSkill);
         // v6 tail. Version-conditional rather than unconditional: a v5 file simply ends here, and
         // reading past it would fail the load outright for every save written before the overworld.
-        if (pok && ver >= SAVE_VERSION) {
+        if (pok && ver >= SAVE_VERSION_LEGACY_V6) {
             pok = std::fread(&ps.waypointMask, sizeof(u64), 1, f) == 1;
             pok = pok && std::fread(&ps.questMask, sizeof(u64), 1, f) == 1;
+        }
+        // v7 tail. On a v6 file there is nothing to read: reconstruct the progress from the mask
+        // instead, or the hero loses both acts.
+        if (pok && ver >= SAVE_VERSION) {
+            pok = pok && std::fread(ps.questProgress.state, sizeof(u8),
+                                    Quest::MAX_QUESTS, f) == Quest::MAX_QUESTS;
+            pok = pok && std::fread(ps.questProgress.obj, sizeof(u8),
+                                    Quest::MAX_QUESTS * Quest::MAX_OBJ, f)
+                         == Quest::MAX_QUESTS * Quest::MAX_OBJ;
+        } else if (pok) {
+            Quest::migrateFromMask(ps.questProgress, ps.questMask);
         }
         if (!pok) { ok = false; break; }
     }
@@ -678,9 +714,21 @@ bool Engine::loadCharacterIntoLane(u8 slot, u8 lane) {
     ok = ok && std::fread(&ps.cls,         sizeof(u8),        1, f) == 1;
     ok = ok && std::fread(&ps.activeSkill, sizeof(u8),        1, f) == 1;
     for (u32 s = 0; s < 4; s++) ok = ok && readSkillLegacy(f, ps.classSkills[s], wideSkill);
-    if (ok && ver >= SAVE_VERSION) {
+    // v6 tail — the SAME version-conditional pair loadGame runs. Both readers must agree; a fix
+    // applied to only one of them is exactly how a save bug survives review.
+    if (ok && ver >= SAVE_VERSION_LEGACY_V6) {
         ok = std::fread(&ps.waypointMask, sizeof(u64), 1, f) == 1;
         ok = ok && std::fread(&ps.questMask, sizeof(u64), 1, f) == 1;
+    }
+    // v7 tail, else reconstruct it from the legacy mask (see loadGame).
+    if (ok && ver >= SAVE_VERSION) {
+        ok = ok && std::fread(ps.questProgress.state, sizeof(u8),
+                              Quest::MAX_QUESTS, f) == Quest::MAX_QUESTS;
+        ok = ok && std::fread(ps.questProgress.obj, sizeof(u8),
+                              Quest::MAX_QUESTS * Quest::MAX_OBJ, f)
+                   == Quest::MAX_QUESTS * Quest::MAX_OBJ;
+    } else if (ok) {
+        Quest::migrateFromMask(ps.questProgress, ps.questMask);
     }
     std::fclose(f);
     if (!ok) return false;

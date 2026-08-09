@@ -1997,11 +1997,15 @@ private:
         SkillState      skill{};
         u8 cls = 0, activeSkill = 0;
         SkillState      classSkills[4]{};
-        // v6 tail: discovered overworld waypoints + completed Act 1 quests. A pre-v6 save leaves
-        // both 0, which reads as "this hero has found/done none" — correct, since those characters
-        // predate the overworld entirely.
+        // v6 tail: discovered overworld waypoints + the legacy completion mask. A pre-v6 save
+        // leaves both 0, which reads as "this hero has found/done none" — correct, since those
+        // characters predate the overworld entirely.
         u64 waypointMask = 0;
         u64 questMask    = 0;
+        // v7 tail: full quest progress. On a v6 file this is reconstructed from questMask by
+        // Quest::migrateFromMask — read as zeros instead and every hero who already played the
+        // acts silently loses both of them, permanently, on their next autosave.
+        Quest::Progress questProgress{};
     };
     // Apply a deserialized character to a local lane: affix migration, stat recompute, class base
     // stats, energy/skill rewire. Does NOT touch world state. (Defined in engine_persist.cpp.)

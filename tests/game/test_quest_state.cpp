@@ -286,3 +286,40 @@ TEST_CASE("every quest completes without ever talking to a giver") {
     REQUIRE(Quest::actComplete(Quest::completionMask(p), 1));
     REQUIRE(Quest::actComplete(Quest::completionMask(p), 2));
 }
+
+// The v7 payload must survive a byte-level round trip at exactly the size the writer emits. This
+// is the shape check; the real-file check is the manual fixture load in the plan's next step.
+TEST_CASE("quest progress round-trips through a byte buffer at the serialized size") {
+    Quest::Progress out{};
+    Quest::offer(out, 0);
+    Quest::noteTalk(out, 0);
+    Quest::offer(out, 5);
+    out.state[9] = static_cast<u8>(Quest::State::COMPLETE);
+    // Objective bytes written DIRECTLY rather than through noteActivate: no quest owns an ACTIVATE
+    // objective until Task 14 flips quest 56, so the mutator would be a silent no-op here and the
+    // round trip would prove nothing about obj[] at all. What this test pins is the SERIALIZED
+    // SHAPE — that every byte of both arrays survives — so it wants arbitrary bytes, not a
+    // realistic play state.
+    out.obj[2][1] = 0b00010001;   // the Cairn bitmask shape: stones 0 and 4
+    out.obj[7][0] = 1;
+
+    u8 buf[Quest::MAX_QUESTS + Quest::MAX_QUESTS * Quest::MAX_OBJ] = {};
+    u32 w = 0;
+    for (u32 i = 0; i < Quest::MAX_QUESTS; i++) buf[w++] = out.state[i];
+    for (u32 i = 0; i < Quest::MAX_QUESTS; i++)
+        for (u32 o = 0; o < Quest::MAX_OBJ; o++) buf[w++] = out.obj[i][o];
+    REQUIRE(w == sizeof(buf));
+
+    Quest::Progress in{};
+    u32 r = 0;
+    for (u32 i = 0; i < Quest::MAX_QUESTS; i++) in.state[i] = buf[r++];
+    for (u32 i = 0; i < Quest::MAX_QUESTS; i++)
+        for (u32 o = 0; o < Quest::MAX_OBJ; o++) in.obj[i][o] = buf[r++];
+
+    for (u32 i = 0; i < Quest::MAX_QUESTS; i++) {
+        REQUIRE(in.state[i] == out.state[i]);
+        for (u32 o = 0; o < Quest::MAX_OBJ; o++) REQUIRE(in.obj[i][o] == out.obj[i][o]);
+    }
+    REQUIRE(Quest::completionMask(in) == Quest::completionMask(out));
+    REQUIRE(in.obj[2][1] == 0b00010001);   // the raw byte, not objectiveProgress — see above
+}
