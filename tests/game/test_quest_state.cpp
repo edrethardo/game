@@ -107,3 +107,20 @@ TEST_CASE("every giver hands out at least one quest") {
         REQUIRE(found);
     }
 }
+
+// Every quest's DEED trigger must be one the engine can currently satisfy. A quest authored with a
+// trigger that has no implementation is not merely incomplete — ZoneRoute::linkOpen gates the
+// onward road on zoneSettled(), so it SEALS the act and strands the character. Add a trigger to
+// this list only in the same commit that makes something able to fire it. (Task 14 adds ACTIVATE
+// here, in the same commit that spawns the five Cairn Stone fixtures.)
+TEST_CASE("every quest's deed trigger is one the engine can satisfy") {
+    for (u32 i = 0; i < Quest::COUNT; i++) {
+        const Quest::ObjectiveDef* deed = Quest::deedObjective(Quest::QUESTS[i]);
+        CAPTURE(Quest::QUESTS[i].name);
+        REQUIRE(deed != nullptr);
+        const bool implemented = deed->trigger == Quest::Trigger::CLEAR_ZONE
+                              || deed->trigger == Quest::Trigger::SLAY
+                              || deed->trigger == Quest::Trigger::REACH;
+        REQUIRE(implemented);
+    }
+}

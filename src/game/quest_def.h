@@ -109,17 +109,20 @@ inline constexpr QuestDef QUESTS[] = {
           { { Trigger::TALK, "Speak to Akara",          "",                      1 },
             { Trigger::SLAY, "Slay The Garbage Collector", "The Garbage Collector", 1 } } },
 
-    // D2's Cairn Stones beat. The five stones are authored fixtures (Phase 4) rather than a
-    // clear-the-zone stand-in: the quest is literally called "Align the Standing Stones", and
-    // "kill everything here" was the weakest beat in Act 1.
+    // D2's Cairn Stones beat. This row keeps CLEAR_ZONE until the five stone fixtures exist; the
+    // flip to ACTIVATE lands in the same commit as the stones themselves.
+    //
+    // The ORDER matters and is not fussiness: ZoneRoute::linkOpen gates the onward road on
+    // zoneSettled(56), so a quest 56 whose trigger has no implementation SEALS the way to TristRAM
+    // and strands anyone playing this commit.
     { 56, "Align the Standing Stones",
-          "Monuments to abandoned features, and none of them agree. Align them.",
+          "Monuments to abandoned features, and none of them agree. Clear the field and they will.",
           "Five stones, each raised for something that was going to be finished. They disagree "
           "about what the field was for, and while they disagree the way to TristRAM stays shut. "
-          "Touch each in turn and let them settle it.",
+          "Settle the field and they will settle with it.",
           /*giver*/ 1, /*objCount*/ 2,
-          { { Trigger::TALK,     "Speak to Charsi", "",      1 },
-            { Trigger::ACTIVATE, "Stones aligned",  "cairn", 5 } } },
+          { { Trigger::TALK,       "Speak to Charsi",    "", 1 },
+            { Trigger::CLEAR_ZONE, "Hostiles remaining", "", 1 } } },
 
     { 57, "The Search for Deckard Cache",
           "The village was restored from backup once too often. Something in the forge came back wrong.",
