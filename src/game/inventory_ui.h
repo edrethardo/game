@@ -30,7 +30,8 @@ namespace InventoryUI {
     static constexpr f32 QB_GAP  = 4.0f;
 
     struct SlotHit {
-        enum Panel : u8 { NONE, BACKPACK, EQUIPMENT, QUICKBAR, STASH, STASH_TAB, BUILD_CELL, BUILD_TOGGLE };
+        enum Panel : u8 { NONE, BACKPACK, EQUIPMENT, QUICKBAR, STASH, STASH_TAB,
+                          BUILD_CELL, BUILD_TOGGLE, JOURNAL_ROW, JOURNAL_TAB };
         Panel panel = NONE;
         u8    index = 0;
     };
@@ -62,6 +63,23 @@ namespace InventoryUI {
     BuildGridRects buildGridLayout(u32 sw, u32 sh);
     // Hit-test the build grid: SlotHit::BUILD_CELL with index = row*3+col, or BUILD_TOGGLE.
     SlotHit hitTestBuildGrid(u32 sw, u32 sh, s32 mx, s32 my);
+
+    // ---- Quest journal panel (drawn in the inventory's right column) ----
+    // Two columns: a quest list on the left, the selected quest's narration + objectives on the
+    // right. Single-sourced like every panel here — HUD::drawJournalPanel and hitTestJournal both
+    // derive from journalLayout(), or the click rects drift off the drawn thing.
+    static constexpr u32 JOURNAL_TABS = 2;      // ACT I, ACT II
+    static constexpr u32 JOURNAL_ROWS = 12;     // visible quest rows per act (10 authored today)
+    struct JournalRects {
+        f32 listX = 0.0f, listTopY = 0.0f, listW = 0.0f;   // row 0's left / TOP edge, column width
+        f32 rowH = 0.0f;                                    // one quest row's height
+        f32 detailX = 0.0f, detailTopY = 0.0f, detailW = 0.0f;
+        f32 tabX = 0.0f, tabY = 0.0f, tabW = 0.0f, tabH = 0.0f, tabGap = 0.0f;
+        f32 uiScale = 1.0f;
+    };
+    JournalRects journalLayout(u32 sw, u32 sh);
+    // Hit-test the journal: JOURNAL_ROW with index = visible row, or JOURNAL_TAB with index = act.
+    SlotHit hitTestJournal(u32 sw, u32 sh, s32 mx, s32 my);
     // Hit-test ONLY the stash panel (slots + tabs). The caller checks this before the regular
     // hitTest while the stash is open — the panel overlaps the (hidden) equipment area.
     SlotHit hitTestStash(u32 sw, u32 sh, s32 mx, s32 my);

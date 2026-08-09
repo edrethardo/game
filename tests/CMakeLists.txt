@@ -34,6 +34,7 @@ add_executable(dungeon_tests
     game/test_zone_def.cpp
     game/test_zone_route.cpp
     game/test_quest_state.cpp        # quest state machine: objectives, derived mask, v6 migration (header-only)
+    game/test_journal_layout.cpp     # journal panel geometry: draw and hit-test derive from one place
     game/test_minion_scale.cpp
     game/test_entity_ground.cpp
     game/test_free_play.cpp

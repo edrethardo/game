@@ -224,3 +224,60 @@ bool InventoryUI::skillSlotAt(const SkillBarRects& r, s32 mx, s32 my,
     }
     return false;
 }
+
+// The journal occupies the same right-hand column the build grid uses, so the two never overlap:
+// only one panel is ever the active one. Geometry is expressed in the same 720p-relative uiScale
+// every other panel here uses.
+InventoryUI::JournalRects InventoryUI::journalLayout(u32 sw, u32 sh) {
+    JournalRects r;
+    r.uiScale = static_cast<f32>(sh) / 720.0f;
+
+    const f32 panelW = 520.0f * r.uiScale;
+    const f32 panelX = static_cast<f32>(sw) * 0.5f - panelW * 0.5f;
+    const f32 topY   = static_cast<f32>(sh) * 0.82f;
+
+    r.tabW   = 110.0f * r.uiScale;
+    r.tabH   = 24.0f  * r.uiScale;
+    r.tabGap = 8.0f   * r.uiScale;
+    r.tabX   = panelX;
+    r.tabY   = topY;
+
+    r.rowH     = 22.0f * r.uiScale;
+    r.listX    = panelX;
+    r.listW    = 200.0f * r.uiScale;
+    r.listTopY = topY - r.tabH - 10.0f * r.uiScale;
+
+    r.detailX    = r.listX + r.listW + 16.0f * r.uiScale;
+    r.detailW    = panelW - r.listW - 16.0f * r.uiScale;
+    r.detailTopY = r.listTopY;
+    return r;
+}
+
+InventoryUI::SlotHit InventoryUI::hitTestJournal(u32 sw, u32 sh, s32 mx, s32 my) {
+    SlotHit result;
+    const JournalRects r = journalLayout(sw, sh);
+    const f32 fx = static_cast<f32>(mx), fy = static_cast<f32>(my);
+
+    for (u32 t = 0; t < JOURNAL_TABS; t++) {
+        const f32 x0 = r.tabX + (r.tabW + r.tabGap) * static_cast<f32>(t);
+        if (fx >= x0 && fx < x0 + r.tabW && fy >= r.tabY && fy < r.tabY + r.tabH) {
+            result.panel = SlotHit::JOURNAL_TAB;
+            result.index = static_cast<u8>(t);
+            return result;
+        }
+    }
+
+    if (fx >= r.listX && fx < r.listX + r.listW) {
+        // Rows descend from listTopY, matching the build grid's row-0-at-top convention.
+        const f32 dy = r.listTopY - fy;
+        if (dy >= 0.0f) {
+            const u32 row = static_cast<u32>(dy / r.rowH);
+            if (row < JOURNAL_ROWS) {
+                result.panel = SlotHit::JOURNAL_ROW;
+                result.index = static_cast<u8>(row);
+                return result;
+            }
+        }
+    }
+    return result;
+}
