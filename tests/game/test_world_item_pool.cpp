@@ -138,6 +138,7 @@ TEST_CASE("fixtures never despawn, globes and loot still do") {
     const Case cases[] = {
         { WAYPOINT_ID,     "waypoint",     false },
         { ZONE_GATE_ID,    "zone gate",    false },
+        { CAIRN_STONE_ID,  "cairn stone",  false },
         { SHRINE_POWER_ID, "shrine",       false },
         { CHEST_ID,        "chest",        false },
         { STASH_ID,        "stash",        false },
