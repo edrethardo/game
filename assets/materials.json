@@ -1203,6 +1203,11 @@
       "id": 192,
       "name": "service_door_skin",
       "texture": "service_door_skin_42.png"
+    },
+    {
+      "id": 193,
+      "name": "cairn_stone_skin",
+      "texture": "cairn_stone_skin_42.png"
     }
   ]
 }

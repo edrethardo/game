@@ -179,6 +179,80 @@ def skin_stone_circle():
     return w, h, p
 
 
+def skin_cairn_stone():
+    """A cairn stone — weathered granite under a band of carved glyphs across the upper third.
+
+    Grid is 7 x 18, the mesh's REAL filled extent (gx -3..3, gy 0..17), not a nominal size:
+    add_voxel_model derives the UVs from the filled set, so a skin sized to anything else is
+    stretched across the model and the glyph band lands somewhere it was never meant to be.
+
+    The glyph band is MECHANICAL, not decorative. The engine tints the whole body by its material
+    and *Align the Standing Stones* brightens an ALIGNED stone, so the model needs one feature that
+    is already bright and cool against warm grey — otherwise "aligned" is a subtle shift in the
+    overall grey of a rock, which is unreadable across a field. The glyphs are that feature; the
+    recessed panel behind them is what makes them read as CARVED rather than painted on.
+
+    Palette otherwise deliberately matches skin_stone_circle's granite family, since these five
+    stones and the TristRAM ring are supposed to be the same monuments in the same landscape.
+    """
+    w, h = 7, 18
+    p = {}
+
+    def mottle(px, py, k):
+        """Deterministic signed speckle. Integer-only for the same reason gen_mesh's _crag is:
+        textures are regenerated on every CI machine and must come out byte-identical."""
+        v = (px * 73856093) ^ (py * 19349663) ^ (k * 83492791)
+        return (((v ^ (v >> 13)) & 0x7FFFFFFF) % 13) - 6
+
+    base   = (122, 120, 116)      # granite, the stone_circle's own body colour
+    dark   = ( 92,  90,  88)      # damp foot, where rain collects
+    pale   = (156, 154, 147)      # sun-bleached crown, where it runs off
+    lichen = ( 96, 112,  84)      # the only non-grey below the band
+    panel  = ( 84,  90,  96)      # the dressed, recessed face the glyphs are cut into
+    glyph  = (176, 224, 226)      # the carving itself — cold and high-value against warm granite
+
+    # The band is derived from h rather than written as row numbers, so it stays in the upper third
+    # if the monolith's height ever changes; the top row is left as bare crown so the band reads as
+    # a panel with stone above it rather than as paint that ran off the top.
+    band_lo = h - h // 3
+    band_hi = h - 2
+
+    # Glyph strokes, one bitmask per band row, bit N = column px N. AUTHORED against the mesh's
+    # measured columns rather than generated: by this height the shaft has tapered and leaned, so
+    # only px 2..6 carry voxels at all, and an arithmetic pattern spread over the full width either
+    # wastes its marks on empty columns or — the bug this replaces — cancels out entirely
+    # (px * 3 % 3 is always 0, which quietly turned the glyphs into horizontal stripes).
+    STROKES = (0b0110100, 0b0001000, 0b0100100, 0b1011000, 0b0010000)
+
+    for px in range(w):
+        for py in range(h):
+            f = py / max(h - 1, 1)
+            carved = band_lo <= py <= band_hi
+            if carved:
+                lit = (STROKES[(py - band_lo) % len(STROKES)] >> px) & 1
+                c = glyph if lit else panel
+            elif f > 0.94:
+                c = pale
+            elif f < 0.16:
+                c = dark
+            else:
+                c = base
+            # Lichen creeps up the damp lower half in patches; never onto the dressed panel, which
+            # is the one part of the stone that is meant to look tended.
+            if not carved and f < 0.44 and ((px * 7 + py * 13) % 5) == 0:
+                c = lichen
+            # The glyphs take a third of the speckle everyone else does: full mottle on a 5-cell
+            # mark is enough to break the stroke up and lose the read at distance, which is the one
+            # thing this band exists to survive.
+            m = mottle(px, py, 4)
+            if c is glyph:
+                m //= 3
+            p[(px, py)] = (max(0, min(255, c[0] + m)),
+                           max(0, min(255, c[1] + m)),
+                           max(0, min(255, c[2] + m)), 255)
+    return w, h, p
+
+
 def skin_hell_gate():
     """The forced rift — pale Portland-stone jambs, scorched toward the opening, black throat.
 
@@ -5671,6 +5745,7 @@ SKIN_TYPES = {
     "tube_entrance": ("tube_entrance_skin_42.png", skin_tube_entrance),
     "service_door": ("service_door_skin_42.png", skin_service_door),
     "stone_circle": ("stone_circle_skin_42.png", skin_stone_circle),
+    "cairn_stone": ("cairn_stone_skin_42.png", skin_cairn_stone),
     "hell_gate": ("hell_gate_skin_42.png", skin_hell_gate),
     "cave_mouth": ("cave_mouth_skin_42.png", skin_cave_mouth),
 

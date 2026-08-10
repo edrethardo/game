@@ -1681,6 +1681,102 @@ def gen_stone_circle(height=3.2):
     return mb
 
 
+def gen_cairn_stone(height=2.4):
+    """ONE standing stone of the five in *Align the Standing Stones* (Field of Unmerged Branches).
+
+    gen_stone_circle above is the TristRAM PORTAL — a whole ring, placed once, walked into. This is
+    the quest's individual monument: five of them stand scattered across the field and are touched
+    one at a time, so unlike the ring it has to read as a single object up close AND be countable
+    across open country.
+
+    A leaning weathered monolith, ~0.8 x 2.4 x 0.5 m, wider at the foot than at the crown, with the
+    crown's leading corner chipped off. The lean and the chip are both silhouette work: an upright
+    rectangular slab reads as a piece of WALL, and a wall is exactly what a player walks past. It
+    leans in BOTH X and Z on purpose — nothing places these with a yaw, so a lean in one axis alone
+    vanishes when you view it down that axis and the stone would look upright from two of its four
+    sides.
+
+    The glyph band the skin paints across the upper third is load-bearing, not decoration: the
+    engine tints the whole body by its material, so brightening an ALIGNED stone needs something
+    bright to act on. That band is what a player reads across a field to know they are at 3 of 5.
+
+    Origin at the feet (Y=0); the base is centred on the origin in XZ.
+    """
+    mb = MeshBuilder()
+    N = 18                      # voxels tall — 0.133 m cells at the default 2.4 m
+    vs = height / N
+
+    filled = set()
+
+    # Cross-section by height band: (first gy, width, depth, lean in X, lean in Z), all in voxels.
+    # A table rather than a formula because every row is a silhouette decision — the STEPS between
+    # bands are the weathering, and a smooth interpolated taper reads as a machined obelisk. Widths
+    # shrink 6 -> 3 and depths 4 -> 2 so the foot is visibly the heavy end.
+    BANDS = (
+        ( 0, 6, 4, 0, 0),
+        ( 6, 5, 4, 0, 0),
+        ( 9, 5, 3, 1, 0),
+        (12, 4, 3, 1, 1),
+        (15, 4, 2, 2, 1),
+        (17, 3, 2, 2, 1),
+    )
+
+    for gy in range(N):
+        w = d = lx = lz = 0
+        for (gy0, bw, bd, blx, blz) in BANDS:
+            if gy >= gy0:
+                w, d, lx, lz = bw, bd, blx, blz
+        x0 = -(w // 2) + lx
+        z0 = -(d // 2) + lz
+        for gx in range(x0, x0 + w):
+            for gz in range(z0, z0 + d):
+                filled.add((gx, gy, gz))
+
+    # Chip the crown's leading corner. Bites are Manhattan distance from the row's (+X, +Z) corner
+    # and are capped at 2 deliberately: a deeper bite on the 3-wide top row leaves a single voxel
+    # standing, which reads as an antenna rather than as broken stone (the same trap gen_cave_mouth
+    # records for its crown chunks).
+    for i, bite in enumerate((1, 2, 2)):
+        gy = N - 3 + i
+        row = [p for p in filled if p[1] == gy]
+        if not row:
+            continue
+        mx = max(p[0] for p in row)
+        mz = max(p[2] for p in row)
+        for p in row:
+            if (mx - p[0]) + (mz - p[2]) < bite:
+                filled.discard(p)
+
+    # Weathering: knock single voxels off the vertical CORNERS of the shaft. Corners only, because
+    # a corner voxel in a solid slab is never what connects two parts of the model — removing one
+    # can chip the silhouette but can never split it. The crown (handled above) and the ground row
+    # are left alone: the foot is what makes the stone look planted.
+    for gy in range(1, N - 3):
+        row = [p for p in filled if p[1] == gy]
+        xs = (min(p[0] for p in row), max(p[0] for p in row))
+        zs = (min(p[2] for p in row), max(p[2] for p in row))
+        for p in row:
+            if p[0] in xs and p[2] in zs and _crag(p[0] * 3 + gy, p[2] * 5 - gy) == 2:
+                filled.discard(p)
+
+    # A skirt of turf-level rubble round the foot, so the stone reads as SUNK into the field rather
+    # than set down on it. Deliberately spread in Z only: gx and gy are what size the skin
+    # (add_voxel_model derives tex_w/tex_h from the filled extents), so widening the base in X would
+    # re-stretch every band the skin paints, glyphs included.
+    SKIRT_X, SKIRT_Z = range(-3, 3), range(-3, 3)
+    for gx in SKIRT_X:
+        for gz in SKIRT_Z:
+            # Bevel all four corners against the skirt's OWN bounds — an abs() test would only
+            # catch the two negative corners here, since the base is centred on cell boundaries
+            # rather than on a cell, and the skirt would come out lopsided for no stated reason.
+            if gx in (SKIRT_X[0], SKIRT_X[-1]) and gz in (SKIRT_Z[0], SKIRT_Z[-1]):
+                continue            # so the skirt reads as spill, not as a square plinth
+            filled.add((gx, 0, gz))
+
+    add_voxel_model(mb, filled, vs, offset=(0.0, 0.0, 0.0))
+    return mb
+
+
 def gen_hell_gate(height=4.4):
     """THE HELLGATE — the rift forced open at Piccadilly Circus, the way into Hellgate: Localhost.
 
@@ -6228,6 +6324,7 @@ MESH_TYPES = {
     "tube_entrance": {"func": gen_tube_entrance, "desc": "Underground stair entrance — Act 2. Params: --height", "default_file": "tube_entrance.obj"},
     "service_door": {"func": gen_service_door, "desc": "Maintenance door — Bank Station. Params: --height", "default_file": "service_door.obj"},
     "stone_circle": {"func": gen_stone_circle, "desc": "Cairn-stone ring — the TristRAM portal. Params: --height", "default_file": "stone_circle.obj"},
+    "cairn_stone": {"func": gen_cairn_stone, "desc": "Standing stone for the Cairn Stones quest. Params: --height", "default_file": "cairn_stone.obj"},
     "hell_gate": {"func": gen_hell_gate, "desc": "The forced rift — Hellgate: Localhost entrance. Params: --height", "default_file": "hell_gate.obj"},
     "cave_mouth": {
         "func": gen_cave_mouth,
