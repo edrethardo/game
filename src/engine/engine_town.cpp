@@ -166,6 +166,12 @@ void Engine::spawnTownContents(Vec3 center) {
             if (npc) {
                 npc->homePosition = posts[n];   // the post the town-mode AI holds
                 npc->questGiver   = givers[n];
+                // nameTag is set for the entity's own sake, not for a nameplate: renderTargetBar
+                // skips ENT_FRIENDLY, so it never reaches the screen from here. The giver's name
+                // reaches the player through the interact prompt ("Speak to <name>") at exactly
+                // the moment they can act on it, and through their chat line. Routing friendlies
+                // into the target bar would drag its HEALTH bar along with them, which over an
+                // NPC you cannot fight reads worse than no name at all.
                 if (givers[n] != 0xFF) {
                     npc->nameTag = Quest::GIVERS[givers[n]].name;
                     LOG_INFO("Town giver: %s at (%.1f, %.1f)", Quest::GIVERS[givers[n]].name,

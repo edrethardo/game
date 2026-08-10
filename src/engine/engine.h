@@ -1733,6 +1733,11 @@ private:
     // Journal cursor while m_invCursorPanel == INV_PANEL_JOURNAL. The act tab is part of the
     // cursor, not of the quest data: which act you are LOOKING at is a UI position, and storing it
     // beside the row is what lets a tab flip reset the row in one place.
+    // SHARED between couch lanes, deliberately matching m_invCursorBuild above rather than
+    // diverging from it. m_invCursorPanel IS per-lane, so P1 and P2 can sit on different
+    // panels; they only share a selection when BOTH are in the Journal, and then P2's row
+    // move follows P1's. That is the build grid's existing wart, not a new one — worth
+    // fixing, but as one change to both, not a silent inconsistency introduced here.
     u8 m_invCursorQuest = 0;    // selected row within the visible act's quest list
     u8 m_invJournalAct  = 0;    // 0 = ACT I, 1 = ACT II
     // Where the J key came FROM, so pressing it again goes back there instead of dumping the
