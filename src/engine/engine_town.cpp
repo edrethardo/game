@@ -98,9 +98,10 @@ Vec3 Engine::buildTownLevel() {
     return center;
 }
 
-// Shared population (host AND client build their own copy — NPCs on the client are cosmetic;
-// the authoritative ones replicate over snapshots exactly like dungeon NPCs, and the client's
-// local spawns are overwritten by the mirror the same way).
+// Shared population: host AND client each build their own copy. On a client these live in the
+// local ghost pool while the host's authoritative townsfolk arrive in the render-interp mirror, so
+// the guest SEES the host's and TALKS TO its own — which is what makes a quest giver work at all,
+// since `Entity::questGiver` is not a snapshot field (see the townsfolk block below).
 void Engine::spawnTownContents(Vec3 center) {
     // --- The account stash: an oversized golden chest at the plaza's heart ---
     ItemInstance stash{};
@@ -113,20 +114,65 @@ void Engine::spawnTownContents(Vec3 center) {
     m_level.townPortalPos    = center + Vec3{0.0f, 0.0f, 10.0f};   // 4m clear of the arrival spot
                                                                     // (spawn z = center+14; trigger r=2m)
 
-    // --- Townsfolk: the companion cast at plaza posts (server-authoritative; clients mirror) ---
-    if (m_netRole != NetRole::CLIENT) {
+    // --- Townsfolk: the companion cast at plaza posts ---
+    // Two of the six are Act 1's QUEST GIVERS. They are ordinary friendly NPCs carrying a giver
+    // index rather than a new entity kind — the town already spawns and seats these.
+    //
+    // NOT gated on role, unlike the rest of this function. `Entity::questGiver` is a POOL field and
+    // is NOT in SnapEntity, so a host-only spawn replicated by snapshot reaches a guest with
+    // questGiver == 0xFF — no prompt, no conversation, ever. The town is deterministic geometry
+    // every peer rebuilds from the sentinel seed, so spawning givers locally on each peer is both
+    // safe and the only thing that works. Talking mutates nothing shared (see talkToGiver), so
+    // there is nothing for the host to arbitrate.
+    {
         const u8 floor = 1;   // town NPCs use base-floor stats; they never fight anyway
+        // Posts 0 and 1 flank the WALK from the south gate to the stash — the one path every
+        // visitor takes, and a giver nobody passes is a giver nobody talks to. They sit level with
+        // post 2, so the three form a line the player comes through on the way in.
+        //
+        // They must clear the two fixtures whose prompts they would otherwise share a screen line
+        // and a button with. "Open Stash" and "Speak to X" both draw at screen height 0.45, and a
+        // TAP resolves to the giver ahead of the stash (engine_update.cpp's item-class order), so
+        // a player who can reach both sees two prompts stacked and cannot open the stash at all.
+        // Both are reachable from one spot only while the fixtures are closer than 2 x
+        // INTERACT_RANGE — a player exactly between them is INTERACT_RANGE from each — so the rule
+        // is dist(post, stash) > 7 m. The to-dungeon portal is the same hazard one class up (it is
+        // a HOLD target, so a tap beside it would talk instead of travelling): its 2 m trigger
+        // wants dist(post, portal) > INTERACT_RANGE + 2 m. Measured here: 9.30 m and 7.78 m. The
+        // posts these replaced were 4.47 m from the stash and failed the first rule outright.
+        // The half-cell offsets put the body inside ONE cell rather than across a corner of four —
+        // the town has no interior geometry to catch on, but the same posts in a zone did.
         const Vec3 posts[6] = {
-            center + Vec3{-4.0f, 0.0f, -1.0f}, center + Vec3{ 4.0f, 0.0f, -1.0f},
+            center + Vec3{-5.5f, 0.0f,  4.5f}, center + Vec3{ 5.5f, 0.0f,  4.5f},
             center + Vec3{ 0.0f, 0.0f,  4.0f}, center + Vec3{-9.0f, 0.0f,  7.0f},
             center + Vec3{ 9.0f, 0.0f,  7.0f}, center + Vec3{ 0.0f, 0.0f, -8.0f},
         };
         const NpcClass kinds[6] = {NpcClass::CLERIC, NpcClass::ROGUE, NpcClass::ARCHER,
                                    NpcClass::CLERIC, NpcClass::ROGUE, NpcClass::ARCHER};
+        // WHICH townsfolk are givers is DERIVED from GIVERS[].hubFloor, not hand-listed. The table
+        // already says where each giver stands, and a hand-listed copy is the second place that
+        // fact could be wrong: an Act 1 giver added to the table and forgotten here would spawn
+        // nowhere and silently never hand out its quests. They fill posts 0 upward, which is why
+        // those are the posts measured against the stash and the portal above — a third Act 1
+        // giver lands on post 2 and needs the same measurement before it is trusted.
+        u8  givers[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+        u32 assigned  = 0;
+        for (u32 gi = 0; gi < Quest::GIVER_COUNT && assigned < 6; gi++)
+            if (Quest::GIVERS[gi].hubFloor == GameConst::TOWN_SENTINEL_FLOOR)
+                givers[assigned++] = static_cast<u8>(gi);
         for (u32 n = 0; n < 6; n++) {
             EntityHandle h = spawnFriendlyNpc(posts[n], kinds[n], floor);
             Entity* npc = handleGet(m_entities, h);
-            if (npc) npc->homePosition = posts[n];   // the post the town-mode AI holds
+            if (npc) {
+                npc->homePosition = posts[n];   // the post the town-mode AI holds
+                npc->questGiver   = givers[n];
+                if (givers[n] != 0xFF) {
+                    npc->nameTag = Quest::GIVERS[givers[n]].name;
+                    LOG_INFO("Town giver: %s at (%.1f, %.1f)", Quest::GIVERS[givers[n]].name,
+                             static_cast<double>(npc->position.x),
+                             static_cast<double>(npc->position.z));
+                }
+            }
         }
     }
 }
@@ -162,7 +208,10 @@ void Engine::enterTownClient() {
     m_level.inTown = true;
 
     worldPlaceLocalPlayers(Vec3{center.x, 0.0f, center.z + 14.0f}, 0.0f);   // face the plaza (-Z)
-    spawnTownContents(center);   // stash chest + portal are local fixtures; NPCs mirror over snapshots
+    // Every peer builds the whole population locally now, not just the fixtures: the two quest
+    // givers carry `questGiver`, which is a pool field absent from SnapEntity, so a mirrored NPC
+    // reaches a guest with no giver index and no prompt (see spawnTownContents).
+    spawnTownContents(center);
     // worldFinishEntry wires the CLIENT callbacks: a join-accept can route here INSTEAD of startGame
     // (joining a host who is at home), and without that wiring the join is connected but deaf — no
     // snapshots, no SV_EVENTs. Idempotent on the mid-session SV_LEVEL_SEED route.

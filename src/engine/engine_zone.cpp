@@ -25,6 +25,7 @@
 #include "platform/input.h"
 #include "core/log.h"
 #include <cstring>   // strcmp — the named zone boss is resolved against the enemy def table
+#include <cmath>     // floor — giver posts are snapped to cell centres, see spawnZoneContents
 
 namespace {
 
@@ -556,6 +557,59 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
         LOG_INFO("Zone fixture: RETURN GATE -> floor %u", (u32)def.returnFloor);
     }
 
+    // ACT HUB QUEST GIVERS. Act 2's stand on Null Terminus, the act's one peaceful platform — its
+    // hub, the way the town is Act 1's. WHICH zone that is comes from GIVERS[].hubFloor rather than
+    // a literal floor number: the table already declares where each giver belongs, and a second
+    // copy of that fact is the drift this codebase keeps paying for.
+    //
+    // NOT role-gated, for the same reason the town's givers are not: `Entity::questGiver` is a POOL
+    // field and is absent from SnapEntity, so a host-only spawn replicated by snapshot reaches a
+    // guest with questGiver == 0xFF and no prompt ever appears. A zone is deterministic geometry
+    // every peer rebuilds from the shared seed, and talking mutates nothing shared (see
+    // talkToGiver), so a local spawn on each peer is both safe and the only thing that works.
+    {
+        u8  hubGivers[Quest::GIVER_COUNT];
+        u32 hubCount = 0;
+        for (u32 gi = 0; gi < Quest::GIVER_COUNT; gi++)
+            if (Quest::GIVERS[gi].hubFloor == def.floor)
+                hubGivers[hubCount++] = static_cast<u8>(gi);
+
+        // A row south of the zone centre, laid out on CELL CENTRES. Both details are load-bearing
+        // and both were found by the log line below rather than by reading the generator. A post on
+        // an INTEGER coordinate sits on a cell CORNER, so the ~0.35 m body straddles four cells and
+        // any one of them being solid displaces it; and the first offsets tried here (+-3, +2) landed
+        // exactly on two of HUB's four 2x2 COVER PILLARS, which carveHub stamps inset from the
+        // concourse corners — so both givers were being silently rescued sideways on every entry.
+        // `center` is spawnZoneContents' own parameter. The centre itself is the boss pad and the
+        // return gate stands RETURN_GATE_OFFSET (8 m) beyond it, so this band clears both, and it
+        // sits on the walk in from the arrival point rather than off to one side.
+        //
+        // ensureNotInWall (inside spawnFriendlyNpc) remains the backstop if a future layout puts
+        // something here anyway: it ring-searches to the nearest open cell, deterministically, so
+        // every peer lands on the same answer. The logged position is what says whether it fired.
+        constexpr f32 GIVER_ROW_Z   = 4.5f;   // south of centre, past the pillar band
+        constexpr f32 GIVER_SPACING = 5.0f;   // far enough apart that one prompt resolves at a time
+        // Alternating classes so two givers standing side by side are told apart on sight; they
+        // hand out different quests and must not read as the same person twice.
+        const NpcClass kinds[2] = {NpcClass::CLERIC, NpcClass::ROGUE};
+        for (u32 n = 0; n < hubCount; n++) {
+            const f32 off = (static_cast<f32>(n) - (static_cast<f32>(hubCount) - 1.0f) * 0.5f)
+                          * GIVER_SPACING;
+            const Vec3 post = { std::floor(center.x + off) + 0.5f, 0.0f,
+                                std::floor(center.z + GIVER_ROW_Z) + 0.5f };
+            EntityHandle h = spawnFriendlyNpc(post, kinds[n % 2], /*floor*/ 1);
+            if (Entity* npc = handleGet(m_entities, h)) {
+                npc->homePosition = post;                 // the post the peaceful-zone AI holds
+                npc->questGiver   = hubGivers[n];
+                npc->nameTag      = Quest::GIVERS[hubGivers[n]].name;
+                // Logged like the other zone fixtures: a giver that ended up shoved out of rock by
+                // ensureNotInWall is a giver in the wrong place, and only the log would say so.
+                LOG_INFO("Zone fixture: GIVER %s at (%.1f, %.1f)", Quest::GIVERS[hubGivers[n]].name,
+                         static_cast<double>(npc->position.x), static_cast<double>(npc->position.z));
+            }
+        }
+    }
+
     // Snapshot the roster AFTER the remembered-state cull, so the Journal's n/m row counts against
     // what this visit actually spawned rather than what a first visit would have.
     m_zoneHostilesAtEntry = zoneHostilesAlive();
@@ -606,13 +660,67 @@ void Engine::questAnnounce(u8 questIdx, bool wasComplete) {
 
 // Talk to the quest giver standing at this ENTITY pool index.
 //
-// STUB — the conversation itself (the greeting line, the TALK objective, the offer of whatever
-// Quest::giverOutstanding names) lands in the next step. It is declared and called now so the
-// interact plumbing that finds the NPC can be built and exercised on its own.
+// Their line goes to chat for flavour, their outstanding quest is offered and its TALK objective
+// ticked, and the Journal opens on that quest.
+//
+// The Journal opening IS the dialogue. Quest text lives in exactly one place, so it can never
+// truncate or disagree with itself — and the first conversation teaches the player where the
+// Journal is, which a separate dialogue box would not.
 //
 // It is resolved LOCALLY on every network role, exactly like a waypoint: talking grants nothing
 // and changes no world state, so there is nothing for the server to arbitrate — no wire change.
-void Engine::talkToGiver(s32 /*entityIdx*/) {
+void Engine::talkToGiver(s32 entityIdx) {
+    if (entityIdx < 0 || static_cast<u32>(entityIdx) >= MAX_ENTITIES) return;
+    const Entity& g = m_entities.entities[entityIdx];
+    if (g.questGiver >= Quest::GIVER_COUNT) return;
+
+    const u8 lane = m_localPlayerIndex;
+    const u8 q    = Quest::giverOutstanding(m_questProgress[lane], g.questGiver);
+    const Quest::GiverDef& gd = Quest::GIVERS[g.questGiver];
+
+    addChatMessage(gd.name, gd.greeting, Vec3{0.80f, 0.85f, 0.95f});
+
+    // 0xFF is "nothing left to hand out" — return BEFORE any QUESTS[] read, which that value
+    // would index straight off the end of the table.
+    if (q == 0xFF) {
+        addChatMessage(gd.name, "Nothing more from me. Not yet.", Vec3{0.65f, 0.68f, 0.75f});
+        LOG_INFO("[QUEST] talked to %s - nothing outstanding", gd.name);
+        return;
+    }
+
+    const bool wasComplete = Quest::isComplete(m_questMask[lane], Quest::QUESTS[q].zoneFloor);
+    Quest::offer(m_questProgress[lane], q);
+    Quest::noteTalk(m_questProgress[lane], q);
+    refreshQuestMask(lane);   // the mask is a CACHE — every mutation site re-derives it
+    LOG_INFO("[QUEST] talked to %s -> %s", gd.name, Quest::QUESTS[q].name);
+    // Sound for a TALK-only quest (none exist today, but the call must be correct if one is
+    // authored): wasComplete was sampled before the mutation, so this fires exactly once.
+    questAnnounce(q, wasComplete);
+
+    // Open the inventory straight onto this quest. The full Tab-open ritual, not a bare flag
+    // flip: without the cursor release the Journal opens un-clickable, and the per-lane array is
+    // what survives the split-screen player swap.
+    m_inventoryOpen = true;
+    m_inventoryOpenArr[m_localPlayerIndex] = true;
+    m_inventoryOpenedOnce = true;
+    if (m_localPlayerIndex == 0) {
+        Input::setRelativeMouseMode(false);
+        m_invCursorActive = Input::laneDeviceIsGamepad(m_localPlayerIndex);
+        m_invLastMouseX = -1;
+        m_invLastMouseY = -1;
+    }
+    m_dragState     = {};
+    m_dblClickState = {};
+
+    m_invCursorPanel  = INV_PANEL_JOURNAL;
+    m_invJournalAct   = static_cast<u8>(Quest::actOf(Quest::QUESTS[q].zoneFloor) - 1);
+    // The cursor is a ROW in the visible act's list, not a quest index — count this quest's
+    // position within its own act (the same walk the Journal's own nav does).
+    u8 row = 0;
+    for (u32 i = 0; i < q; i++)
+        if (Quest::actOf(Quest::QUESTS[i].zoneFloor) == m_invJournalAct + 1) row++;
+    m_invCursorQuest = row;
+    AudioSystem::play(SfxId::UI_CONFIRM);
 }
 
 // Offered on arrival. REACH quests take their objective from the same event — finding the place

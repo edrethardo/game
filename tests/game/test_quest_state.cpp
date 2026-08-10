@@ -5,6 +5,7 @@
 // that the act's rules are testable without booting anything.
 #include "../../external/doctest/doctest.h"
 #include "game/quest_state.h"
+#include "game/zone_def.h"   // a giver's hubFloor must name a real hub — see the last case
 #include <string>   // CAPTURE renders a bare const char* as a POINTER, not the text
 
 
@@ -359,5 +360,24 @@ TEST_CASE("each giver's quests all belong to that giver's own act") {
         // Act 1's hub is the town (98), Act 2's is Null Terminus (61). A giver standing in the
         // wrong hub can never be reached at the point its quest is relevant.
         REQUIRE(Quest::actOf(q.zoneFloor) == (g.hubFloor == 98 ? 1 : 2));
+    }
+}
+
+// Both spawn sites derive WHERE a giver stands from GIVERS[].hubFloor — the town block matches it
+// against the town sentinel, spawnZoneContents against the zone it is building. So a hubFloor that
+// names neither is not a typo you would ever see: the NPC simply never spawns, the "Speak to X"
+// prompt never appears, and its quests can only be picked up by walking into their zones. Silent,
+// and indistinguishable from the feature not being finished.
+TEST_CASE("every giver's hub is a place that actually spawns givers") {
+    for (u32 g = 0; g < Quest::GIVER_COUNT; g++) {
+        const Quest::GiverDef& gd = Quest::GIVERS[g];
+        CAPTURE(std::string(gd.name));
+        CAPTURE(static_cast<u32>(gd.hubFloor));
+        if (gd.hubFloor == Zone::TOWN_FLOOR) continue;   // Act 1's hub is the town
+        const Zone::ZoneDef* z = Zone::find(gd.hubFloor);
+        REQUIRE(z != nullptr);
+        // ...and it must be somewhere you can stand and talk. A hub full of tier-5 hostiles is not
+        // a place a conversation happens, which is why both acts put their givers on peaceful ground.
+        REQUIRE(z->peaceful);
     }
 }
