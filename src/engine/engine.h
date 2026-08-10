@@ -1387,6 +1387,7 @@ private:
         // consumed; a zone gate walks you through to the floor named in its itemLevel byte.
         s32  waypointIdx = -1;
         s32  zoneGateIdx = -1;
+        s32  cairnIdx    = -1;   // best aimed Cairn Stone (quest 56); never consumed, like a waypoint
         // Best aimed quest giver (ENTITY pool index, -1 = none). Item-class for the tap/hold rule
         // like the other fixtures — you walk up to an NPC and press once — but real loot at your
         // feet still wins the button.
@@ -1497,6 +1498,10 @@ private:
     Vec3 zoneRoomCentre(const DungeonResult& gen, u32 idx) const;
     Vec3 m_zoneWaypointPos = {};   // where buildZoneLevel put them; spawnZoneContents reads these,
     Vec3 m_zonePoiPos      = {};   // so the cleared pad and the fixture can never disagree
+    // The five Cairn Stone anchors (zone 56 only). Recorded by buildZoneLevel so the cleared ground
+    // and the fixture that stands on it can never disagree — the rule the waypoint/POI anchors
+    // already follow, and the reason the Bank portal stopped generating inside rock.
+    Vec3 m_zoneCairnPos[Quest::CAIRN_COUNT] = {};
 
     // --- ZONE MEMORY (session-scoped) ---
     // A zone is rebuilt from its seed on every entry, so without this it repopulates completely the
@@ -1535,6 +1540,12 @@ private:
     bool waypointDiscovered(u8 zoneFloor) const;
     void touchWaypoint(s32 worldItemIdx);
     void enterZoneGate(s32 worldItemIdx);
+    void touchCairnStone(s32 worldItemIdx);   // align one of the five stones (zone 56)
+    // Which of the five stones this character has already aligned, as a bitmask of ordinals.
+    // ONE accessor because THREE consumers need the same answer — the world renderer's brighter
+    // tint, the minimap's brighter glyph and the bot's "which stone next" — and three open-coded
+    // reads of the same objective byte are exactly the drift this codebase keeps paying for.
+    u8   cairnAlignedMask() const;
     void openWaypointUI();
     // Act 1 quests (game/quest_def.h). Offered on entering their zone, completed by one of three
     // triggers the engine can already observe. No journal UI — the chat line IS the journal.
@@ -1982,6 +1993,7 @@ private:
     u8   m_graveGateMeshId   = 0; // cemetery gate -> the Deprecated Graveyard
     u8   m_tubeEntryMeshId   = 0; // Underground stair -> Act 2
     u8   m_serviceDoorMeshId = 0; // staff door -> Bank Station
+    u8   m_cairnStoneMeshId  = 0; // one standing stone of the Cairn circle (quest 56)
     // The champion affixes that fire on a CYCLE (Molten eruptions, Thundering novas, Teleport
     // blinks) rather than on a hit (applyDamage) or a death (handleDeathPreamble). Authoritative
     // sim only — called from tickSharedSystems inside its NetRole::CLIENT gate.

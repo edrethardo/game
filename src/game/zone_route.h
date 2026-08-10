@@ -175,20 +175,28 @@ enum struct Task : u8 {
     TRAVEL,      // nothing to do here — take the next hop
     CLEAR_ZONE,  // kill everything
     SLAY,        // kill the named boss
+    ACTIVATE,    // touch the quest's fixtures (the Cairn Stones)
     COUNT
 };
 
 // A REACH quest needs no task: it completes on arrival, so by the time anything asks, it is done.
+//
+// ACTIVATE does need one, and it is not optional. TRAVEL means "take the next hop toward the
+// objective zone", and for an ACTIVATE quest the objective zone is the one you are ALREADY standing
+// in — so nextHop(from == goal) returns NONE, zoneBotGoal reports no goal, and the driver logs
+// STRANDED and ends the run. A bot that ends its run on arriving at the Cairn Stones is exactly the
+// stranding that made this quest's trigger flip wait for its fixtures.
 inline Task taskFor(u8 zoneFloor, u64 questMask) {
     const Quest::QuestDef* q = Quest::forZone(zoneFloor);
     if (!q || Quest::isComplete(questMask, zoneFloor)) return Task::TRAVEL;
     // The DEED objective, not objective 0 — every quest opens with a TALK step, which asks nothing
-    // of the bot. ACTIVATE falls through to TRAVEL: walking to the fixtures IS the task.
+    // of the bot.
     const Quest::ObjectiveDef* deed = Quest::deedObjective(*q);
     if (!deed) return Task::TRAVEL;
     switch (deed->trigger) {
         case Quest::Trigger::CLEAR_ZONE: return Task::CLEAR_ZONE;
         case Quest::Trigger::SLAY:       return Task::SLAY;
+        case Quest::Trigger::ACTIVATE:   return Task::ACTIVATE;
         default:                         return Task::TRAVEL;
     }
 }

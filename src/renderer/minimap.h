@@ -42,5 +42,10 @@ namespace Minimap {
               // The overworld sentinel floor we are standing on (0 = not in a zone). Only used to
               // decide which zone-gate icon to draw: a cave mouth is a cave mouth from BOTH sides,
               // so the glyph needs to know where you are, not just where the gate leads.
-              u8 zoneFloor = 0);
+              u8 zoneFloor = 0,
+              // Which Cairn Stones (quest 56) the local character has aligned — bit N = stone N,
+              // matching the ordinal each stone carries in its ItemInstance. Passed in rather than
+              // read here because quest progress is per-character engine state and the minimap is a
+              // renderer: the caller already holds the one authority (Engine::cairnAlignedMask).
+              u8 cairnMask = 0);
 }

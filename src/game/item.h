@@ -419,6 +419,14 @@ static constexpr u16 WAYPOINT_ID = 0xFFF5;
 // sentinel rather than a new object type: world items already replicate and already validate their
 // pickups server-side, and one spare byte is all the routing needs.
 static constexpr u16 ZONE_GATE_ID = 0xFFF4;
+// The Cairn Stones (quest 56). Riding the sentinel path buys spawning, replication, server-side
+// validation and the fixture despawn exemption — the last for free, since that rule is now derived
+// as "any sentinel except the globe" rather than hand-listed.
+//
+// A stone is NEVER consumed, like the waypoint: the five of them ARE the monument, and a player who
+// finishes the circle should find it standing when they walk back through the field.
+// Which of the five this one is rides in `ItemInstance::affixCount` — see spawnZoneContents.
+static constexpr u16 CAIRN_STONE_ID = 0xFFF3;
 
 inline bool isGlobe(const ItemInstance& item) {
     return item.defId == GLOBE_HEALTH_ID || item.defId == GLOBE_ENERGY_ID;
@@ -449,10 +457,14 @@ inline bool isZoneGate(const ItemInstance& item) {
     return item.defId == ZONE_GATE_ID;
 }
 
+inline bool isCairnStone(const ItemInstance& item) {
+    return item.defId == CAIRN_STONE_ID;
+}
+
 // Any sentinel — i.e. "not a real item". Anything that must not enter the inventory or be dropped.
 inline bool isSentinelItem(const ItemInstance& item) {
     return isGlobe(item) || isSourceShard(item) || isShrine(item) || isChest(item) || isStash(item) ||
-           isWaypoint(item) || isZoneGate(item);
+           isWaypoint(item) || isZoneGate(item) || isCairnStone(item);
 }
 
 // ---- Rarity color lookup ----

@@ -119,6 +119,35 @@ bool Engine::zoneBotGoal(Vec3& outGoal, bool& outNeedsInteract) {
             outGoal = zoneCentre(*def);
             return true;
         }
+        case ZoneRoute::Task::ACTIVATE: {
+            // THE CAIRN STONES. Head for the nearest stone this character has NOT aligned and flag
+            // it interactable, so the brain's DESCEND branch walks the last metres and pulses
+            // interact — the identical treatment a portal hop gets, through the same arbitration.
+            //
+            // "Not aligned" is read from the SAME mask the world renderer tints with, so the stone
+            // the bot walks to is the one that is visibly still dark. Without the filter it would
+            // re-press the nearest stone forever and the quest would never advance past one.
+            const u8 lit = cairnAlignedMask();
+            const WorldItem* best = nullptr;
+            f32 bestD2 = 1e18f;
+            for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+                const WorldItem& wi = m_worldItems.items[i];
+                if (!wi.active || !isCairnStone(wi.item)) continue;
+                if (lit & (1u << wi.item.affixCount)) continue;
+                const f32 d2 = lengthSq(wi.position - m_localPlayer.position);
+                if (d2 < bestD2) { bestD2 = d2; best = &wi; }
+            }
+            if (best) {
+                outGoal = best->position;
+                outNeedsInteract = true;
+                return true;
+            }
+            // Every stone is lit but the quest has not completed yet, or the fixtures never spawned.
+            // Hold at the centre rather than reporting "no goal", which would end the run a frame
+            // early — the same reason the CLEAR_ZONE branch does it.
+            outGoal = zoneCentre(*def);
+            return true;
+        }
         default: break;   // TRAVEL — fall through to the route
     }
 

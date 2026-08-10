@@ -45,6 +45,14 @@ enum struct Trigger : u8 {
     COUNT
 };
 
+// THE CAIRN STONES, in one place. Four things must agree on this number — the authored objective
+// below, the anchor array buildZoneLevel fills, the spawn loop that stands them up, and the bitmask
+// each stone's ordinal rides in — and the day they disagree the quest either cannot complete or the
+// field grows a stone nothing can count. Named here so the authored row USES it rather than
+// repeating a literal 5.
+inline constexpr u8 CAIRN_COUNT = 5;
+inline constexpr u8 CAIRN_ZONE  = 56;   // the Field of Unmerged Branches
+
 struct ObjectiveDef {
     Trigger     trigger;
     const char* text;      // journal row label: "Hostiles remaining", "Stones aligned"
@@ -108,20 +116,20 @@ inline constexpr QuestDef QUESTS[] = {
           { { Trigger::TALK, "Speak to Akara",          "",                      1 },
             { Trigger::SLAY, "Slay The Garbage Collector", "The Garbage Collector", 1 } } },
 
-    // D2's Cairn Stones beat. This row keeps CLEAR_ZONE until the five stone fixtures exist; the
-    // flip to ACTIVATE lands in the same commit as the stones themselves.
+    // D2's Cairn Stones beat, and the act's only ACTIVATE quest.
     //
     // The ORDER matters and is not fussiness: ZoneRoute::linkOpen gates the onward road on
     // zoneSettled(56), so a quest 56 whose trigger has no implementation SEALS the way to TristRAM
-    // and strands anyone playing this commit.
-    { 56, "Align the Standing Stones",
-          "Monuments to abandoned features, and none of them agree. Clear the field and they will.",
+    // and strands anyone playing this commit. That is why this row stayed CLEAR_ZONE until the five
+    // stone fixtures existed, and why the flip lands in the same commit that spawns them.
+    { CAIRN_ZONE, "Align the Standing Stones",
+          "Monuments to abandoned features, and none of them agree. Align them.",
           "Five stones, each raised for something that was going to be finished. They disagree "
           "about what the field was for, and while they disagree the way to TristRAM stays shut. "
-          "Settle the field and they will settle with it.",
+          "Touch each in turn and let them settle it.",
           /*giver*/ 1, /*objCount*/ 2,
-          { { Trigger::TALK,       "Speak to Charsi",    "", 1 },
-            { Trigger::CLEAR_ZONE, "Hostiles remaining", "", 1 } } },
+          { { Trigger::TALK,     "Speak to Charsi", "",      1 },
+            { Trigger::ACTIVATE, "Stones aligned",  "cairn", CAIRN_COUNT } } },
 
     { 57, "The Search for Deckard Cache",
           "The village was restored from backup once too often. Something in the forge came back wrong.",

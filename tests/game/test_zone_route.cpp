@@ -132,10 +132,12 @@ TEST_CASE("a hop names a real link out of the zone you are standing in") {
 TEST_CASE("the in-zone task matches what the quest actually asks") {
     CHECK(ZoneRoute::taskFor(53, 0) == ZoneRoute::Task::CLEAR_ZONE);  // Free the Allocation
     CHECK(ZoneRoute::taskFor(55, 0) == ZoneRoute::Task::SLAY);        // The Rebaser
-    // The Stony Field. Pinned explicitly because this is the row whose trigger is scheduled to
-    // become ACTIVATE: taskFor falling through to TRAVEL is the visible half of a quest the engine
-    // cannot satisfy, and the onward road to TristRAM is gated on it.
-    CHECK(ZoneRoute::taskFor(56, 0) == ZoneRoute::Task::CLEAR_ZONE);  // Align the Standing Stones
+    // The Stony Field, the act's one ACTIVATE quest. Pinned explicitly, and NOT allowed to fall
+    // through to TRAVEL, because TRAVEL means "take the next hop toward the objective zone" — and
+    // for this quest the objective zone is the one you are standing in, so nextHop(from == goal)
+    // returns NONE, zoneBotGoal reports no goal and the driver logs STRANDED and ends the run. The
+    // onward road to TristRAM is gated on this quest, so getting it wrong parks the bot for good.
+    CHECK(ZoneRoute::taskFor(Quest::CAIRN_ZONE, 0) == ZoneRoute::Task::ACTIVATE);
     CHECK(ZoneRoute::taskFor(59, 0) == ZoneRoute::Task::TRAVEL);      // REACH completes on arrival
     CHECK(ZoneRoute::taskFor(52, 0) == ZoneRoute::Task::TRAVEL);      // hosts no quest at all
 

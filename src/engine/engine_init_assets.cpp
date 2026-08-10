@@ -229,6 +229,7 @@ void Engine::initAssets() {
     m_graveGateMeshId   = findMeshByName("grave_gate");
     m_tubeEntryMeshId   = findMeshByName("tube_entrance");
     m_serviceDoorMeshId = findMeshByName("service_door");
+    m_cairnStoneMeshId  = findMeshByName("cairn_stone");
     m_meshIdHuman    = findMeshByName("human");
     m_meshIdSword    = findMeshByName("sword");
     m_meshIdDagger   = findMeshByName("dagger");

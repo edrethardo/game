@@ -26,6 +26,7 @@
 #include "core/log.h"
 #include <cstring>   // strcmp — the named zone boss is resolved against the enemy def table
 #include <cmath>     // floor — giver posts are snapped to cell centres, see spawnZoneContents
+#include <cstdio>    // snprintf — the Cairn Stones' progress line
 
 namespace {
 
@@ -52,6 +53,24 @@ struct DressRNG {
     u32 next() { state = state * 1664525u + 1013904223u; return state; }
     u32 range(u32 lo, u32 hi) { return (hi <= lo) ? lo : lo + (next() >> 8) % (hi - lo); }
 };
+
+// Which quest row and which objective slot the Cairn Stones satisfy. DERIVED, never written down:
+// objective 0 is the TALK step and the deed is objective 1 *today*, but "the deed is slot 1" is
+// exactly the positional fact that goes silently wrong the day a row gains a step — and a stale
+// index here would tick the wrong objective, which reads as the stones doing nothing.
+// false when the quest is not authored with an ACTIVATE step (which the deed-trigger test forbids,
+// but returning false beats indexing off the end of the table on a data edit).
+bool cairnObjective(u8& outQuest, u8& outObj) {
+    const u8 q = Quest::indexForZone(Quest::CAIRN_ZONE);
+    if (q == 0xFF) return false;
+    const Quest::QuestDef& qd = Quest::QUESTS[q];
+    for (u32 o = 0; o < qd.objectiveCount; o++) {
+        if (qd.objectives[o].trigger != Quest::Trigger::ACTIVATE) continue;
+        outQuest = q; outObj = static_cast<u8>(o);
+        return true;
+    }
+    return false;
+}
 
 } // namespace
 
@@ -283,6 +302,45 @@ Vec3 Engine::buildZoneLevel(const Zone::ZoneDef& def) {
         m_zonePoiPos = c;
         zoneClearPad(static_cast<u32>(c.x), static_cast<u32>(c.z), 2);
     }
+    // THE CAIRN STONES ride room centres for the same reason the waypoint and the POI mouth do:
+    // every layout style guarantees a room centre open and connected, while a fixture stamped at a
+    // fraction of the grid can generate inside rock — which is how the Bank Station portal once put
+    // the whole of Act 2 behind a wall. Five fractions spread them across the field.
+    //
+    // Recorded here, in the BUILDER, and never in spawnZoneContents: buildZoneLevel runs before
+    // LevelMeshSystem::buildAll and spawnZoneContents runs after it, so ground cleared in the
+    // spawner behaves as floor while still RENDERING as rock (the trap the lava exit pad documents
+    // and the zone arrival points were fixed for). The spawner reads what the builder recorded.
+    if (def.floor == Quest::CAIRN_ZONE) {
+        // AN ARC AROUND THE FIELD, and it deliberately avoids two rooms.
+        //
+        // WILDERNESS lays its rooms as a FIXED 3x3 lattice (carveWilderness step 3 — seed-
+        // independent, so this reasoning holds for every seed of this zone), and zoneAnchorRoom
+        // snaps a fraction to the nearest of those nine centres. On zone 56's authored 52-grid the
+        // centres are {10.5, 25.5, 40.5} squared, of which the POI mouth already owns the NW one
+        // (0.28, 0.30) and the waypoint the middle (0.50, 0.62). A stone snapping to either would
+        // stand INSIDE the stone circle to TristRAM or the waypoint — same cell, overlapping meshes,
+        // and the interact scan ranks the gate above the stone, so that stone could never be
+        // aligned and the quest could never complete. Measured: the first draft put stone 0 at
+        // exactly the POI's (10.5, 10.5).
+        //
+        // So the five take the W / SW / S / SE / E centres, in walking order — which also reads as
+        // the arc of a circle rather than a scatter. If this zone's gridSize or terrain ever
+        // changes, re-read the "Zone anchor: CAIRN STONE" log lines: five DISTINCT positions, none
+        // of them the waypoint's or the POI's.
+        static constexpr f32 CAIRN_FRAC[Quest::CAIRN_COUNT][2] = {
+            {0.20f, 0.50f}, {0.20f, 0.80f}, {0.50f, 0.82f}, {0.80f, 0.80f}, {0.80f, 0.50f},
+        };
+        for (u8 st = 0; st < Quest::CAIRN_COUNT; st++) {
+            const Vec3 c = zoneRoomCentre(gen, zoneAnchorRoom(gen, zoneSeed,
+                                                              CAIRN_FRAC[st][0], CAIRN_FRAC[st][1]));
+            m_zoneCairnPos[st] = c;
+            zoneClearPad(static_cast<u32>(c.x), static_cast<u32>(c.z), 2);
+            LOG_INFO("Zone anchor: CAIRN STONE %u at (%.1f, %.1f)", static_cast<u32>(st),
+                     static_cast<double>(c.x), static_cast<double>(c.z));
+        }
+    }
+
     // An interior's way out is its own landmark; put it at the centre so it is never behind you.
     if (def.returnFloor != Zone::NO_LINK)
         zoneClearPad(size / 2, size / 2, 3);   // the boss pad — radius 3, matching spawnZoneContents
@@ -523,6 +581,24 @@ void Engine::spawnZoneContents(const Zone::ZoneDef& def, Vec3 center) {
                          static_cast<double>(bHp));
             }
         }
+    }
+
+    // THE FIVE CAIRN STONES (quest 56), standing on the pads buildZoneLevel already cleared.
+    //
+    // `affixCount` carries the stone's ORDINAL (0..4) so the interact handler knows which of the
+    // five it is without a side table. The ordinal is stable across runs because the anchors are a
+    // pure function of the zone's geometry, so spawn order is too — which is what lets the aligned
+    // BITMASK survive the zone being rebuilt from its seed on every entry. A COUNT could not: it
+    // could say how many were lit but never which, so re-entry would light the wrong ones.
+    if (def.floor == Quest::CAIRN_ZONE && m_netRole != NetRole::CLIENT) {
+        for (u8 st = 0; st < Quest::CAIRN_COUNT; st++) {
+            ItemInstance stone{};
+            stone.defId      = CAIRN_STONE_ID;
+            stone.uid        = m_worldItems.nextUid++;
+            stone.affixCount = st;
+            WorldItemSystem::spawn(m_worldItems, stone, m_zoneCairnPos[st], &m_level.grid, 0xFF);
+        }
+        LOG_INFO("Zone fixture: %u CAIRN STONES", static_cast<u32>(Quest::CAIRN_COUNT));
     }
 
     if (def.hasWaypoint) {
@@ -849,6 +925,53 @@ void Engine::enterZoneGate(s32 worldItemIdx) {
     // that counts only edge crossings undercounts every interior in both acts.
     LOG_INFO("[ZONEX] portal %u -> %u", static_cast<u32>(from), static_cast<u32>(dest));
     enterZone(dest, from);
+}
+
+// Which of the five stones this character has aligned, as a bitmask of ordinals (bit N = stone N).
+// The bitmask IS the stored objective byte — see Quest::noteActivate — so nothing is cached here.
+u8 Engine::cairnAlignedMask() const {
+    u8 q = 0, o = 0;
+    if (!cairnObjective(q, o)) return 0;
+    return m_questProgress[m_localPlayerIndex].obj[q][o];
+}
+
+// Touching one of the five stones. Resolved LOCALLY on every network role, exactly like a waypoint
+// and a giver: it records a per-character objective bit and grants nothing, so there is nothing for
+// the server to arbitrate and no packet to add.
+//
+// The stone is NOT consumed. All five stay standing once aligned — they are the monument, and a
+// player who comes back should find the circle they finished, not an empty field.
+void Engine::touchCairnStone(s32 worldItemIdx) {
+    if (worldItemIdx < 0 || worldItemIdx >= static_cast<s32>(MAX_WORLD_ITEMS)) return;
+    const WorldItem& wi = m_worldItems.items[static_cast<u32>(worldItemIdx)];
+    if (!wi.active || !isCairnStone(wi.item)) return;
+
+    const u8 ordinal = wi.item.affixCount;   // stamped at spawn; stable across a zone rebuild
+    if (ordinal >= Quest::CAIRN_COUNT) return;
+
+    u8 q = 0, o = 0;
+    if (!cairnObjective(q, o)) return;
+
+    const u8 lane = m_localPlayerIndex;
+    const bool wasComplete = Quest::isComplete(m_questMask[lane], Quest::CAIRN_ZONE);
+
+    const u8 before = Quest::objectiveProgress(m_questProgress[lane], q, o);
+    Quest::noteActivate(m_questProgress[lane], q, ordinal);
+    refreshQuestMask(lane);   // the mask is a CACHE — every mutation site re-derives it
+    const u8 after = Quest::objectiveProgress(m_questProgress[lane], q, o);
+
+    // Re-touching a stone already aligned must say NOTHING. noteActivate sets a bit, so it is
+    // idempotent by construction; repeating the line would only make it read as if it had counted.
+    if (after == before) return;
+
+    char line[64];
+    std::snprintf(line, sizeof(line), "The stone settles. %u of %u.",
+                  static_cast<u32>(after), static_cast<u32>(Quest::CAIRN_COUNT));
+    addChatMessage("", line, Vec3{0.8f, 0.85f, 1.0f});
+    AudioSystem::play(SfxId::SHRINE_ACTIVATE);
+    LOG_INFO("[QUEST] cairn stone %u aligned (%u/%u)", static_cast<u32>(ordinal),
+             static_cast<u32>(after), static_cast<u32>(Quest::CAIRN_COUNT));
+    questAnnounce(q, wasComplete);
 }
 
 // The travel list. Opened OVER the live world exactly as the town portal opens the Free-Play

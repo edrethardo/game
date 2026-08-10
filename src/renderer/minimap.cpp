@@ -254,7 +254,7 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
                    const Vec3* otherPlayers, const bool* otherActive,
                    u32 otherPlayerCount,
                    const WorldItemPool* worldItems,
-                   u8 zoneFloor)
+                   u8 zoneFloor, u8 cairnMask)
 {
     if (s_gridW == 0 || s_gridD == 0) return;
     if (s_dirty) rebuildTexture(grid);
@@ -535,7 +535,7 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
     if (worldItems) {
         static constexpr f32 SHRINE_R    = 4.5f;   // outer diamond half-extent, px
         static constexpr f32 SHRINE_CORE = 1.6f;   // white centre pip half-extent, px
-        static constexpr u32 MAX_SHRINE_ICONS = 16;   // shrines (2/floor) + a zone's waypoint + its gates
+        static constexpr u32 MAX_SHRINE_ICONS = 16;   // shrines (2/floor) + a zone's waypoint, its gates and its 5 Cairn Stones
 
         // Emit the two triangles of a diamond centred on (cx, cy).
         //
@@ -650,7 +650,11 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
             const bool shrine  = isShrine(wi.item);
             const bool waypnt  = isWaypoint(wi.item);
             const bool zgate   = isZoneGate(wi.item);
-            if (!wi.active || !(shrine || waypnt || zgate)) continue;
+            // The CAIRN STONES are furniture too, and more so than most: the quest is to visit all
+            // five, so "which have I done" is a question only the map can answer at a glance in a
+            // 52-cell field of open country.
+            const bool cairn   = isCairnStone(wi.item);
+            if (!wi.active || !(shrine || waypnt || zgate || cairn)) continue;
 
             u32 sx, sz;
             if (!LevelGridSystem::worldToGrid(grid, wi.position, sx, sz)) continue;
@@ -664,7 +668,12 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
             // They still dim while unexplored, so the map keeps saying what you have and have not
             // walked, which is the same convention second-hand knowledge already uses here.
             if (vis == 0 && shrine) continue;
-            const f32 alpha = (vis == 0) ? 0.40f : (vis == 1) ? 0.55f : 1.0f;
+            f32 alpha = (vis == 0) ? 0.40f : (vis == 1) ? 0.55f : 1.0f;
+            // An ALIGNED stone burns bright and an unaligned one stays dim, whatever the fog says —
+            // the state of the circle is the quest, so it must not be readable only where you have
+            // already walked.
+            const bool cairnLit = cairn && (cairnMask & (1u << wi.item.affixCount)) != 0;
+            if (cairn) alpha = cairnLit ? 1.0f : 0.45f;
 
             f32 normX = (static_cast<f32>(sx) + 0.5f) / static_cast<f32>(s_gridW);
             f32 normZ = (static_cast<f32>(sz) + 0.5f) / static_cast<f32>(s_gridD);
@@ -689,7 +698,7 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
             // service door) and is told apart by colour; the two that are not doorways at all get
             // their own shapes, because no amount of tinting would make a ring of standing stones
             // or a torn rift read as a door.
-            const bool stones = zgate && ekind == Zone::Entrance::STONES;
+            const bool stones = cairn || (zgate && ekind == Zone::Entrance::STONES);
             const bool rift   = zgate && ekind == Zone::Entrance::HELLGATE;
             const bool cave   = zgate && !stones && !rift && ekind != Zone::Entrance::STONE;
             Vec3 c;
@@ -701,7 +710,11 @@ void Minimap::draw(u32 screenWidth, u32 screenHeight,
                 case Zone::Entrance::TUBE:     c = {0.30f, 0.55f, 0.95f}; break;  // Underground blue
                 case Zone::Entrance::DOOR:     c = {0.62f, 0.66f, 0.60f}; break;  // painted steel
                 default:
-                    c = zgate  ? Vec3{0.95f, 0.55f, 0.20f}
+                    // A stone is pale blue — the same family as the waypoint's blue and the chat
+                    // line the quest prints, and deliberately NOT the granite tan of the stone
+                    // CIRCLE that leads to TristRAM, which stands in this same field.
+                    c = cairn  ? Vec3{0.72f, 0.82f, 1.00f}
+                      : zgate  ? Vec3{0.95f, 0.55f, 0.20f}
                       : waypnt ? Vec3{0.55f, 0.85f, 1.00f}
                                : Shrine::colorOf(Shrine::buffOf(wi.item));
                     break;

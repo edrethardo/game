@@ -6,6 +6,7 @@
 #include "../../external/doctest/doctest.h"
 #include "game/quest_state.h"
 #include "game/zone_def.h"   // a giver's hubFloor must name a real hub — see the last case
+#include "game/zone_route.h" // linkOpen — the Cairn Stones are what open the road to TristRAM
 #include <string>   // CAPTURE renders a bare const char* as a POINTER, not the text
 
 
@@ -114,8 +115,8 @@ TEST_CASE("every giver hands out at least one quest") {
 // Every quest's DEED trigger must be one the engine can currently satisfy. A quest authored with a
 // trigger that has no implementation is not merely incomplete — ZoneRoute::linkOpen gates the
 // onward road on zoneSettled(), so it SEALS the act and strands the character. Add a trigger to
-// this list only in the same commit that makes something able to fire it. (Task 14 adds ACTIVATE
-// here, in the same commit that spawns the five Cairn Stone fixtures.)
+// this list only in the same commit that makes something able to fire it. ACTIVATE joined it with
+// the five Cairn Stone fixtures (Engine::touchCairnStone), which is the only thing that fires it.
 TEST_CASE("every quest's deed trigger is one the engine can satisfy") {
     for (u32 i = 0; i < Quest::COUNT; i++) {
         const Quest::ObjectiveDef* deed = Quest::deedObjective(Quest::QUESTS[i]);
@@ -123,9 +124,64 @@ TEST_CASE("every quest's deed trigger is one the engine can satisfy") {
         REQUIRE(deed != nullptr);
         const bool implemented = deed->trigger == Quest::Trigger::CLEAR_ZONE
                               || deed->trigger == Quest::Trigger::SLAY
-                              || deed->trigger == Quest::Trigger::REACH;
+                              || deed->trigger == Quest::Trigger::REACH
+                              || deed->trigger == Quest::Trigger::ACTIVATE;
         REQUIRE(implemented);
     }
+}
+
+// The Cairn Stones, as DATA. Every one of these is something the engine hard-codes against: the
+// anchor array is sized to CAIRN_COUNT, the spawn loop stamps ordinals 0..CAIRN_COUNT-1 into
+// ItemInstance::affixCount, and noteActivate turns each into a BIT — so a required count above 8
+// would silently drop stones off the top of the mask and the quest could never complete.
+TEST_CASE("the Cairn Stones quest is authored the way the engine spawns them") {
+    const Quest::QuestDef* q = Quest::forZone(Quest::CAIRN_ZONE);
+    REQUIRE(q != nullptr);
+    const Quest::ObjectiveDef* deed = Quest::deedObjective(*q);
+    REQUIRE(deed != nullptr);
+    REQUIRE(deed->trigger == Quest::Trigger::ACTIVATE);
+    REQUIRE(deed->required == Quest::CAIRN_COUNT);
+    REQUIRE(Quest::CAIRN_COUNT <= 8);   // one objective BYTE holds the whole set
+}
+
+// An ACTIVATE objective is a SET, not a count, and this is the property that makes the zone rebuild
+// survivable: the zone regenerates from its seed on every entry, so progress has to say WHICH stones
+// were aligned. Re-touching one must therefore be a no-op, and the five may be touched in any order.
+TEST_CASE("aligning the Cairn Stones counts each stone once, in any order") {
+    const u8 q = Quest::indexForZone(Quest::CAIRN_ZONE);
+    REQUIRE(q != 0xFF);
+    u8 objIdx = 0xFF;
+    for (u32 o = 0; o < Quest::QUESTS[q].objectiveCount; o++)
+        if (Quest::QUESTS[q].objectives[o].trigger == Quest::Trigger::ACTIVATE) objIdx = static_cast<u8>(o);
+    REQUIRE(objIdx != 0xFF);
+
+    Quest::Progress p{};
+    Quest::offer(p, q);
+
+    // Re-touching stone 3 four times must still read 1.
+    for (u32 i = 0; i < 4; i++) Quest::noteActivate(p, q, 3);
+    REQUIRE(Quest::objectiveProgress(p, q, objIdx) == 1);
+    REQUIRE(p.state[q] != static_cast<u8>(Quest::State::COMPLETE));
+
+    // Out of order, and the last one completes it — TALK deliberately not required (see reevaluate).
+    Quest::noteActivate(p, q, 0);
+    Quest::noteActivate(p, q, 4);
+    Quest::noteActivate(p, q, 1);
+    REQUIRE(Quest::objectiveProgress(p, q, objIdx) == 4);
+    REQUIRE(p.state[q] == static_cast<u8>(Quest::State::ACTIVE));
+    Quest::noteActivate(p, q, 2);
+    REQUIRE(Quest::objectiveProgress(p, q, objIdx) == Quest::CAIRN_COUNT);
+    REQUIRE(p.state[q] == static_cast<u8>(Quest::State::COMPLETE));
+
+    // ...and completing it is what opens the road to TristRAM. This is the reason the trigger flip
+    // could not land before the stones did: with no way to fire ACTIVATE, this link stays shut.
+    REQUIRE(ZoneRoute::linkOpen(Quest::CAIRN_ZONE, 57, Quest::completionMask(p)));
+
+    // A sixth stone is not this quest's to give — noteActivate must refuse an ordinal past required.
+    Quest::Progress p2{};
+    Quest::offer(p2, q);
+    Quest::noteActivate(p2, q, Quest::CAIRN_COUNT);
+    REQUIRE(Quest::objectiveProgress(p2, q, objIdx) == 0);
 }
 
 // Quest 0 (zone 53, Free the Allocation) is TALK + CLEAR_ZONE. Quest 1 (zone 55) is TALK + SLAY.

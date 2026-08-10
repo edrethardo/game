@@ -99,7 +99,13 @@ inline void reevaluate(Progress& p, u8 questIdx) {
     bool anyProgress  = false;
     for (u32 o = 0; o < q.objectiveCount; o++) {
         const bool done = objectiveDone(p, questIdx, static_cast<u8>(o));
-        if (done) anyProgress = true;
+        // ACTIVE means what the enum says it means — "at least one objective ADVANCED", not
+        // "finished". Until the Cairn Stones every objective had required == 1, where advanced and
+        // finished are the same thing, so a `done` test was indistinguishable from this one; with a
+        // 5-of-5 objective it is not, and a quest four stones deep would still have read OFFERED
+        // (grey in the Journal, which colours the row by state). Byte-identical for every boolean
+        // objective, since satisfy() writes `required` and progress > 0 then implies done.
+        if (objectiveProgress(p, questIdx, static_cast<u8>(o)) > 0) anyProgress = true;
         if (q.objectives[o].trigger == Trigger::TALK) continue;
         if (!done) allDeedsDone = false;
     }

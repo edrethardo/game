@@ -108,6 +108,10 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
     DiscData discs[MAX_WORLD_ITEMS + PET_BEAM_QUADS];
     u32 discCount = 0;
 
+    // Hoisted: the same answer for every item this frame, and it walks the quest table to find its
+    // objective slot — cheap, but not something to redo 64 times a frame.
+    const u8 cairnLit = cairnAlignedMask();
+
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         const WorldItem& wi = m_worldItems.items[i];
         if (!wi.active) continue;
@@ -139,6 +143,12 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         // of open country, indistinguishable from litter.
         bool isGateObj   = isZoneGate(wi.item);
         bool isWayObj    = isWaypoint(wi.item);
+        // A CAIRN STONE (quest 56). Needs its own branch for the same reason the gate and the
+        // waypoint did: the model-matrix chain gates the item-mesh branch on `defId < m_itemDefCount`
+        // and a sentinel defId sits far outside that range, so without one a 2.4 m standing stone
+        // falls through to the 0.3-scale spinning cube — which is most of why the Den's mouth was
+        // documented as 2.2x and was in fact 0.3x.
+        bool isCairnObj  = isCairnStone(wi.item);
         // A cave mouth is the boundary BETWEEN a cave and the open air, so it is a cave mouth from
         // EITHER side — the Den's entrance out in the Blood Buffer, and the way back out seen from
         // inside the Den. Keying only on the destination would have left that second one an orange
@@ -175,9 +185,13 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
         // A missing mesh must fall back, never draw nothing: assets are generated and gitignored, so
         // a build that skipped one would otherwise make an act's entrance invisible.
         const bool isModelledGate = isGateObj && gateMesh > 0 && gateMesh < m_meshDefCount;
-        bool isFixture   = isShrineObj || isChestObj || isStashObj || isGateObj || isWayObj;
+        bool isFixture   = isShrineObj || isChestObj || isStashObj || isGateObj || isWayObj ||
+                           isCairnObj;
         f32 renderScale = isGlobeItem      ? 0.4f
                         : isShard          ? 0.9f
+                        // The stone is authored at its real 2.4 m, like the modelled entrances:
+                        // scaling a monument is scaling the thing that makes it read as one.
+                        : isCairnObj       ? 1.0f
                         // Modelled entrances are authored at their REAL size (a 3.4 m outcrop, a
                         // 4.4 m rift), so they draw at 1.0 — scaling them would be scaling a
                         // doorway a person is meant to walk through.
@@ -215,6 +229,18 @@ void Engine::renderWorldItems(u32 sw, u32 sh) {
             // in the room and the diamond on the map can never disagree about which shrine this is.
             const Vec3 sc = Shrine::colorOf(Shrine::buffOf(wi.item));
             tint = {sc.x, sc.y, sc.z, 1.0f};
+        } else if (isCairnObj) {
+            if (m_cairnStoneMeshId > 0 && m_cairnStoneMeshId < m_meshDefCount)
+                itemMesh = &m_meshDefs[m_cairnStoneMeshId].mesh;
+            const Material* cm = MaterialSystem::get(MaterialSystem::getIdByName("cairn_stone_skin"));
+            if (cm) { itemTex = cm->texture; tint = {1.0f, 1.0f, 1.0f, 1.0f}; }
+            else    { tint = {0.58f, 0.58f, 0.62f, 1.0f}; }   // texture missing: plain grey stone
+            // AN ALIGNED STONE LIGHTS UP. The circle visibly fills in as you work round it, which is
+            // the only feedback that says which ones you have already done — the quest is a set, not
+            // a count, and without it a player re-walks stones they have already touched.
+            if (cairnLit & (1u << wi.item.affixCount)) {
+                tint.x *= 1.30f; tint.y *= 1.30f; tint.z *= 1.10f;
+            }
         } else if (isGateObj || isWayObj) {
             // Both stand as pillars rather than lying about as loot — the shrine mesh is the tall
             // standing form this project already has, and a standing stone is what a way through

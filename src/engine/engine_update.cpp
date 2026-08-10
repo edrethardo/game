@@ -2297,6 +2297,7 @@ void Engine::resolveInteractTargets(InteractState& st) {
     st.stashIdx = -1;
     st.waypointIdx = -1;
     st.zoneGateIdx = -1;
+    st.cairnIdx = -1;
     st.npcIdx = -1;
     st.nearTownPortal = false;
     st.nearExit = false;
@@ -2305,7 +2306,7 @@ void Engine::resolveInteractTargets(InteractState& st) {
     const Vec3 fwd  = m_localPlayer.forward;
     const f32  hLen = sqrtf(fwd.x * fwd.x + fwd.z * fwd.z);
     f32 bestItem = -1.0f, bestShrine = -1.0f, bestChest = -1.0f, bestStash = -1.0f;
-    f32 bestWaypoint = -1.0f, bestGate = -1.0f;
+    f32 bestWaypoint = -1.0f, bestGate = -1.0f, bestCairn = -1.0f;
 
     for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
         const WorldItem& w = m_worldItems.items[i];
@@ -2317,14 +2318,15 @@ void Engine::resolveInteractTargets(InteractState& st) {
         const bool stash  = isStash(w.item);   // the town's account-stash chest (fixture)
         const bool waypnt = isWaypoint(w.item); // overworld fast-travel anchor (never consumed)
         const bool zgate  = isZoneGate(w.item); // a POI mouth / an interior's way back out
+        const bool cairn  = isCairnStone(w.item); // a Cairn Stone (quest 56) — never consumed
         // The defId bound check must NOT be applied to a shrine or a chest: their sentinel
         // defIds (0xFFFB…/0xFFF8) sit far outside the real item range, so this exact line —
         // copied into the client's scan — is what made shrines impossible to activate as a
         // guest. A chest skipped here would be un-openable the same silent way.
-        if (!shrine && !chest && !stash && !waypnt && !zgate &&
+        if (!shrine && !chest && !stash && !waypnt && !zgate && !cairn &&
             w.item.defId >= m_itemDefCount) continue;
         // Loot-ownership window: another player's kill is theirs for 3 s. Fixtures are never owned.
-        if (!shrine && !chest && !stash && !waypnt && !zgate && w.ownerSlot != 0xFF && w.ownerSlot != activeNetSlot() && w.exclusiveTimer > 0.0f)
+        if (!shrine && !chest && !stash && !waypnt && !zgate && !cairn && w.ownerSlot != 0xFF && w.ownerSlot != activeNetSlot() && w.exclusiveTimer > 0.0f)
             continue;
 
         Vec3 to = w.position - m_localPlayer.position;
@@ -2353,6 +2355,8 @@ void Engine::resolveInteractTargets(InteractState& st) {
             if (score > bestWaypoint) { bestWaypoint = score; st.waypointIdx = static_cast<s32>(i); }
         } else if (zgate) {
             if (score > bestGate) { bestGate = score; st.zoneGateIdx = static_cast<s32>(i); }
+        } else if (cairn) {
+            if (score > bestCairn) { bestCairn = score; st.cairnIdx = static_cast<s32>(i); }
         } else {
             // Pickup preference tiers (soft — a decisive aim can still win): a pet outranks a plain
             // legendary the same way a legendary outranks common loot, so when a summon pet and a
@@ -2452,7 +2456,7 @@ void Engine::updatePlayerPickup(f32 dt) {
     // to and press once, and putting them here means interact.h's Target enum needs no new value.
     const bool hasItemClass  = (st.itemIdx >= 0) || (st.chestIdx >= 0) || (st.mimicIdx >= 0) ||
                                (st.stashIdx >= 0) || (st.waypointIdx >= 0) ||
-                               (st.zoneGateIdx >= 0) || (st.npcIdx >= 0);
+                               (st.zoneGateIdx >= 0) || (st.cairnIdx >= 0) || (st.npcIdx >= 0);
     const bool down = !m_inventoryOpen && Input::isActionDown(GameAction::PICKUP);
     const Interact::Intent intent =
         Interact::poll(st.hold, down, hasHoldTarget, dt, GameConst::INTERACT_HOLD_SEC);
@@ -2494,6 +2498,14 @@ void Engine::updatePlayerPickup(f32 dt) {
     if (wantItem && (st.waypointIdx >= 0 || st.zoneGateIdx >= 0)) {
         if (st.waypointIdx >= 0) touchWaypoint(st.waypointIdx);
         else                     enterZoneGate(st.zoneGateIdx);
+        return;
+    }
+
+    // A Cairn Stone is local on every role for the same reason: it sets a per-character quest bit
+    // and grants nothing. Ranked BELOW the gate and the waypoint because those change where you
+    // are, and a stone standing beside one must never steal the press that was meant for the door.
+    if (wantItem && st.cairnIdx >= 0) {
+        touchCairnStone(st.cairnIdx);
         return;
     }
 
