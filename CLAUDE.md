@@ -274,7 +274,8 @@ of one of those steps has shipped as a bug, and **`enterTown` was missing the ho
 (masked only because the menu happens to call `startGame` first); a fifth entry point would have
 multiplied the trap.
 **Waypoints** are `WAYPOINT_ID` world items — the sentinel trick buys spawning, replication and
-server-side validation for free. They are the ONE sentinel that is **not consumed on use**. Discovery
+server-side validation for free. They are the ONE sentinel that is **not consumed on use**
+(the Cairn Stones are the second — see the quest engine). Discovery
 is **per character**, a `u64` bit per `ZONES[]` row, appended to the per-player save block
 (**SAVE_VERSION 6**; a v5 save reads 0 = "found none", which is right — those heroes predate the
 overworld). The travel list reuses the town portal's menu-over-a-live-world flow (substate **25** —
@@ -478,6 +479,147 @@ road-to-road border is not an entrance at all, and **every interior must author 
 unauthored one still works, falling back to the plain marker, which is exactly the silent downgrade
 this work exists to remove. Sabotage-verified: authoring TristRAM as CAVE fails three assertions by
 name.
+
+**THE QUEST ENGINE — a chain you can READ, from four named people, that a save actually remembers
+(2026-08-09).** The acts had quests, and what a character knew about them was one `u64` bitmask plus
+a chat line that faded after ten seconds. Nothing said who asked, nothing said why, and nothing you
+could go back and look at. Five pieces replace that, and every one of them exists because the
+bitmask could not express something a player could see.
+**(1) STATE, and the DERIVED MASK that is the whole compatibility story.** `game/quest_state.h` is
+pure and engine-free (the `zone_route.h` / `free_play.h` pattern): `Quest::State`
+(LOCKED/OFFERED/ACTIVE/COMPLETE), `Quest::Progress` (`state[32]` + `obj[32][4]`) and the mutators.
+`ZoneRoute`, the gate refusals and the whole autoplay act branch still consume a plain `u64` of
+completed quests — and they keep doing so, because **`completionMask()` DERIVES it from `state` on
+demand**. `Engine::m_questMask` survives as a CACHE with exactly one home, refreshed at every
+mutation site — and `refreshQuestMask` FOLDS THE MASK IN before re-deriving
+(`migrateFromMask` then `completionMask`), which is what keeps the two remaining raw-mask writers
+honest: the save load and the `--quests-done` dev door both stamp a `u64` and nothing else, and
+because migration only ever ADDS completions the fold is monotonic — the derived mask can never come
+back smaller than the one it was handed. Without it, `--quests-done` would silently un-complete both
+acts on the first zone entry (measured as `[ZONEX] refused 56 -> 58`, the onward road sealed). That was not a convenience: "one fact stored twice" is the single most common bug
+shape in this file's history (trigger band vs arrival inset, boss ratios vs authored numbers, world
+state vs the entry that owns it), and a second copy of "which quests are done" would have drifted the
+first time a quest completed on a path that forgot to update it.
+**(2) TALK IS NEVER A PREREQUISITE.** Every quest opens with a TALK objective, and `reevaluate()`
+EXCLUDES it from the completion test: a quest completes on its DEED alone, and the conversation is
+narration, not permission. Three independent reasons, any one of which is sufficient. There is no
+walk-back in this design — the giver is in the hub and the deed is two zones away, so requiring the
+conversation would mean walking back to be told you had finished. `ZoneRoute::linkOpen` gates the
+onward road on the local quest being settled — and `test_zone_route.cpp` walks the whole quest order
+asserting the acts can always be FINISHED ("every objective is reachable in chain order", "the
+objective is reachable from wherever the previous one left you") — so a blocking TALK would put the
+road behind an NPC in a hub the player may never revisit, and nothing in play would tell them which
+of fifteen links was at fault. And the nine-class act soak's bot **cannot talk to anybody** — it has no interact
+policy for a giver — so a blocking TALK would strand all nine. Pinned by "every quest completes
+without ever talking to a giver" (all ten, deed-only) and sabotage-verified.
+**COMPLETE is TERMINAL in `reevaluate()`, and that is a migration rule, not tidiness.** A v6 hero
+migrates in as COMPLETE with `obj` zeroed, because a mask has no objective detail to restore — so
+re-deriving state from objectives would UN-COMPLETE every quest they had already finished, the first
+time they said hello to its giver.
+**(3) SAVE_VERSION 6 -> 7**, `questState[32]` + `objProgress[32][4]` (160 B) appended to the v6
+per-player tail — same reasoning as v6's waypoint mask: the tail has one writer and two readers,
+while the HEADER has three readers including the slot-list scan that never wants the field. **The
+migration is the load-bearing half.** A v6 file carries completions as the single `u64`, so reading
+the absent v7 tail as zeros would silently un-complete BOTH ACTS for every hero who has played them —
+and the next autosave writes that loss back permanently, with no recovery for a player. Hence the
+explicit legacy branch and `Quest::migrateFromMask`, whose bit-for-bit behaviour is pinned by
+`test_quest_state.cpp` ("v6 quest mask migrates to COMPLETE states, bit for bit", plus the case where
+the mask carries bits above the quest table). The END-TO-END load is verified by hand against a real
+v6 save checked in as `tests/fixtures/save_v6_fixture.dat` (`questMask = 1023`, all ten quests, no v7
+tail at all — it ends on that `u64`); **nothing in the suite reads that file yet**, so it is a manual
+artifact, not a regression pin, and wiring it into a test is the obvious next hardening.
+Sized to **32 quests x 4 objectives up front**, while the bump was still free: ten quests are
+authored, and growing either array later would cost another version and another pair of legacy
+readers forever (`MAX_QUESTS <= 64` is `static_assert`ed, because completion travels as a `u64`). `QUESTS[]` stays **append-only** — a row's POSITION is its
+slot in `state[]` and its bit in the derived mask, so resorting the table silently reassigns every
+saved hero's progress.
+**(4) THE JOURNAL is where the narration lives, and it is the actual fix for the reported
+complaint.** Quest text used to go to chat, and `addChatMessage` composed into a **48-byte** buffer —
+which cut **nine of the ten quest blurbs mid-sentence**, several of them losing the clause that said
+what to DO. The rule moved out to a pure `game/chat_line.h` (128 bytes, and a speakerless line no
+longer renders with a stray leading `": "` — the majority of callers are speakerless) precisely so a
+test could pin it against the real quest table; but the real answer is that a paragraph belongs in a
+panel, not in a line that fades. `INV_PANEL_JOURNAL = 5` in the inventory's shoulder cycle (STASH
+moved to 6), layout single-sourced in `InventoryUI::journalLayout()` so draw and hit-test cannot
+drift, narration WORD-WRAPPED. It is also reachable by the **`J` key**, and that is not a
+convenience: the panel cycle is on the SHOULDER buttons (controller only) and the Journal's mouse
+hit-test is consulted only while the Journal is already the active panel — self-blocking, so without
+a key a mouse-and-keyboard player could navigate the Journal and never enter it. A fixed scancode
+rather than a new `GameAction`, because those ordinals ARE `controls.json`'s on-disk format and
+appending one would mean a `BINDINGS_REV` migration for a convenience key.
+**...and the gameplay PROMPTS now stand down over it.** `renderHUD`'s common tail draws the tutorial
+prompts AFTER the inventory screen, so the "Block" label at 0.62*sh and its `Ctrl` glyph landed
+squarely on the Journal's narration and covered the giver line. Pre-existing — it does the same over
+the stash — and over a grid of item slots it is merely untidy; over a block of PROSE it hides the one
+thing the panel exists to show. Suppressed at the GATE (`m_inventoryOpen && (stash || journal)`)
+rather than by reordering the draw: a gameplay prompt is meant to be visible during play and a
+full-screen inventory panel is the exception, so the exception states itself instead of being implied
+by who happens to submit last.
+**(5) NAMED GIVERS.** `Quest::GIVERS[]` is four NPCs — Akara the Allocator and Charsi the Forgemaid
+in the TOWN (Act 1's hub), the Signalman and Kashya of the Platform on **Null Terminus** (Act 2's) —
+with `Entity::questGiver`, an `Interact::Target::NPC` and a "Speak to X" prompt. Talking OPENS THE
+JOURNAL on that giver's outstanding quest, which is the whole dialogue system: quest text then lives
+in exactly one place and can never disagree with itself, and the first conversation teaches the
+player where the Journal is. `giverOutstanding` hands out ONE quest at a time (first non-COMPLETE in
+table order, which is the road's own walking order) — a giver who dumps their whole act at once makes
+the first conversation a wall of text and removes any sense of the chain advancing.
+**Givers are spawned on EVERY PEER, not host-only.** `questGiver` is a POOL field absent from
+`SnapEntity`, so a snapshot-replicated spawn arrives at a guest with `questGiver == 0xFF` — no
+prompt, no conversation, ever. Both hubs are deterministic geometry both peers already rebuild from
+the sentinel seed, so spawning locally costs nothing and needs no wire change; talking grants nothing
+and changes no world state, so like a waypoint it is resolved locally on every network role.
+**(6) THE CAIRN STONES.** Quest 56 was "kill everything in the field", which is not D2's beat at all
+— the Cairn Stones are five monuments you touch in turn, and the fifth opens the way to TristRAM.
+They ride the SENTINEL path (`CAIRN_STONE_ID`), which buys spawning, replication, server-side
+validation and the fixture despawn exemption for free, and like the waypoint they are **never
+consumed**: the five of them ARE the monument, and a player who finishes the circle should walk back
+through the field and find it standing.
+Progress is a **BITMASK of WHICH stones**, not a count, and that is forced by the world: a zone is
+rebuilt from its seed on every entry, so a count plus a rebuild lets one stone be touched five times.
+The bitmask makes `noteActivate` idempotent by construction, and the SAME mask tints the stones in
+the world renderer, lights them on the minimap, and tells the bot which one to walk to — so the stone
+that is visibly dark is exactly the stone the game still wants.
+Their anchors ride **ROOM CENTRES recorded in `buildZoneLevel`**, twice for reasons this file has
+already paid for. Room centres, because a fixture stamped at a fraction of the grid can generate
+inside rock — that is how the Bank Station portal once put the whole of Act 2 behind a wall. And in
+the BUILDER rather than in `spawnZoneContents`, because the spawner runs AFTER
+`LevelMeshSystem::buildAll`: ground cleared there behaves as floor while still RENDERING as rock.
+The five fractions deliberately avoid the W/NW/centre lattice cells the POI mouth and the waypoint
+already own — the first draft put stone 0 at exactly the POI's `(10.5, 10.5)`, where the interact
+scan ranks the gate above the stone, so that stone could never be aligned and the quest could never
+complete.
+**A TRIGGER AND THE THING THAT SATISFIES IT LAND IN THE SAME COMMIT.** `ZoneRoute::linkOpen` gates
+the onward road on the host zone's quest, so a quest whose trigger nothing can satisfy SEALS the act
+for anyone playing that commit. An earlier draft flipped quest 56 to `ACTIVATE` three tasks before
+the stones existed and had to be reverted; `"every quest's deed trigger is one the engine can
+satisfy"` in `test_quest_state.cpp` now pins it, and `ZoneRoute::Task::ACTIVATE` exists for the same
+reason — TRAVEL means "take the next hop", and for an ACTIVATE quest the objective zone is the one
+the bot is already standing in, so `nextHop(from == goal)` returns NONE and the driver logs STRANDED
+and ends the run.
+**Verification (2026-08-10).** Unit suite **854/854** (`test_quest_state.cpp` alone is 29 cases).
+The nine-class act soak was re-run on this commit, because Task 14 changed `ZoneRoute` and rewrote
+quest 56's trigger and the standing 9/9 predated both: **8/9 finished Act 2's last quest**,
+`deaths == revives` in every session (43-76 each, inflated by the post-acts roll-on into fresh
+dungeon runs), **zero crashes, zero routing strands**, 10 quests completed by each passing class —
+and **all nine aligned all five Cairn Stones**, which is the new mechanic's own pass mark.
+The one PARTIAL was the TINKERER, the roster's weakest class, stopped in Threadneedle Street (zone 62)
+on a CLEAR_ZONE quest: three hostiles 3 m away, `fire=0`, `kills` frozen at 232 for twenty minutes —
+the dormant-AMBUSH standoff shape, and nothing this work touches (it had already aligned the stones
+and completed six quests). **Three fresh Tinkerer runs on the same binary finished both acts in
+12-17 minutes each, 5/5 stones, `deaths == revives`**, so read the 8/9 as the known summon-class
+variance rather than a regression — the same spread the earlier partial soaks show, where a Tinkerer
+passed and a Paladin did not.
+The bot aligns the stones through the ordinary DESCEND branch — the goal is the nearest UNLIT stone
+and `outNeedsInteract` is set, the same treatment a portal hop gets — so the act gained a quest KIND
+without the brain gaining a branch.
+**Draw calls are unmoved by the Journal:** a zone measured **74** with the panel open and 74 with it
+closed (it is HUD geometry, batched into the pass that was already running), against a 500 budget.
+**Save compatibility was measured end to end**, not reasoned about: the v6 fixture hero loads and is
+NOT re-offered a quest they had finished, where a fresh hero in the same zone IS
+(`[QUEST] offered: Free the Allocation` — the discriminating control); the first autosave rewrites
+the file at **1988 bytes, version 7**, with `state[0..9] == COMPLETE`, the other 22 slots LOCKED and
+`obj` all zero (right for a migrated hero — a mask has no detail to restore); and that v7 file
+round-trips.
 
 **...and a cave entrance is now a CAVE, not a tinted pillar (2026-08-07, Aaron: "remodel the cave
 entrances using the tools").** The first pass reused the shrine's standing-pillar mesh with a grey
@@ -787,11 +929,13 @@ Stones* (the Cairn Stones, which open the way to TristRAM), ***The Search for De
 CLIMAX — a SLAY on Griswald in the TristRAM ruins), and *Terminal Access* at the station, a REACH
 that is deliberately the EPILOGUE and not a second climax competing with the first. Both halves of
 that ending are pinned by test, because an act whose last beat is "arrive somewhere" has no payoff
-and an act with two finales has a muddled one. Deliberately NOT a quest engine — no dialogue, no journal UI, no prerequisite
-graph. Each quest is a place, one of three triggers the engine can already observe (CLEAR_ZONE /
-SLAY / REACH), and a per-character bit in the same v6 save tail as the waypoint mask (widened while
-v6 is still unreleased, which is free; adding a v7 later would mean a second conditional read in
-every reader forever). The SLAY hook sits at `handleDeathPreamble` — the ONE choke every enemy death
+and an act with two finales has a muddled one. **Read the paragraph below as HISTORY from here on:**
+this shipped as deliberately NOT a quest engine — no dialogue, no journal UI, one of three triggers,
+and a per-character BIT in the v6 save tail beside the waypoint mask. All four of those are now
+false; the current model is "THE QUEST ENGINE" above (state machine, derived mask, ACTIVATE, named
+givers, the Journal, SAVE_VERSION 7). What still holds is the SHAPE — a quest is a place, a trigger
+the engine can already observe, and per-character progress — and the two hook placements that follow,
+which are unchanged. The SLAY hook sits at `handleDeathPreamble` — the ONE choke every enemy death
 funnels through — so no kill route (a proc, a pet, a thorns reflect) can miss an objective, and
 CLEAR_ZONE is POLLED rather than event-driven because "the last one just died" is a property of the
 pool, not of any single death. Offers and completions both LOG as well as printing to chat: a
@@ -1577,7 +1721,7 @@ lanes ride the server-validated `CL_PICKUP_ITEM`, so no wire change) and wears a
 build scores as an upgrade. The build is one cell of a **3x3 grid** in the inventory (rows
 Tanky/Moderate/Glass Cannon, cols Magic/Melee/Ranged; `InventoryUI::buildGridLayout` single-sources
 draw + hit-test; controller reaches it as `INV_PANEL_BUILD` in the shoulder cycle — STASH moved to
-panel id 5). Scoring is the pure, tested `game/build_score.h`: stat-derived (base stats + rolled
+panel id 5, and then to **6** when the quest Journal took 5). Scoring is the pure, tested `game/build_score.h`: stat-derived (base stats + rolled
 affixes — no authored tags), **weapons scored on SUSTAINED DPS, mirroring `getEffectiveWeapon`** (cooldown divided by attack
 speed AND cut by CDR — the engine applies CDR to the weapon swing; clip weapons pay the reload
 cycle `shots*cd + reload`, which reload%/clip% rolls buy back — a Pistol's sustained output is ~29%

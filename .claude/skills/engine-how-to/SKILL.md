@@ -38,6 +38,64 @@ debug keys) lives in the `engine-reference` skill.
 
 **New skill**: use the dedicated **`create-skill`** skill (`SkillId` → `SkillDef` → loader → `tryActivate` branch → optional per-tick → skills.json → HUD icon → granting legendary item).
 
+**New quest (an act beat).** Quests are authored C++ data, not JSON — `Quest::QUESTS[]` in
+`game/quest_def.h`, with the rules in the pure `game/quest_state.h`. The recipe:
+
+1. **APPEND a `QuestDef` row. Never insert, never resort.** A row's POSITION is its slot in
+   `Quest::Progress::state[]` and its bit in the derived completion mask, so moving a row silently
+   reassigns every saved hero's progress. The table is walked in order by the road, the Journal and
+   `giverOutstanding`, so append in the order the quest is meant to be reached.
+2. **Author the row**: `zoneFloor` (which zone it belongs to — `Quest::forZone`/`indexForZone` key off
+   it, so exactly one quest per zone), `name`, `blurb` (the one-line chat offer), `narration` (the
+   Journal body — unbounded, the panel word-wraps it), `giverIdx` into `GIVERS[]`, and up to
+   `MAX_OBJ` (4) objectives.
+3. **Objective 0 is always `TALK`.** Every quest opens by speaking to somebody, and it gives the
+   Journal a first row that is true the moment the quest is known. It is pinned by test — and it is
+   **never a prerequisite**: `reevaluate()` excludes TALK from the completion test, so the quest
+   completes on its DEED alone. Do not "fix" that. There is no walk-back in this design, the onward
+   gate reads quest completion, and the act soak's bot cannot talk to anyone — a blocking TALK seals
+   the road for every bot and for any player who does not return to the hub.
+4. **Pick a deed trigger the ENGINE CAN ALREADY SATISFY, and land both in the SAME COMMIT.**
+   `CLEAR_ZONE` (polled off the live entity pool), `SLAY` (hooked at `handleDeathPreamble`, the one
+   choke every death funnels through), `REACH` (zone entry), `ACTIVATE` (N world fixtures, stored as
+   a bitmask). `ZoneRoute::linkOpen` gates the onward road on the host zone's quest, so a trigger
+   nothing implements SEALS the act for anyone playing that commit — this was actually done once and
+   had to be reverted. `"every quest's deed trigger is one the engine can satisfy"` in
+   `tests/game/test_quest_state.cpp` now fails the build instead.
+5. **A NEW trigger kind needs three things, not one**: the enum value; a mutator — `Quest::satisfy`
+   already handles any BOOLEAN trigger generically (it matches on trigger kind and writes
+   `required`), so a counting/accumulating one needs its own, the way `noteActivate` sets a bit; and
+   a `ZoneRoute::Task` plus a branch in `Engine::zoneBotGoal` (`engine_autoplay_zone.cpp`) so the BOT
+   can complete it — with no task it falls to `TRAVEL`, whose next hop from the zone you are standing
+   in is NONE, so `zoneBotGoal` reports no goal and the driver logs STRANDED and ends the run. The
+   Journal needs nothing: it prints `ObjectiveDef::text` and appends `n/required` whenever
+   `required > 1`. Prefer composing shipped triggers.
+6. **A quest with world FIXTURES records its anchors in `buildZoneLevel`, never in
+   `spawnZoneContents`.** The builder runs BEFORE `LevelMeshSystem::buildAll` and the spawner AFTER,
+   so a pad cleared in the spawner behaves as floor while still RENDERING as rock. Anchor on ROOM
+   CENTRES (`zoneAnchorRoom`/`zoneRoomCentre`) — every layout style guarantees those open and
+   connected, while a fraction of the grid can land in rock. Check the anchors do not collide with
+   the zone's waypoint or POI mouth: the interact scan ranks a gate above a fixture, so a fixture
+   sharing a cell with one can never be used and the quest can never complete. The fixture itself
+   should ride the sentinel path (a new `*_ID` below `CAIRN_STONE_ID`), which buys spawning,
+   replication, server-side validation and the despawn exemption for free.
+7. **Store fixture progress as a BITMASK of WHICH, not a count.** A zone is rebuilt from its seed on
+   every entry, so a count plus a re-entry lets one fixture be used five times. A bitmask makes the
+   mutator idempotent by construction, and the same mask can drive the world tint, the minimap and
+   the bot's "which one is still dark".
+8. **Do not grow `MAX_QUESTS` (32) or `MAX_OBJ` (4) casually** — both are SERIALIZED sizes in the v7
+   per-player tail, so either costs a `SAVE_VERSION` bump plus another pair of legacy readers,
+   forever. `MAX_QUESTS <= 64` is `static_assert`ed because completion travels as a `u64`.
+9. **A new GIVER** is a `GiverDef` row (hubFloor 98 = the town, 61 = Null Terminus) plus a spawn in
+   that hub. Spawn givers on **EVERY PEER, not host-only**: `Entity::questGiver` is a pool field
+   absent from `SnapEntity`, so a snapshot-replicated giver reaches a guest with `questGiver == 0xFF`
+   and never shows a prompt. Both hubs are deterministic geometry both peers already rebuild, and
+   talking changes no world state, so a local spawn is correct and costs no wire change.
+10. **Run `tests/game/test_quest_state.cpp`** — it lints the authored table (a narration, a TALK
+    opener, a SLAY target that names a real enemy, a giver whose quests are all in its own act) and
+    then the state machine. `tests/game/test_zone_route.cpp` pins that no gate can strand a
+    character across the whole quest order; run it too, since a new quest changes that order.
+
 **New material**: edit `assets/materials.json`. ID must equal array index. Look up at runtime by name with `MaterialSystem::getIdByName`. Tint blends with sampled texture color (1,1,1,1 = unmodified).
 
 **Armor visuals on the player body (inspect screen).** Equipped armor renders on the class body mesh in the Character inspect screen (`T` or `K` / `LB`+`+`) via `Engine::submitPlayerEquipment()`. Each armor `ItemDef` resolves to a per-tier mesh at init: `armorTierFromMaterial()` maps the material name suffix (`_light` / `_medium` / `_heavy`) to `ArmorTier::LIGHT/MEDIUM/HEAVY`, and the matching `ItemDef.tierMeshId` is filled by `ItemLoader::resolveVisuals`. The 3-D model render path lives in `engine_render_character.cpp::renderInspectModelToFbo()` — it creates an offscreen FBO (square, same aspect as the panel), renders via the normal `Renderer::submit/flush` pipeline with a standalone orbit camera (yaw driven by mouse drag / right-stick), then composites the result into the 2-D overlay in `renderCharacterInspect()`. **FBO size is platform-gated:** `kInspectFboSize = 320` on `__SWITCH__` (weaker GPU), 512 on desktop — the panel upscales either way so quality loss is minimal. The camera `projection` aspect is always 1.0 regardless of the FBO size; only the pixel dimensions change.
@@ -307,6 +365,9 @@ python3 tools/balance_chart.py out.csv -o out.html   # CSV → one-page HTML cur
 - **Snapshot quantization range** clamps positions to ±128 m. Keep level/grid bounds inside that range or clients see jitter.
 - **`assets/config/weapons.json` is shadowed** by the inline `initWeaponTable` (`game/weapon.h`). Editing the JSON alone has no effect; either remove the inline table or load JSON in `Engine::init`.
 - **Legendary skills require equipping the right item** — `legendarySkillId` on the equipped weapon's `ItemDef` becomes the player's `activeSkill`; without a matching item, right-click does nothing.
+- **A chat line is 128 bytes and a speakerless line carries NO prefix — compose it through `Chat::format` (`game/chat_line.h`), never a local `snprintf`.** The rule lived inline in `Engine::addChatMessage` for the whole life of the project and carried two defects the whole time, neither reachable by a test while it was in the engine: a **48-byte** buffer that cut **nine of the ten quest blurbs mid-sentence** (several losing the clause that said what to DO), and an unconditional `"%s: %s"` that rendered every speakerless line — quest offers, act completions, gate refusals, pickup names, i.e. most callers — with a stray leading `": "`. `Chat::LINE_LEN` is single-sourced beside the rule and 128 is the widest that is safe to DRAW unclipped (~61% of a 16:9 screen at 6 px/glyph). It returns snprintf's own count, so truncation is detected as `format(...) >= cap` rather than by re-deriving the format string in a test. **But the real lesson is upstream: a paragraph belongs in a panel, not in a line that fades after ten seconds.** Long prose goes in the Journal.
+- **`renderHUD`'s common tail draws AFTER the inventory branch, so anything it emits paints ON TOP of a full-screen panel.** The tutorial prompts sit at fixed `y ≈ 0.62-0.72*sh`, horizontally centred, which is squarely on the quest Journal's narration — the "Block" label and its `Ctrl` glyph covered the giver line. Over a grid of item slots (the stash) that is merely untidy; over PROSE it hides the thing the panel exists to show. The fix is to SUPPRESS at the gate (`m_inventoryOpen && (m_stashOpen || panel == INV_PANEL_JOURNAL)`), never to reorder the draw: prompts are meant to be visible during play, and the full-screen panels are the exception, so the exception should state itself rather than be implied by submission order. The same tail also gates `renderTargetBar` and `renderTutorials` on `!m_characterScreenOpen && !m_menu.confirmQuit` — add any new full-screen overlay to those gates too.
+- **Quest completion is a DERIVED `u64`, not a stored one.** `Quest::completionMask(progress)` builds it from `state[]` on demand and `Engine::m_questMask` is a CACHE refreshed by `refreshQuestMask(lane)` at every mutation site. Never write the mask directly, and never add a second stored copy for convenience — "one fact stored twice" is the most common bug shape in this project (trigger band vs arrival inset, boss ratios vs authored numbers, the fixture despawn list vs `isSentinelItem`), and this one is consumed by `ZoneRoute`, the gate refusals and the whole autoplay act branch, any of which would silently disagree.
 - **OBJ loader expects triangles + per-vertex normals.** Quad meshes will load with garbage normals. Triangulate on export.
 - **A new player-facing damage source must call a `Combat::pvp*` helper or Arena PvP silently ignores it.** Entity damage and player damage are SEPARATE pipelines: every skill/weapon site queries the `EntityPool` and calls `applyDamage`, which can never hit a player. The arena works because each such site has a one-line `Combat::pvpCone/pvpRay/pvpRadius` (or `pvpApply`) twin beside its entity query — registry-gated, so it's a free no-op in PvE. Add the twin when you add the source (attacker slot: `s_castingPlayer` on skill paths, `activeNetSlot()`/`np.slotIndex` on weapon paths, `p.ownerSlot` on projectiles — the ambient `s_attackingPlayer` is NOT maintained on weapon-fire paths); never hand-roll a players loop (the exclusion/atomic-apply rules live in the helpers). Full lifecycle: `engine-reference` → Arena internals.
 - **A world entered WITHOUT `startGame` must wire its own net callbacks.** `startGame` used to be the only place SERVER/CLIENT callbacks (`onPlayerJoin`, `onSnapshot`, `onEvent`, …) were registered — so a host reaching the arena/town via a Continue (no `startGame`) never seated joiners (connected but invisible), and a client join-accept-routed onto a sentinel floor (`enterArenaClient`/`enterTownClient`/`enterSourceChamberClient`) was connected but DEAF: snapshots flowed to nobody, `SV_EVENT`s vanished. Call the idempotent `wireServerNet()` (host, before broadcasting the sentinel seed) / `wireClientNet()` (client entry) — and if you add a new sentinel world, both.
