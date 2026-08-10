@@ -1214,7 +1214,18 @@ void Engine::renderHUD(u32 sw, u32 sh) {
     // is drawn, so the screen looks unremarkable at a glance", but these two calls were gated only
     // on !m_characterScreenOpen, an unrelated flag, so a live controls/shield/dodge/pickup tooltip
     // kept rendering through the pause overlay whenever one happened to be showing when ESC was hit.
-    if (!m_characterScreenOpen && !m_menu.confirmQuit)
+    //
+    // ...and they are suppressed over a READING panel for the same reason. This tail runs AFTER the
+    // inventory branch, so a live prompt paints on top of whatever the inventory drew: the "Block"
+    // label at 0.62*sh and its Ctrl glyph land squarely on the Journal's narration and cover the
+    // giver line (measured). It does the same over the stash. Over a grid of item slots that is
+    // merely untidy — over a block of PROSE it hides the one thing the panel exists to show. The
+    // fix belongs here rather than in the draw order: a gameplay prompt is meant to be visible
+    // during play, and a full-screen inventory panel is the exception, so the exception states
+    // itself at the gate instead of being implied by who happens to submit last.
+    const bool readingPanelUp = m_inventoryOpen &&
+                                (m_stashOpen || m_invCursorPanel == INV_PANEL_JOURNAL);
+    if (!m_characterScreenOpen && !m_menu.confirmQuit && !readingPanelUp)
         renderTutorials(sw, sh);
 
     // Quickbar — always visible at bottom of screen, EXCEPT while the inventory's item comparison
