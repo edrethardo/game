@@ -31,10 +31,28 @@ namespace InventoryUI {
 
     struct SlotHit {
         enum Panel : u8 { NONE, BACKPACK, EQUIPMENT, QUICKBAR, STASH, STASH_TAB,
-                          BUILD_CELL, BUILD_TOGGLE, JOURNAL_ROW, JOURNAL_TAB };
+                          BUILD_CELL, BUILD_TOGGLE, JOURNAL_ROW, JOURNAL_TAB, MENU_TAB };
         Panel panel = NONE;
         u8    index = 0;
     };
+
+    // ---- The tabbed menu's frame + tab bar (Diablo 2 style) --------------------------------
+    // ONE framed panel hosts all three pages (Inventory / Character / Quests). Every page draws
+    // inside `contentX/Y/W/H`, so they cannot drift apart, and the backdrop that dims the live
+    // world is drawn once for all of them — before this the inventory had NO backdrop at all and
+    // the dungeon showed straight through the item grid.
+    static constexpr u32 MENU_TABS = 3;
+    struct MenuFrameRects {
+        f32 x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;             // the framed panel
+        f32 contentX = 0.0f, contentY = 0.0f;                   // usable area's left/bottom
+        f32 contentW = 0.0f, contentH = 0.0f;                   // ...below the tab bar
+        f32 tabX = 0.0f, tabY = 0.0f;                           // tab 0's left/bottom
+        f32 tabW = 0.0f, tabH = 0.0f, tabGap = 0.0f;
+        f32 uiScale = 1.0f;
+    };
+    MenuFrameRects menuFrameLayout(u32 sw, u32 sh);
+    // Hit-test the tab bar. MENU_TAB with index = the page, or NONE.
+    SlotHit hitTestMenuTabs(u32 sw, u32 sh, s32 mx, s32 my);
 
     // ---- Account stash panel (drawn over the equipment area while the stash is open) ----
     // THE single source for the stash grid + page tabs: HUD::drawStashPanel and hitTestStash
@@ -66,7 +84,7 @@ namespace InventoryUI {
 
     // ---- Quest journal panel (drawn in the inventory's right column) ----
     // Two columns: a quest list on the left, the selected quest's narration + objectives on the
-    // right. Single-sourced like every panel here — HUD::drawJournalPanel and hitTestJournal both
+    // right. Single-sourced like every panel here — HUD::drawQuestLog and hitTestJournal both
     // derive from journalLayout(), or the click rects drift off the drawn thing.
     static constexpr u32 JOURNAL_TABS = 2;      // ACT I, ACT II
     static constexpr u32 JOURNAL_ROWS = 12;     // visible quest rows per act (10 authored today)

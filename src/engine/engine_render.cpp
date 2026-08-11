@@ -540,6 +540,12 @@ void Engine::renderPostOverlays(u32 sw, u32 sh) {
         lowHp = (GameConst::LOW_HP_FRACTION - hpFrac) / GameConst::LOW_HP_FRACTION * 0.40f;   // 0 at threshold -> 0.40 near death, constant per frame
     f32 vig = fmaxf(m_localPlayer.hurtVignette, lowHp);
     if (vig > 0.60f) vig = 0.60f;
+    // Stands down under the character menu, like the tutorial prompts and the target bar. It is
+    // drawn AFTER the HUD, so over a full-screen page it is a red wash across the very text the
+    // page exists to show — measured on the quest log at 11% HP, where the list was barely
+    // legible. Nothing is lost by hiding it: the menu already covers the world it is warning
+    // about, and the warning it carries ("you are low") is on the page's own Health row.
+    if (m_inventoryOpen) vig = 0.0f;
     if (vig > 0.0f) {
         glDisable(GL_DEPTH_TEST);
         glEnable(GL_BLEND);
@@ -850,7 +856,7 @@ void Engine::render(f32 alpha) {
     // so the 2D composite in renderCharacterInspect (driven from the HUD pass below) can sample it.
     // Done before the HUD pass and only for the active lane (the inspect screen is mouse-driven /
     // single-player; split-screen runs at render scale 1.0 so no FBO upscale is in flight here).
-    if (m_characterScreenOpen && !m_hideHud) {
+    if (characterTabUp() && !m_hideHud) {
         renderInspectModelToFbo();
         // renderInspectModelToFbo restores framebuffer 0; re-assert the native HUD viewport/scissor
         // (it set the inspect-sized viewport internally) so the HUD pass below draws full-window.

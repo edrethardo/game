@@ -209,7 +209,7 @@ void Engine::updateAutoplay(f32 dt) {
     // "fight while I re-gear" carve-out could never engage. Counting the toggle key AS the UI (the bot
     // never presses these in 8a, so the reads reflect the human) keeps the bot in control across the
     // open/close, and the latch stays frozen (bot-controlled) while the screen is up.
-    const bool uiOpen = m_inventoryOpen || m_characterScreenOpen || m_menu.confirmQuit
+    const bool uiOpen = m_inventoryOpen || m_menu.confirmQuit
                      || m_menu.optionsFromPause || m_menagerieOpen
                      || Input::isActionPressed(GameAction::INVENTORY)
                      || Input::isActionPressed(GameAction::CHARACTER_SCREEN)

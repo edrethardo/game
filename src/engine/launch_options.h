@@ -75,6 +75,14 @@ struct LaunchOptions {
     // --endgame and --victory exist. Compose it: --load <slot> --endgame --zone 52 --autoplay
     // --quests-done reproduces "my finished hero walks into the overworld with the bot driving".
     bool questsDone = false;
+    // --menu <inventory|character|quests>: open the tabbed character menu on that PAGE as soon as
+    // the world is up. 0xFF = do not open.
+    //
+    // A dev door onto a SCREEN rather than a game state, and it exists for the same reason
+    // --victory does: the alternative is driving the UI by hand, and on a headless or unfocused
+    // display there is no hand to drive it with — the window-focus input gate zeroes every
+    // synthetic keypress, so the menu pages were literally uncapturable without this.
+    u8 menuPage = 0xFF;
 
     bool arenaCouch = false;                   // --arena-couch: local-versus arena, two fresh lanes
     bool autoplayCouch = false;                // --autoplay-couch: split-screen, BOTH lanes bot-driven

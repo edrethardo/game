@@ -64,6 +64,13 @@ static void pushSolidRect(f32 x0, f32 y0, f32 x1, f32 y1, Vec3 color) {
         pushLine(x0, y, x1, y, color);
 }
 
+void fillRect(f32 x0, f32 y0, f32 x1, f32 y1, Vec3 color) {
+    // Normalise so a caller cannot silently draw nothing by passing (top, bottom).
+    if (x1 < x0) { const f32 t = x0; x0 = x1; x1 = t; }
+    if (y1 < y0) { const f32 t = y0; y0 = y1; y1 = t; }
+    for (f32 y = y0; y < y1; y += 1.0f) pushLine(x0, y, x1, y, color);
+}
+
 void flushHUD() {
     if (s_vertCount == 0 || !s_vao) return;
 

@@ -788,7 +788,8 @@ void Engine::talkToGiver(s32 entityIdx) {
     m_dragState     = {};
     m_dblClickState = {};
 
-    m_invCursorPanel  = INV_PANEL_JOURNAL;
+    m_menuTab         = MENU_TAB_QUESTS;
+    m_menuTabArr[m_localPlayerIndex] = MENU_TAB_QUESTS;   // alias + array — see openMenu
     m_invJournalAct   = static_cast<u8>(Quest::actOf(Quest::QUESTS[q].zoneFloor) - 1);
     // The cursor is a ROW in the visible act's list, not a quest index — count this quest's
     // position within its own act (the same walk the Journal's own nav does).

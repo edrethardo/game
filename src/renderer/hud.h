@@ -87,10 +87,18 @@ namespace HUD {
     // `liveQuestIdx` / `liveRemaining` / `liveTotal` carry the CLEAR_ZONE count, which is a property
     // of the entity pool and is deliberately not stored in Quest::Progress. 0xFF = the player is not
     // standing in a quest zone, so no live row is drawn.
-    void drawJournalPanel(u32 sw, u32 sh, const Quest::Progress& prog,
-                          u8 selectedRow, u8 actTab,
-                          u8 liveQuestIdx, u16 liveRemaining, u16 liveTotal,
-                          s32 mouseX, s32 mouseY);
+    void drawQuestLog(u32 sw, u32 sh, const Quest::Progress& prog,
+                      u8 selectedRow, u8 actTab,
+                      u8 liveQuestIdx, u16 liveRemaining, u16 liveTotal,
+                      s32 mouseX, s32 mouseY);
+    // The tabbed menu's shared chrome: dimming backdrop, framed panel, and the page tab strip.
+    // Drawn once before whichever page is up, so the three pages cannot drift apart visually.
+    // `activeTab` is Engine::MENU_TAB_*; the mouse position drives tab hover only.
+    // `cursorOnTabs` = the controller/keyboard cursor is parked ON the strip (not in the page),
+    // which the strip must SHOW or a pad player has no idea their next A/D changes the page.
+    void drawMenuChrome(u32 sw, u32 sh, u8 activeTab, bool gamepad, bool cursorOnTabs,
+                        s32 mouseX, s32 mouseY);
+
     void drawStashPanel(u32 sw, u32 sh, const ItemInstance* items, u8 page,
                         const ItemDef* itemDefs, s32 mouseX, s32 mouseY);
 

@@ -36,6 +36,7 @@ add_executable(dungeon_tests
     game/test_quest_state.cpp        # quest state machine: objectives, derived mask, v6 migration (header-only)
     game/test_save_v6_fixture.cpp  # the v6->v7 migration against a REAL save file, not a hand-built mask
     game/test_journal_layout.cpp     # journal panel geometry: draw and hit-test derive from one place
+    game/test_menu_frame.cpp         # tabbed menu frame + page tabs: content box, click rects, no tab-row collision
     game/test_chat_line.cpp          # HUD chat line format: no stray ': ', no truncated quest blurb
     game/test_minion_scale.cpp
     game/test_entity_ground.cpp

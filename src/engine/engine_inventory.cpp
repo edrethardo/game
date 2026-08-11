@@ -52,6 +52,87 @@
 // server with a reliable CL_USE_PET packet naming the defId (Engine::onUsePet validates
 // it) — the summon is server-authoritative and the entity comes back through the snapshot.
 // ---------------------------------------------------------------------------
+// The tabbed character menu — open / close / page cycle.
+//
+// These three exist so the open-and-close RITUAL has one home. Before the tab bar there were
+// seven sites writing `m_inventoryOpen = false` and three writing it true, each re-deriving the
+// mouse-mode and drag-reset steps by hand; the character screen had a second such set of its own.
+// That is the per-site-list shape CLAUDE.md keeps recording (the town portal flag, the level
+// flags) — a page or hotkey added later would miss a step, and the step it missed would be the
+// mouse capture, which strands the pointer.
+// ---------------------------------------------------------------------------
+void Engine::openMenu(u8 tab) {
+    const bool wasOpen = m_inventoryOpen;
+
+    m_inventoryOpen = true;
+    m_inventoryOpenArr[m_localPlayerIndex] = true;
+    // Out-of-range degrades to the inventory rather than indexing a page that does not exist.
+    m_menuTab = (tab < MENU_TAB_COUNT) ? tab : MENU_TAB_INVENTORY;
+    // BOTH the alias and the per-lane array, because openMenu is called from OUTSIDE the
+    // per-player swap as well as inside it (the --menu dev door runs in the frame loop;
+    // talkToGiver runs in the interact handler). swapInPlayer re-reads every alias from its array
+    // at the top of the next per-player pass, so an alias-only write is silently undone one frame
+    // later — measured exactly that way: --menu quests opened on the inventory page.
+    m_menuTabArr[m_localPlayerIndex] = m_menuTab;
+    m_inventoryOpenedOnce = true;              // dismisses the "Open Inventory" tutorial prompt
+
+    // The pointer is freed on EVERY page now, not just the inventory: the tab bar is clickable
+    // everywhere, so the character page can no longer keep the cursor captured for its drag-rotate
+    // (it reads a left-button drag instead). Player 0 only — the mouse belongs to that lane, and a
+    // couch P2 opening a menu must not release P1's mouse-look.
+    if (m_localPlayerIndex == 0) Input::setRelativeMouseMode(false);
+
+    if (!wasOpen) {
+        if (m_localPlayerIndex == 0) {
+            // Seed the input mode from THIS lane's device: a controller opens in cursor mode, a
+            // keyboard/mouse in mouse mode, and either can take over later (last-input-wins). Read
+            // per-lane, not globally — the global flips to Gamepad the moment a couch P2 touches a
+            // pad, which would open P1's menu in cursor mode and make P1's double-click inert.
+            m_invCursorActive = Input::laneDeviceIsGamepad(m_localPlayerIndex);
+            m_invLastMouseX = -1;
+            m_invLastMouseY = -1;
+        }
+        if (m_firstPickupTooltipShown && !m_equipTooltipShown) m_equipTooltipShown = true;
+    }
+
+    // A drag begun on a previous open must not survive into this one.
+    m_dragState = {};
+    m_dblClickState = {};
+}
+
+void Engine::closeMenu() {
+    m_inventoryOpen = false;
+    m_inventoryOpenArr[m_localPlayerIndex] = false;
+    // Next open lands on the page its own hotkey asks for, so nothing here has to remember one.
+    m_menuTab = MENU_TAB_INVENTORY;
+    m_menuTabArr[m_localPlayerIndex] = MENU_TAB_INVENTORY;
+    // Recapture only for the mouse-owning lane, and only if nothing else wants the pointer free.
+    if (m_localPlayerIndex == 0) Input::setRelativeMouseMode(true);
+    m_dragState = {};
+    m_dblClickState = {};
+}
+
+void Engine::cycleMenuTab(s8 delta) {
+    if (!m_inventoryOpen) return;
+    const s16 n = static_cast<s16>(MENU_TAB_COUNT);
+    s16 t = static_cast<s16>(m_menuTab) + delta;
+    while (t < 0)  t += n;
+    while (t >= n) t -= n;
+    if (static_cast<u8>(t) == m_menuTab) return;
+    m_menuTab = static_cast<u8>(t);
+    m_menuTabArr[m_localPlayerIndex] = m_menuTab;   // see openMenu — alias-only writes get undone
+
+    // Leaving the inventory page parks its cursor somewhere legal. The stash lives OUTSIDE the
+    // page cycle (it is entered from the town chest), so a tab flip must not leave the synthetic
+    // cursor pointing at a grid nobody is looking at.
+    if (m_menuTab != MENU_TAB_INVENTORY && m_invCursorPanel == INV_PANEL_STASH) {
+        m_invCursorPanel = INV_PANEL_BACKPACK;
+        m_invCursorIndex = 0;
+    }
+    AudioSystem::play(SfxId::UI_CLICK);
+}
+
+// ---------------------------------------------------------------------------
 bool Engine::tryUsePetItem(u8 backpackIndex) {
     if (backpackIndex >= MAX_INVENTORY_ITEMS) return false;
     const ItemInstance& it = m_inventories[m_localPlayerIndex].backpack[backpackIndex];
@@ -108,10 +189,20 @@ void Engine::inventoryCursorToMouse(u32 sw, u32 sh, s32& mx, s32& my) const {
         return;
     }
 
-    // Journal. Handled BEFORE the skill-bar branch below for the same reason the stash is: its
-    // panel value is > CLASS_SKILL, so without this the cursor would park on the equip skill bar
-    // and the panel would be reachable but unnavigable.
-    if (m_invCursorPanel == INV_PANEL_JOURNAL) {
+    // The page TAB STRIP. First, because it sits above every page and its cursor position has
+    // nothing to do with whichever page is behind it.
+    if (m_invCursorPanel == INV_PANEL_MENUTAB) {
+        const InventoryUI::MenuFrameRects r = InventoryUI::menuFrameLayout(sw, sh);
+        mx = static_cast<s32>(r.tabX + (r.tabW + r.tabGap) * static_cast<f32>(m_menuTab)
+                              + r.tabW * 0.5f);
+        my = static_cast<s32>(r.tabY + r.tabH * 0.5f);
+        return;
+    }
+
+    // Quest page. Handled BEFORE the skill-bar branch below because the page has no item panel at
+    // all: without this the synthetic cursor would sit wherever the inventory page left it and the
+    // pad's hover highlight would land on a row nobody selected.
+    if (questTabUp()) {
         const InventoryUI::JournalRects r = InventoryUI::journalLayout(sw, sh);
         // Rows DESCEND from listTopY, so row i's centre is listTopY - rowH*(i + 0.5) — the same
         // inversion hitTestJournal does, which is what makes the pad's hover highlight land on the
@@ -330,13 +421,32 @@ void Engine::updateInventoryInteraction(f32 dt) {
 
         // Navigation — always live. D-pad OR keyboard WASD (MOVE_* is bound to plain W/S/A/D with no
         // stick/pad binding, a clean keyboard-only edge). Pressing any of these ENTERS cursor mode.
-        const bool navR = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || (kb && Input::isActionPressed(GameAction::MOVE_RIGHT));
-        const bool navL = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_LEFT)  || (kb && Input::isActionPressed(GameAction::MOVE_LEFT));
-        const bool navD = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_DOWN)  || (kb && Input::isActionPressed(GameAction::MOVE_BACKWARD));
-        const bool navU = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_UP)    || (kb && Input::isActionPressed(GameAction::MOVE_FORWARD));
-        const bool panelL = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
-        const bool panelR = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
-        if (navR || navL || navD || navU || panelL || panelR) m_invCursorActive = true;
+        // ARROW KEYS work everywhere WASD does. They were not accepted at all before, which on a
+        // menu is a genuine dead end rather than a preference: a player reading a list reaches for
+        // the arrows, and the quest log's act tabs had NO other keyboard route (the footer even
+        // said "Left/Right", which was simply untrue). Raw scancodes rather than new GameActions —
+        // those ordinals ARE controls.json's on-disk format, so appending four would force a
+        // BINDINGS_REV migration for navigation keys nobody would ever rebind.
+        const bool navR = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || (kb && (Input::isActionPressed(GameAction::MOVE_RIGHT)    || Input::isKeyPressed(SDL_SCANCODE_RIGHT)));
+        const bool navL = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_LEFT)  || (kb && (Input::isActionPressed(GameAction::MOVE_LEFT)     || Input::isKeyPressed(SDL_SCANCODE_LEFT)));
+        const bool navD = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_DOWN)  || (kb && (Input::isActionPressed(GameAction::MOVE_BACKWARD) || Input::isKeyPressed(SDL_SCANCODE_DOWN)));
+        const bool navU = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_DPAD_UP)    || (kb && (Input::isActionPressed(GameAction::MOVE_FORWARD)  || Input::isKeyPressed(SDL_SCANCODE_UP)));
+
+        // PAGE CYCLE. The shoulders are the controller's route; `[` / `]` and PageUp/PageDown are
+        // the keyboard's. Before this there was NO keyboard cycle at all — a mouse-and-keyboard
+        // player could only reach a page by clicking its tab or knowing the direct hotkey (T/K, J),
+        // and the on-screen hint named the controller's buttons, so the screen actively misinformed
+        // them. All four keys are unbound in the default scheme (Q/E/Z/X/C/V and 1-4 are taken).
+        //
+        // PgUp/PgDn are what the on-screen hint NAMES, because SDL scancodes are physical key
+        // POSITIONS: SDL_SCANCODE_LEFTBRACKET is the slot that carries "[" on a US layout and
+        // "u-umlaut" on the German one this is developed on. The brackets stay bound for US
+        // players who reach for them; PgUp/PgDn are the pair that is engraved the same everywhere.
+        const bool pageL = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_LEFTSHOULDER)
+                        || (kb && (Input::isKeyPressed(SDL_SCANCODE_LEFTBRACKET)  || Input::isKeyPressed(SDL_SCANCODE_PAGEUP)));
+        const bool pageR = Input::isButtonPressed(padIdx, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)
+                        || (kb && (Input::isKeyPressed(SDL_SCANCODE_RIGHTBRACKET) || Input::isKeyPressed(SDL_SCANCODE_PAGEDOWN)));
+        if (navR || navL || navD || navU) m_invCursorActive = true;
 
         // Actions on the CURRENT selection — gated on cursorMode so they fire ONLY when the cursor is
         // the live pointer. In mouse mode a player equips with double-click and drops with right-click,
@@ -356,34 +466,20 @@ void Engine::updateInventoryInteraction(f32 dt) {
         HUD::EquipSkillSlot navEquip[MAX_EQUIP_SKILL_SLOTS];
         const u32 navEquipCount = buildEquipSkillSlots(navEquip);
 
-        // J toggles the Journal. NOT gated on cursorMode, and that is the entire point: the panel
-        // cycle lives on the shoulder buttons (controller only) and the Journal's mouse hit-test is
-        // consulted only while the Journal is ALREADY the active panel — self-blocking, so without
-        // this key a keyboard-and-mouse player can navigate the Journal but can never enter it.
+        // J jumps to the QUESTS page and back. NOT gated on cursorMode, and that is the entire
+        // point: the page cycle lives on the shoulder buttons (controller only), so without a key
+        // a keyboard-and-mouse player would have to click the tab — discoverable, but not fast.
         //
         // A FIXED scancode, not a new GameAction: those ordinals ARE controls.json's on-disk format
         // (serialized by enum position), so appending one for a convenience key would mean a
-        // BINDINGS_REV migration. Same shape as the character screen's fixed T/K.
+        // BINDINGS_REV migration. Same shape as the character page's T/K.
         //
-        // It TOGGLES rather than only entering, so a fixed key can never be a trap: J takes you back
-        // to the panel you came from.
+        // It TOGGLES back to the INVENTORY page rather than closing the menu, so the key is a page
+        // flip and never a surprise exit.
         if (kb && Input::isKeyPressed(SDL_SCANCODE_J)) {
-            if (m_invCursorPanel == INV_PANEL_JOURNAL) {
-                // The equip-skill bar can have emptied while the Journal was up (a legendary was
-                // unequipped from it), and the panel cycle already refuses to land there when it
-                // holds nothing — returning to it would park the cursor on an empty bar.
-                m_invCursorPanel = (m_invPanelBeforeJournal == INV_PANEL_EQUIP_SKILL && navEquipCount == 0)
-                                 ? INV_PANEL_BACKPACK : m_invPanelBeforeJournal;
-                m_invCursorIndex = 0;
-            } else {
-                // Never remember a panel outside the cycle (STASH): its cursor maps through a
-                // layout that is only on screen while the stash is open, so returning to it would
-                // park the synthetic cursor on a panel nobody is looking at.
-                m_invPanelBeforeJournal = (m_invCursorPanel < INV_PANEL_COUNT)
-                                        ? m_invCursorPanel : INV_PANEL_BACKPACK;
-                m_invCursorPanel = INV_PANEL_JOURNAL;
-                m_invCursorQuest = 0;   // enter on row 0 — the same reset the act flip does
-            }
+            m_menuTab = questTabUp() ? MENU_TAB_INVENTORY : MENU_TAB_QUESTS;
+            m_menuTabArr[m_localPlayerIndex] = m_menuTab;
+            if (m_menuTab == MENU_TAB_QUESTS) m_invCursorQuest = 0;   // enter on row 0
             AudioSystem::play(SfxId::UI_CLICK);
         }
         // Slots in the panel the cursor is currently on.
@@ -393,6 +489,54 @@ void Engine::updateInventoryInteraction(f32 dt) {
             (m_invCursorPanel == INV_PANEL_CLASS_SKILL) ? static_cast<u8>(InventoryUI::CLASS_SKILL_SLOTS)
                                                         : static_cast<u8>(navEquipCount);
 
+        // Does the CURSOR own this frame's input, or the physical mouse?
+        //
+        // This gate is load-bearing and its absence was a real, shipped bug. The three panel blocks
+        // below (tab strip, build grid, quest page) each end in an unconditional `return`, and they
+        // sit ABOVE the physical-mouse path — so whenever one of them was on screen the mouse was
+        // dead for the WHOLE menu: on the quest page you could not click a quest row, an act tab, a
+        // page tab, or anything else. Reported as, simply, "mouse doesn't work".
+        //
+        // `cursorMode` alone is not enough: it is sampled BEFORE this frame's nav presses, so the
+        // first W in mouse mode would fall past these blocks into the generic item handling with a
+        // non-item page on screen. OR-ing this frame's nav in routes that press to the page that
+        // owns it, while a frame carrying only mouse input falls through as it must.
+        const bool cursorDrives = cursorMode || navR || navL || navD || navU;
+
+        // L/R shoulder switches the PAGE — Inventory / Character / Quests — which is what Diablo 2
+        // puts there on a controller, and the reason the quest log is no longer buried five panels
+        // deep in an item cursor cycle.
+        //
+        // The inventory page's own panels are reached by the D-pad instead (the cross-moves below
+        // now form a complete graph: equipment <-> backpack <-> build, and down into the skill
+        // bars), so nothing became unreachable when the shoulders were reassigned.
+        if (pageL || pageR) {
+            cycleMenuTab(pageR ? +1 : -1);
+            return;   // the page changed; this frame's remaining input belongs to the new page
+        }
+
+        // --- The cursor is ON the tab strip -------------------------------------------------
+        // LEFT/RIGHT walk the pages (the page changes as you move, so the page you can see is
+        // always the page you have selected — a confirm step here would only add a keypress to a
+        // choice that is already reversible). DOWN enters the page. This is the WASD/D-pad route
+        // to the tabs; it must be handled before any page's own nav, or the page below would eat
+        // the same keys.
+        if (cursorDrives && m_invCursorPanel == INV_PANEL_MENUTAB) {
+            if (navL) cycleMenuTab(-1);
+            if (navR) cycleMenuTab(+1);
+            // DOWN enters the page — but only where there is something to enter. The CHARACTER
+            // page has no cursor panels at all (it is a model and a stats sheet), so dropping into
+            // it would park the cursor on a backpack slot that page never draws: a highlight
+            // nobody can see, on a panel nobody is looking at. The cursor stays on the strip there.
+            if (navD && m_menuTab != MENU_TAB_CHARACTER) {
+                m_invCursorPanel = INV_PANEL_BACKPACK;
+                m_invCursorIndex = 0;
+                m_invCursorQuest = 0;
+                AudioSystem::play(SfxId::UI_CLICK);
+            }
+            return;   // nothing else on any page may act while the cursor is on the strip
+        }
+
         // Navigate the cursor. Left/right also CROSS between the two item panels at the edges
         // (equipment sits left of the backpack on screen) — the keyboard's substitute for the
         // controller's shoulder cycle, and a nicety for the pad too.
@@ -400,6 +544,11 @@ void Engine::updateInventoryInteraction(f32 dt) {
             if (m_invCursorPanel == INV_PANEL_BACKPACK) {
                 u8 col = m_invCursorIndex % InventoryUI::BP_COLS;
                 if (col < InventoryUI::BP_COLS - 1) m_invCursorIndex++;
+                // Right edge crosses into the build grid, which sits in the right column on screen.
+                // Added when the shoulders were reassigned to the page tabs: the build grid was
+                // reachable ONLY by that cycle, so without this cross it would have become
+                // unreachable on a controller — and it is the panel that owns the Auto Loot toggle.
+                else { m_invCursorPanel = INV_PANEL_BUILD; m_invCursorBuild = 0; }
             } else if (m_invCursorPanel == INV_PANEL_EQUIPMENT) {
                 m_invCursorPanel = INV_PANEL_BACKPACK; m_invCursorIndex = 0;   // cross right → backpack
             } else if (m_invCursorPanel >= INV_PANEL_CLASS_SKILL) {
@@ -417,11 +566,19 @@ void Engine::updateInventoryInteraction(f32 dt) {
             }
         }
         if (navD) {
+            // Dropping out of an item panel's last row lands on the skill bars, which sit below
+            // them on screen. Prefer the EQUIP bar when it holds anything (it is the upper of the
+            // two); the class bar is the floor. Both crossings exist for the same reason as the
+            // build one above — the shoulders that used to reach these now switch pages.
+            const u8 skillPanelBelow = (navEquipCount > 0) ? INV_PANEL_EQUIP_SKILL
+                                                           : INV_PANEL_CLASS_SKILL;
             if (m_invCursorPanel == INV_PANEL_BACKPACK) {
                 if (m_invCursorIndex + InventoryUI::BP_COLS < InventoryUI::BP_COLS * InventoryUI::BP_ROWS)
                     m_invCursorIndex += InventoryUI::BP_COLS;
+                else { m_invCursorPanel = skillPanelBelow; m_invCursorIndex = 0; }
             } else if (m_invCursorPanel == INV_PANEL_EQUIPMENT) {
                 if (m_invCursorIndex < InventoryUI::EQ_SLOTS - 1) m_invCursorIndex++;
+                else { m_invCursorPanel = skillPanelBelow; m_invCursorIndex = 0; }
             } else if (m_invCursorPanel == INV_PANEL_EQUIP_SKILL) {
                 // The equip bar sits directly ABOVE the class bar on screen, so "down" drops to it.
                 m_invCursorPanel = INV_PANEL_CLASS_SKILL;
@@ -430,42 +587,50 @@ void Engine::updateInventoryInteraction(f32 dt) {
             }
         }
         if (navU) {
+            // Off the TOP of a page and you are on the tab strip. Every page's topmost row exits
+            // upward the same way, which is what makes "press up to change page" a rule rather
+            // than a list of special cases.
             if (m_invCursorPanel == INV_PANEL_BACKPACK) {
                 if (m_invCursorIndex >= InventoryUI::BP_COLS)
                     m_invCursorIndex -= InventoryUI::BP_COLS;
+                else { m_invCursorPanel = INV_PANEL_MENUTAB; AudioSystem::play(SfxId::UI_CLICK); }
             } else if (m_invCursorPanel == INV_PANEL_EQUIPMENT) {
                 if (m_invCursorIndex > 0) m_invCursorIndex--;
+                else { m_invCursorPanel = INV_PANEL_MENUTAB; AudioSystem::play(SfxId::UI_CLICK); }
             } else if (m_invCursorPanel == INV_PANEL_CLASS_SKILL && navEquipCount > 0) {
                 m_invCursorPanel = INV_PANEL_EQUIP_SKILL;
                 if (m_invCursorIndex >= navEquipCount)
                     m_invCursorIndex = static_cast<u8>(navEquipCount - 1);
+            } else if (m_invCursorPanel == INV_PANEL_EQUIP_SKILL ||
+                       m_invCursorPanel == INV_PANEL_CLASS_SKILL) {
+                // Top of the skill stack climbs back into the bag — the return leg of the navD
+                // crossings above. Without it a pad player who dropped onto a bar could walk along
+                // it and back down, but never out.
+                m_invCursorPanel = INV_PANEL_BACKPACK;
+                m_invCursorIndex = static_cast<u8>(InventoryUI::BP_COLS *
+                                                   (InventoryUI::BP_ROWS - 1));   // bottom row
             }
         }
-        // L/R shoulder cycles the panels: backpack -> equipment -> class skills -> equip skills
-        // (controller only — the keyboard reaches the two item panels via the left/right cross above).
-        if (panelL || panelR) {
-            const bool fwd = panelR;
-            for (u8 step = 0; step < INV_PANEL_COUNT; step++) {
-                m_invCursorPanel = fwd
-                    ? static_cast<u8>((m_invCursorPanel + 1) % INV_PANEL_COUNT)
-                    : static_cast<u8>((m_invCursorPanel + INV_PANEL_COUNT - 1) % INV_PANEL_COUNT);
-                if (m_invCursorPanel != INV_PANEL_EQUIP_SKILL || navEquipCount > 0) break;
-            }
-            m_invCursorIndex = 0;
-        }
+
         // Build panel: D-pad walks the 3x3 (up from the top row reaches the mode toggle); A/E on
         // the toggle flips Auto Loot & Equip, on a cell selects the build. Selecting either way
         // re-gears the whole bag on the spot (autoEquipBackpack), so the change is visible NOW.
-        if (m_invCursorPanel == INV_PANEL_BUILD) {
+        if (cursorDrives && m_invCursorPanel == INV_PANEL_BUILD) {
             if (navU) {
                 if (m_invCursorBuild < 3)      m_invCursorBuild = 9;                 // top row -> toggle
                 else if (m_invCursorBuild < 9) m_invCursorBuild -= 3;
+                else { m_invCursorPanel = INV_PANEL_MENUTAB;                          // toggle -> tabs
+                       AudioSystem::play(SfxId::UI_CLICK); return; }
             }
             if (navD) {
                 if (m_invCursorBuild >= 9)     m_invCursorBuild = 1;                 // toggle -> top mid
                 else if (m_invCursorBuild < 6) m_invCursorBuild += 3;
             }
-            if (navL  && m_invCursorBuild < 9 && (m_invCursorBuild % 3) > 0) m_invCursorBuild--;
+            if (navL && m_invCursorBuild < 9) {
+                if ((m_invCursorBuild % 3) > 0) m_invCursorBuild--;
+                // Left edge returns to the bag — the return leg of the backpack's right-edge cross.
+                else { m_invCursorPanel = INV_PANEL_BACKPACK; m_invCursorIndex = 0; return; }
+            }
             if (navR && m_invCursorBuild < 9 && (m_invCursorBuild % 3) < 2) m_invCursorBuild++;
             if (equipPressed) {
                 PlayerInventory& binv = m_inventories[m_localPlayerIndex];
@@ -486,10 +651,10 @@ void Engine::updateInventoryInteraction(f32 dt) {
             return;   // the generic slot handling below is for item panels
         }
 
-        // Journal: D-pad up/down walks the visible act's quest list, left/right flips the act tab.
-        // Read-only by design — there is nothing to activate, so nothing can be mis-pressed.
-        // Placed after the shoulder cycle (like the build panel) so L/R can still leave the panel.
-        if (m_invCursorPanel == INV_PANEL_JOURNAL) {
+        // Quest page: D-pad up/down walks the visible act's quest list, left/right flips the act
+        // tab. Read-only by design — there is nothing to activate, so nothing can be mis-pressed.
+        // Placed after the shoulder handler so L/R can still leave the page.
+        if (cursorDrives && questTabUp()) {
             // How many quests the visible act actually has. Derived from the table every frame
             // rather than cached: the row cursor is only ever meaningful against THIS count, and a
             // cached one would go stale the moment a quest is appended.
@@ -497,7 +662,14 @@ void Engine::updateInventoryInteraction(f32 dt) {
             for (u32 i = 0; i < Quest::COUNT; i++)
                 if (Quest::actOf(Quest::QUESTS[i].zoneFloor) == m_invJournalAct + 1) rows++;
 
-            if (navU && m_invCursorQuest > 0)        m_invCursorQuest--;
+            // Up off row 0 leaves for the tab strip, exactly as the item pages do — the quest log
+            // has no panel below the tabs to fall back on, so without this it was a page you could
+            // enter and not leave without a hotkey.
+            if (navU) {
+                if (m_invCursorQuest > 0) m_invCursorQuest--;
+                else { m_invCursorPanel = INV_PANEL_MENUTAB;
+                       AudioSystem::play(SfxId::UI_CLICK); return; }
+            }
             if (navD && m_invCursorQuest + 1 < rows) m_invCursorQuest++;
             // Flipping the act resets the row: a cursor left at row 4 on an act with two quests
             // would draw no detail pane at all and read as the journal being broken.
@@ -623,12 +795,27 @@ void Engine::updateInventoryInteraction(f32 dt) {
 
         // Left mouse pressed: detect double-click or begin potential drag
         if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT)) {
-            // The right column hosts EITHER the build grid or the journal, chosen by the active
-            // panel — the same branch the draw side takes. Routing the hit-test the same way is
-            // what stops a click meant for one being eaten by the other: their rects do not
-            // overlap at 16:9 but they graze at 4:3, and only one of them is ever on screen.
-            // Checked before the item hit-test so a click here can't also start a phantom drag.
-            if (m_invCursorPanel == INV_PANEL_JOURNAL) {
+            // THE PAGE TABS come first, before any page's own hit-test. They are drawn on top of
+            // every page, so they must be tested on top of every page too — and being able to
+            // click them is what makes the menu navigable at all for a mouse player, who has no
+            // shoulder buttons.
+            {
+                const InventoryUI::SlotHit mt = InventoryUI::hitTestMenuTabs(sw, sh, mx, my);
+                if (mt.panel == InventoryUI::SlotHit::MENU_TAB && mt.index < MENU_TAB_COUNT) {
+                    if (mt.index != m_menuTab) {
+                        // Go through the shared cycler rather than assigning: it carries the
+                        // stash-cursor parking rule, which a direct write here would miss.
+                        cycleMenuTab(static_cast<s8>(static_cast<s16>(mt.index) -
+                                                     static_cast<s16>(m_menuTab)));
+                    }
+                    return;
+                }
+            }
+
+            // The quest page owns the whole content area, so its hit-test runs instead of — never
+            // beside — the inventory page's. Checked before the item hit-test so a click here
+            // cannot also start a phantom drag on a slot that is not even on screen.
+            if (questTabUp()) {
                 const InventoryUI::SlotHit jr = InventoryUI::hitTestJournal(sw, sh, mx, my);
                 if (jr.panel == InventoryUI::SlotHit::JOURNAL_TAB &&
                     jr.index < InventoryUI::JOURNAL_TABS) {

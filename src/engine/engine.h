@@ -118,7 +118,6 @@ public:
     // straight into a state (host/join/single + load/new), skipping the menu. Sequences the same
     // start primitives the menu uses. No/invalid options leave the game at the normal menu.
     void applyLaunchOptions(const LaunchOptions& opt);
-    void applyQuestsDoneOption(const LaunchOptions& opt);  // --quests-done, shared by --zone and --town
 
 private:
     static constexpr f64 FIXED_DT            = 1.0 / 60.0;
@@ -577,7 +576,9 @@ private:
     SkillId        m_ringPassives[MAX_LOCAL_PLAYERS] = {};
     SkillId        m_glovesPassives[MAX_LOCAL_PLAYERS] = {};
     bool           m_inventoryOpenArr[MAX_LOCAL_PLAYERS] = {};
-    bool           m_characterScreenOpenArr[MAX_LOCAL_PLAYERS] = {};
+    // Which page of the tabbed menu each lane is on. Per-lane like m_inventoryOpen beside it:
+    // in couch co-op P1 can be reading quests while P2 re-gears.
+    u8             m_menuTabArr[MAX_LOCAL_PLAYERS] = {};
     // Pre-seeded to 0.6 rad so the model isn't front-facing on first open.
     f32            m_inspectYawArr[MAX_LOCAL_PLAYERS] = {0.6f, 0.6f};
     f32            m_hitMarkerTimers[MAX_LOCAL_PLAYERS] = {};
@@ -616,13 +617,50 @@ private:
     SkillId     m_weaponProc = SkillId::NONE;
     SkillId     m_ringPassive = SkillId::NONE;
     SkillId     m_glovesPassive = SkillId::NONE;  // FRENZY while legendary gloves equipped
+    // THE TABBED CHARACTER MENU (Diablo 2 style).
+    //
+    // m_inventoryOpen means "the menu is up" — it kept its name because ~40 call sites read it and
+    // the inventory is still the page it opens on. m_menuTab says WHICH page.
+    //
+    // m_menuTab is the SINGLE FACT for that. It replaced a second bool (m_characterScreenOpen)
+    // that had to agree with m_inventoryOpen at 17 sites: two flags describing one "which screen
+    // is up" is precisely the stored-twice shape this codebase has paid for over and over (the
+    // town portal flag, the trigger band vs arrival inset, the quest mask). The pages are pure
+    // views of it — see characterTabUp() / questTabUp() below.
     bool        m_inventoryOpen = false;
-    // Character inspect overlay: toggled by CHARACTER_SCREEN action (T or K / LB+Plus).
-    // Frees the mouse (like inventory) and freezes gameplay input. m_inspectYaw
-    // accumulates per-tick from mouse-X drag, right-stick X, and an idle auto-spin
-    // so the renderer can rotate the paper-doll model around the Y axis.
-    bool        m_characterScreenOpen = false;
+    static constexpr u8 MENU_TAB_INVENTORY = 0;
+    static constexpr u8 MENU_TAB_CHARACTER = 1;
+    static constexpr u8 MENU_TAB_QUESTS    = 2;
+    static constexpr u8 MENU_TAB_COUNT     = 3;
+    u8          m_menuTab = MENU_TAB_INVENTORY;
+
+    // The character sheet page. Every consumer of the old m_characterScreenOpen reads this, and
+    // the behaviour it gates is unchanged: it PAUSES the world in singleplayer, hard-freezes the
+    // autoplay bot, and renders the paper-doll FBO. Keying those on the TAB rather than on the
+    // menu as a whole is deliberate — flipping to Inventory must not start pausing, and flipping
+    // to Character must not stop.
+    bool characterTabUp() const { return m_inventoryOpen && m_menuTab == MENU_TAB_CHARACTER; }
+    // The quest log page. A reading page, like the stash: gameplay prompts stand down over it.
+    bool questTabUp()     const { return m_inventoryOpen && m_menuTab == MENU_TAB_QUESTS; }
+
+    // Open the menu on a given page / close it. ONE ritual instead of a per-site list: opening
+    // seeds the cursor input mode, frees the pointer and dismisses the tutorial; closing recaptures
+    // the pointer and drops any in-flight drag. Three hotkeys (Tab / C / J) and the tab bar all go
+    // through these, so a page added later cannot forget a step — the same argument
+    // worldClearLevelFlags makes for world state, applied to the menu.
+    void openMenu(u8 tab);
+    void closeMenu();
+    // Move `delta` pages around the tab bar (wrapping). The shoulder buttons and the keyboard's
+    // bracket keys both call it, so the two can never disagree about the order.
+    void cycleMenuTab(s8 delta);
     f32         m_inspectYaw = 0.6f;   // inspect-model rotation in radians (initial angle)
+    // Last mouse X sampled during a character-page drag-rotate; -1 = no drag in progress. Absolute
+    // positions, because the menu frees the pointer (relative-mode deltas are unavailable there).
+    s32         m_inspectDragX = -1;
+    // --menu <page>: the page to open on the first IN_GAME frame, then 0xFF forever. A dev door
+    // onto the menu SCREENS, which are otherwise uncapturable on a headless or unfocused display
+    // (the window-focus input gate zeroes synthetic keypresses).
+    u8          m_launchMenuPage = 0xFF;
     ViewmodelState  m_viewmodelState;
 
     // Death-screen mouse control. m_deathHover is the option the mouse is over on the SP
@@ -651,7 +689,7 @@ private:
     // walking and firing. Potion is intentionally NOT gated (matches inventory — you can
     // drink while a menu is open).
     bool gameplayInputFrozen() const {
-        return m_inventoryOpen || m_characterScreenOpen || m_menu.confirmQuit
+        return m_inventoryOpen || m_menu.confirmQuit
             || m_menu.optionsFromPause || m_menagerieOpen;
     }
 
@@ -659,7 +697,7 @@ private:
     // open — NOT while a hard-freeze UI (pause / character inspect / options / menagerie) is up.
     bool botMayAct() const {
         if (!m_autoplayActive || !m_autoplayControl.botInControl()) return false;
-        return !(m_characterScreenOpen || m_menu.confirmQuit || m_menu.optionsFromPause || m_menagerieOpen);
+        return !(characterTabUp() || m_menu.confirmQuit || m_menu.optionsFromPause || m_menagerieOpen);
     }
 
     // Networking
@@ -1486,6 +1524,7 @@ private:
     void zoneClearPad(u32 cx, u32 cz, u32 radius);
     void zoneOpenGate(Zone::Dir dir);
     Vec3 zoneGatePos(Zone::Dir dir) const;
+    void applyQuestsDoneOption(const LaunchOptions& opt);  // --quests-done, shared by --zone and --town
     const Entity* nearestZoneHostile() const;   // shared by the quest hunt and the post-acts roam
     Vec3 zoneReturnPos(const Zone::ZoneDef& def) const;
     Vec3 zoneArrivalPos(const Zone::ZoneDef& def, u8 fromFloor);
@@ -1672,6 +1711,14 @@ private:
 
     // renderHUD helpers — extracted contiguous blocks, called in original order
     void renderInventoryHUD(u32 sw, u32 sh);          // inventory screen branch
+    // The tabbed menu's shared chrome (backdrop + frame + tab strip), drawn before every page.
+    void renderMenuChrome(u32 sw, u32 sh);
+    // The quest log page. Thin: it resolves the LIVE clear-zone count (a property of the entity
+    // pool, not of saved progress) and hands the rest to HUD::drawQuestLog.
+    void renderQuestLog(u32 sw, u32 sh);
+    // The menu's synthetic/real mouse position in HUD coords, shared by every page's draw and the
+    // interaction handler so hover and click can never disagree about where the pointer is.
+    void menuPointer(u32 sw, u32 sh, s32& outX, s32& outY) const;
     // True while the inventory's item comparison is on screen (cursor on a non-empty backpack
     // cell): the skill bars + quickbar hide for that frame — the two tooltips land on top of them.
     bool inventoryComparisonActive(u32 sw, u32 sh) const;
@@ -1714,24 +1761,33 @@ private:
     // controller reaches it with no dedicated chord. Skipped by the cycle while the mode is off?
     // No: reachable always, so the mode TOGGLE itself is controller-reachable.
     static constexpr u8 INV_PANEL_BUILD       = 4;
-    // Quest journal — also IN the main cycle, so controller and Switch reach it exactly as they
-    // reach the build grid, with no dedicated chord. Appended rather than inserted: STASH moves up
-    // with it, which is free because STASH sits OUTSIDE the cycle (it is entered from the town
-    // stash chest) and its value is only ever "the next free panel id".
-    static constexpr u8 INV_PANEL_JOURNAL     = 5;
-    static constexpr u8 INV_PANEL_COUNT       = 6;   // main-inventory cycle length
+    // The quest journal is NOT a panel any more — it is the QUESTS page of the menu, reached by
+    // the tab strip / LB-RB / J. It used to sit in this cycle, which meant a controller player had
+    // to step through five item panels to read a quest; that is exactly the wart the tab bar
+    // exists to remove. The id is retired rather than reused so a stale saved cursor value cannot
+    // silently land on whatever took its number.
+    static constexpr u8 INV_PANEL_COUNT       = 5;   // inventory-page cursor cycle length
     // Stash-mode cursor panel — NOT part of the cycle above. While the stash is open the cursor lives
     // on either the stash grid (this) or the backpack (INV_PANEL_BACKPACK), so a controller/Switch can
     // navigate + transfer without a mouse. Value > CLASS_SKILL, so inventoryCursorToMouse handles it
-    // BEFORE its skill-bar branch.
+    // BEFORE its skill-bar branch. Kept at 6 even though the journal vacated 5: the value is
+    // arbitrary, and moving it would only churn every comparison that reads it.
     static constexpr u8 INV_PANEL_STASH       = 6;
+    // The PAGE TAB STRIP as a cursor position — also outside the cycle. Reached by pressing UP off
+    // the top of a page (backpack row 0, equipment slot 0, the build grid's toggle row, the quest
+    // list's first row); LEFT/RIGHT then switch page and DOWN drops back into it.
+    //
+    // This is what makes the strip reachable with WASD and the D-pad alone. It was previously
+    // reachable only by the shoulders, a page hotkey, or a mouse click — so on keyboard the tab
+    // bar was furniture you could see and not touch, which is exactly how it was reported.
+    static constexpr u8 INV_PANEL_MENUTAB     = 7;
 
     // Park the synthetic cursor on the D-pad-selected slot, so the gamepad drives the SAME hover
     // path the mouse does (items and skills alike) instead of needing its own.
     // Build-grid cursor position while m_invCursorPanel == INV_PANEL_BUILD: 0-8 = grid cells
     // (row*3+col), 9 = the mode-toggle row above the grid.
     u8 m_invCursorBuild = 0;
-    // Journal cursor while m_invCursorPanel == INV_PANEL_JOURNAL. The act tab is part of the
+    // Journal cursor while the menu is on its QUESTS page. The act tab is part of the
     // cursor, not of the quest data: which act you are LOOKING at is a UI position, and storing it
     // beside the row is what lets a tab flip reset the row in one place.
     // SHARED between couch lanes, deliberately matching m_invCursorBuild above rather than
@@ -1741,9 +1797,6 @@ private:
     // fixing, but as one change to both, not a silent inconsistency introduced here.
     u8 m_invCursorQuest = 0;    // selected row within the visible act's quest list
     u8 m_invJournalAct  = 0;    // 0 = ACT I, 1 = ACT II
-    // Where the J key came FROM, so pressing it again goes back there instead of dumping the
-    // player on the backpack. Only meaningful while the Journal is up.
-    u8 m_invPanelBeforeJournal = INV_PANEL_BACKPACK;
     void inventoryCursorToMouse(u32 sw, u32 sh, s32& mx, s32& my) const;
     // True when the inventory highlight + tooltip should follow the cursor (WASD/E or D-pad) rather
     // than the physical mouse. Split-screen P2 (gamepad-only) is always cursor; player 0 follows the

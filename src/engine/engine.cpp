@@ -1180,6 +1180,18 @@ void Engine::run() {
         // frame's poll — recovers ~16.7 ms per direction of self-inflicted latency (audit C-Q5).
         if (m_netRole != NetRole::NONE) Net::flush();
 
+        // Dev door (--menu <page>): open the character menu as soon as a world is up, then never
+        // again. Applied HERE rather than at each of applyLaunchOptions' six terminal branches —
+        // town, zone, source, arena, victory, plain start — because "do this once we are in a
+        // world" is one rule, and a rule needed at six sites gets missed at a seventh (this file
+        // has already paid for that shape with the world-flag clears).
+        if (m_launchMenuPage != 0xFF && m_gameState == GameState::IN_GAME) {
+            LOG_INFO("Launch: --menu opened the character menu on page %u",
+                     static_cast<u32>(m_launchMenuPage));
+            openMenu(m_launchMenuPage);
+            m_launchMenuPage = 0xFF;
+        }
+
         // Auto-screenshot (CLI --screenshot-interval): once IN_GAME, flag a capture every
         // m_shotInterval seconds. Set before render() so it is serviced (and saved) this frame.
         if (m_shotInterval > 0.0 && m_gameState == GameState::IN_GAME) {
@@ -1226,7 +1238,7 @@ void Engine::run() {
     X(m_ringPassive,      m_ringPassives)   \
     X(m_glovesPassive,    m_glovesPassives) \
     X(m_inventoryOpen,        m_inventoryOpenArr)      \
-    X(m_characterScreenOpen,  m_characterScreenOpenArr) \
+    X(m_menuTab,              m_menuTabArr)             \
     X(m_inspectYaw,           m_inspectYawArr)          \
     X(m_hitMarkerTimer,       m_hitMarkerTimers)        \
     X(m_stashOpen,            m_stashOpenArr)           \

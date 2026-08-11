@@ -1,6 +1,6 @@
 // engine_render_character.cpp — the character INSPECT screen (C key / LB+R3).
 //
-// Two halves, both driven from render() while m_characterScreenOpen is true:
+// Two halves, both driven from render() while the menu's CHARACTER page is up (characterTabUp()):
 //   1. renderInspectModelToFbo() — draws the player's class body mesh + equipped weapon/armor
 //      (via submitPlayerEquipment) into an offscreen FBO (m_inspectColorTex) using an orbit camera
 //      that spins with m_inspectYaw. Called once per frame BEFORE the 2D HUD pass; it binds its own
@@ -23,6 +23,7 @@
 #include "renderer/shader.h"
 #include "game/player.h"
 #include "game/item.h"
+#include "game/inventory_ui.h"   // menuFrameLayout — this page lays out inside the shared menu frame
 #include "game/weapon.h"
 #include "core/math.h"
 
@@ -183,18 +184,20 @@ void Engine::renderCharacterInspect(u32 sw, u32 sh) {
     const f32 fsw = (f32)sw, fsh = (f32)sh;
     const f32 uiScale = fsh / 720.0f; // matches the rest of the HUD's resolution scaling
 
-    // The default material's white texture, used as a solid-fill source for backdrop/panel rects.
+    // The default material's white texture, used as a solid-fill source for the panel rects.
     const Texture& whiteTex = MaterialSystem::get(0)->texture;
 
-    // --- Dark full-screen backdrop (dims the live world behind the screen) ---
-    drawTexturedQuad(m_unlitShader, sw, sh, 0.0f, 0.0f, fsw, fsh,
-                     whiteTex.handle, {0.03f, 0.03f, 0.05f, 0.86f}, false,
-                     m_inspectQuadVao, m_inspectQuadVbo);
+    // Everything on this page is laid out inside the menu frame's CONTENT area, which the shared
+    // chrome (HUD::drawMenuChrome) has already painted and bordered. This page used to draw its
+    // own full-screen backdrop; doing that now would paint over the tab strip and make the page
+    // unleavable by mouse.
+    const InventoryUI::MenuFrameRects mf = InventoryUI::menuFrameLayout(sw, sh);
 
-    // --- Model panel: a square on the left, vertically centered, with a subtle frame ---
-    f32 panel = fsh * 0.42f;                 // panel side length
-    f32 panelX = fsw * 0.08f;                // left margin
-    f32 panelY = (fsh - panel) * 0.5f;       // vertical center
+    // --- Model panel: a square on the left of the content area, vertically centred ---
+    f32 panel = mf.contentH * 0.80f;
+    if (panel > mf.contentW * 0.40f) panel = mf.contentW * 0.40f;   // never crowd the stats sheet
+    f32 panelX = mf.contentX + mf.contentW * 0.045f;
+    f32 panelY = mf.contentY + (mf.contentH - panel) * 0.5f;
     // Frame: a slightly larger dark rect behind the model for separation.
     f32 pad = 6.0f * uiScale;
     drawTexturedQuad(m_unlitShader, sw, sh, panelX - pad, panelY - pad,
@@ -233,11 +236,19 @@ void Engine::renderCharacterInspect(u32 sw, u32 sh) {
     // UPWARD on screen — see font.cpp), so the sheet starts HIGH and each row DECREMENTS y to read
     // top-to-bottom. Text scales via setUIScale (set by renderHUD before this call); integer font
     // sizes are 1=body, 2=header, 3=title.
-    f32 colX  = fsw * 0.50f;
-    f32 colX2 = fsw * 0.78f;   // value column anchor
-    f32 y     = fsh * 0.86f;   // top of the sheet (high y == near top of screen)
-    f32 lineH = 26.0f * uiScale;
-    f32 hdrH  = 36.0f * uiScale;
+    // Anchored to the frame's content box, not to the raw screen: the sheet used to start at
+    // 0.86*sh, which is above the frame's tab strip.
+    const f32 sheetX = mf.contentX + mf.contentW * 0.50f;
+    f32 colX  = sheetX;
+    f32 colX2 = sheetX + mf.contentW * 0.33f;   // value column anchor
+    f32 y     = mf.contentY + mf.contentH;      // top of the sheet (high y == near top)
+    // Row pitch is DERIVED from the space available rather than a fixed 26 px: the sheet is
+    // 3 headers + 15 rows + 3 spacers deep, which at the old constant ran past the frame's bottom
+    // edge and clipped the last row off. Clamped so it never stretches absurdly on a tall window.
+    const f32 rowsTall = 15.0f + 3.0f * 1.4f + 3.0f * 0.5f + 1.4f;   // rows + headers + gaps
+    f32 lineH = (mf.contentH - 10.0f * uiScale) / rowsTall;
+    if (lineH > 26.0f * uiScale) lineH = 26.0f * uiScale;
+    f32 hdrH  = lineH * 1.4f;
 
     const Vec3 headerCol = {0.95f, 0.85f, 0.45f};
     const Vec3 labelCol  = {0.75f, 0.78f, 0.85f};
@@ -292,8 +303,13 @@ void Engine::renderCharacterInspect(u32 sw, u32 sh) {
     std::snprintf(buf, sizeof(buf), "%.1f%%", manasteal);         row("Mana Steal", buf);
     std::snprintf(buf, sizeof(buf), "%.0f", manaPerKill);         row("Mana / Kill", buf);
 
-    // Footer hint near the bottom of the screen (low y == near bottom).
-    const char* footer = "Drag to rotate  -  C to close";
+    // Footer hint along the bottom of the content box. Names the LEFT-DRAG explicitly: the page
+    // no longer spins the model on bare pointer motion, so "drag" is now literal.
+    // "C" was wrong and inherited from the pre-quickbar days: C is QUICKBAR_SLOT_3 now, and the
+    // character screen is bound to T (with K as an alias). Naming a key that does something
+    // ELSE is the worst kind of hint.
+    const char* footer = "Hold left mouse to rotate  -  T or Esc to close";
     f32 fw = FontSystem::textWidth(footer, 1);
-    FontSystem::drawText(sw, sh, (fsw - fw) * 0.5f, fsh * 0.05f, footer, {0.6f, 0.62f, 0.68f}, 1);
+    FontSystem::drawText(sw, sh, mf.contentX + (mf.contentW - fw) * 0.5f,
+                         mf.contentY + 6.0f * uiScale, footer, {0.5f, 0.52f, 0.60f}, 1);
 }

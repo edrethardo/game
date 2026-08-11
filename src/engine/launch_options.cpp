@@ -66,6 +66,7 @@ void logUsage() {
     LOG_INFO("  --port <n>  --lan      host/join port; --lan skips UPnP");
     LOG_INFO("  --fullscreen           real fullscreen on the external widescreen monitor");
     LOG_INFO("  --screenshot-interval <s>  auto-save a 1080p screenshot every <s> seconds in-game");
+    LOG_INFO("  --menu <page>              open the character menu on inventory|character|quests (dev)");
     LOG_INFO("  --net-loss <0-90>      drop this %% of packets both directions (netcode stress rig)");
     LOG_INFO("  --net-latency <ms>     add one-way fake latency to every send (0-1000)");
     LOG_INFO("  --net-jitter <ms>      add per-packet [0,ms] jitter on top of latency (0-500)");
@@ -168,6 +169,18 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             // whether the overworld bot roams or ends its run.
             opt.questsDone = true;
             opt.active     = true;
+        } else if (ieq(a, "--menu")) {
+            // Named rather than numbered: "--menu 2" would silently follow the enum if a page were
+            // ever inserted, and the whole point of a screenshot door is that it names the screen.
+            const char* v = (i + 1 < argc) ? argv[++i] : "";
+            if      (ieq(v, "inventory")) opt.menuPage = 0;
+            else if (ieq(v, "character")) opt.menuPage = 1;
+            else if (ieq(v, "quests"))    opt.menuPage = 2;
+            else {
+                LOG_WARN("--menu expects inventory|character|quests (got '%s')", v);
+                opt.valid = false; break;
+            }
+            opt.active = true;
         } else if (ieq(a, "--victory")) {
             // Dev door onto the ENDING screens: builds the world, then rolls the standard ending's
             // credits on the spot. Exercises credits -> victory -> (autoplay) next-run continuation

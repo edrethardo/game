@@ -122,6 +122,13 @@ void Engine::equipEndgameLoadout(u8 lane) {
 void Engine::applyQuestsDoneOption(const LaunchOptions& opt) {
     if (!opt.questsDone) return;
     m_questMask[0] = (Quest::COUNT >= 64) ? ~0ull : ((1ull << Quest::COUNT) - 1ull);
+    // ...and FOLD it into the per-quest state, which is the authority. The mask alone is a raw
+    // write, exactly like the save loader's, and Quest::Progress is what the Journal, the givers
+    // and reevaluate() all read — so without this the door half-worked: ZoneRoute and the gate
+    // refusals saw a finished chain while the quest log showed ten LOCKED rows and "0 of 5
+    // complete". refreshQuestMask migrates the mask in before re-deriving, and migration only ever
+    // ADDS completions, so this cannot lose progress.
+    refreshQuestMask(0);
     LOG_INFO("Launch: --quests-done - both acts marked complete on lane 0 (%u quests)", Quest::COUNT);
 }
 
@@ -131,6 +138,9 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     // Display / capture modifiers apply whether or not a game-jump (host/join/load/new) was asked.
     if (opt.fullscreen) Window::enterFullscreenExternal();
     m_shotInterval = (f64)opt.shotInterval;
+    // Deferred to the first IN_GAME frame (Engine::run) — every game-jump branch below returns
+    // from a different place, and the menu can only open once a world exists.
+    m_launchMenuPage = opt.menuPage;
     if (opt.shotInterval > 0)
         LOG_INFO("Launch: auto-screenshot every %us -> screenshot_NNNN.png in the run dir", opt.shotInterval);
 

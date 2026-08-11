@@ -228,27 +228,35 @@ bool InventoryUI::skillSlotAt(const SkillBarRects& r, s32 mx, s32 my,
 // The journal occupies the same right-hand column the build grid uses, so the two never overlap:
 // only one panel is ever the active one. Geometry is expressed in the same 720p-relative uiScale
 // every other panel here uses.
+// The quest log fills the menu frame's CONTENT area rather than floating a fixed-size box in the
+// middle of the screen. That is the whole difference between the old panel and this page: the old
+// one was 520 logical px wide wherever the screen was, so it overlapped the equipment column on
+// the left and left the right third of the screen empty.
 InventoryUI::JournalRects InventoryUI::journalLayout(u32 sw, u32 sh) {
+    const MenuFrameRects m = menuFrameLayout(sw, sh);
     JournalRects r;
-    r.uiScale = static_cast<f32>(sh) / 720.0f;
+    r.uiScale = m.uiScale;
+    const f32 s = r.uiScale;
 
-    const f32 panelW = 520.0f * r.uiScale;
-    const f32 panelX = static_cast<f32>(sw) * 0.5f - panelW * 0.5f;
-    const f32 topY   = static_cast<f32>(sh) * 0.82f;
+    // Act tabs sit at the TOP of the content area, below the page tabs. Two strips of tabs would
+    // be confusing if they looked identical, so these are drawn narrower and lighter (see
+    // hud_journal.cpp) — page tabs are chrome, act tabs are content.
+    r.tabW   = 104.0f * s;
+    r.tabH   = 24.0f  * s;
+    r.tabGap = 6.0f   * s;
+    r.tabX   = m.contentX + 6.0f * s;
+    r.tabY   = m.contentY + m.contentH - r.tabH;
 
-    r.tabW   = 110.0f * r.uiScale;
-    r.tabH   = 24.0f  * r.uiScale;
-    r.tabGap = 8.0f   * r.uiScale;
-    r.tabX   = panelX;
-    r.tabY   = topY;
+    // Quest list: a fixed-ish left column wide enough for the longest authored name, capped at a
+    // third of the content so an ultrawide screen does not give the list half the page.
+    r.rowH     = 26.0f * s;
+    r.listX    = m.contentX + 6.0f * s;
+    r.listW    = (m.contentW * 0.34f < 340.0f * s) ? m.contentW * 0.34f : 340.0f * s;
+    r.listTopY = r.tabY - 14.0f * s;
 
-    r.rowH     = 22.0f * r.uiScale;
-    r.listX    = panelX;
-    r.listW    = 200.0f * r.uiScale;
-    r.listTopY = topY - r.tabH - 10.0f * r.uiScale;
-
-    r.detailX    = r.listX + r.listW + 16.0f * r.uiScale;
-    r.detailW    = panelW - r.listW - 16.0f * r.uiScale;
+    // Detail pane takes the rest, with a gutter for the divider rule drawn between them.
+    r.detailX    = r.listX + r.listW + 26.0f * s;
+    r.detailW    = (m.contentX + m.contentW) - r.detailX - 6.0f * s;
     r.detailTopY = r.listTopY;
     return r;
 }
@@ -280,4 +288,58 @@ InventoryUI::SlotHit InventoryUI::hitTestJournal(u32 sw, u32 sh, s32 mx, s32 my)
         }
     }
     return result;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The tabbed menu's frame + tab bar.
+//
+// Every page (Inventory / Character / Quests) is drawn inside ONE panel whose geometry lives here,
+// so the pages share a backdrop, a border and a tab strip rather than each inventing their own.
+// The inset is generous but not full-screen: a visible margin of dimmed world is what makes the
+// thing read as a panel laid over the game instead of a new screen the game switched to.
+// ---------------------------------------------------------------------------------------------
+InventoryUI::MenuFrameRects InventoryUI::menuFrameLayout(u32 sw, u32 sh) {
+    MenuFrameRects r;
+    const f32 fsw = static_cast<f32>(sw), fsh = static_cast<f32>(sh);
+    r.uiScale = fsh / 720.0f;
+
+    // Horizontal inset is a FRACTION, vertical is nearly the full height: the inventory page's
+    // existing panels (equipment column, backpack grid, build grid, skill bars) already span from
+    // ~0.04h to ~0.9h, and a frame that cropped them would have to move every one of them.
+    r.x = fsw * 0.030f;
+    r.w = fsw - r.x * 2.0f;
+    r.y = fsh * 0.025f;
+    r.h = fsh - r.y * 2.0f;
+
+    // Tab strip along the top INSIDE the frame.
+    r.tabH   = 30.0f * r.uiScale;
+    r.tabW   = 132.0f * r.uiScale;
+    r.tabGap = 4.0f * r.uiScale;
+    r.tabX   = r.x + 14.0f * r.uiScale;
+    r.tabY   = r.y + r.h - r.tabH - 8.0f * r.uiScale;
+
+    // Content is everything below the strip, with a small gutter so a page's own text never
+    // touches the tabs or the border.
+    const f32 pad = 12.0f * r.uiScale;
+    r.contentX = r.x + pad;
+    r.contentW = r.w - pad * 2.0f;
+    r.contentY = r.y + pad;
+    r.contentH = (r.tabY - 6.0f * r.uiScale) - r.contentY;
+    return r;
+}
+
+InventoryUI::SlotHit InventoryUI::hitTestMenuTabs(u32 sw, u32 sh, s32 mx, s32 my) {
+    const MenuFrameRects r = menuFrameLayout(sw, sh);
+    SlotHit hit;
+    const f32 fx = static_cast<f32>(mx), fy = static_cast<f32>(my);
+    if (fy < r.tabY || fy >= r.tabY + r.tabH) return hit;
+    for (u32 t = 0; t < MENU_TABS; t++) {
+        const f32 x0 = r.tabX + (r.tabW + r.tabGap) * static_cast<f32>(t);
+        if (fx >= x0 && fx < x0 + r.tabW) {
+            hit.panel = SlotHit::MENU_TAB;
+            hit.index = static_cast<u8>(t);
+            return hit;
+        }
+    }
+    return hit;
 }

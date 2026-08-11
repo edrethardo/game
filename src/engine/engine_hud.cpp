@@ -75,7 +75,7 @@ extern bool s_firstKillDropGiven;
 bool Engine::inventoryComparisonActive(u32 sw, u32 sh) const {
     // Same priority chain as renderHUD's branch selection: if the pause-quit overlay or the
     // character-inspect screen is covering the inventory, no comparison is visible.
-    if (m_menu.confirmQuit || m_characterScreenOpen || !m_inventoryOpen) return false;
+    if (m_menu.confirmQuit || !m_inventoryOpen || m_menuTab != MENU_TAB_INVENTORY) return false;
 
     s32 mx, my;
     Input::getMousePosition(mx, my);
@@ -96,19 +96,45 @@ bool Engine::inventoryComparisonActive(u32 sw, u32 sh) const {
 // renderInventoryHUD — the entire m_inventoryOpen branch:
 // controller cursor, drawInventoryScreen, drag icon, button hints, equip tutorial.
 // ---------------------------------------------------------------------------
-void Engine::renderInventoryHUD(u32 sw, u32 sh) {
-    // Inventory screen replaces normal HUD elements
-    s32 invMX, invMY;
-    Input::getMousePosition(invMX, invMY);
-    invMY = static_cast<s32>(sh) - invMY; // flip to HUD coords
+// menuPointer — where the menu thinks the pointer is, in HUD coords (origin bottom-left).
+//
+// In cursor mode (WASD/E or the D-pad drove the selection — see inventoryUsesCursor) the synthetic
+// cursor is driven from the SELECTION, so hover tooltips follow the controller with no second code
+// path; in mouse mode the real pointer stands. Extracted so all three pages and the interaction
+// handler read one answer — it was already duplicated between the render and the handler once.
+void Engine::menuPointer(u32 sw, u32 sh, s32& outX, s32& outY) const {
+    Input::getMousePosition(outX, outY);
+    outY = static_cast<s32>(sh) - outY;           // flip to HUD coords
+    if (inventoryUsesCursor()) inventoryCursorToMouse(sw, sh, outX, outY);
+}
 
-    // In cursor mode (WASD/E or the D-pad drove the selection — see inventoryUsesCursor), drive the
-    // synthetic cursor from the selection instead of the physical mouse, so the hover tooltip (items
-    // AND skills) follows it with no second code path. In mouse mode the real pointer stays. Shared
-    // with updateInventoryInteraction; this used to be a second copy of the same math.
-    if (inventoryUsesCursor()) {
-        inventoryCursorToMouse(sw, sh, invMX, invMY);
-    }
+// renderMenuChrome — backdrop + frame + tab strip, drawn before whichever page is up.
+void Engine::renderMenuChrome(u32 sw, u32 sh) {
+    s32 mx, my;
+    menuPointer(sw, sh, mx, my);
+    // The strip shows the cursor only when the CURSOR is what is driving — in mouse mode the
+    // pointer speaks for itself and a second selection ring would be two cursors on one screen.
+    const bool cursorOnTabs = inventoryUsesCursor() && m_invCursorPanel == INV_PANEL_MENUTAB;
+    HUD::drawMenuChrome(sw, sh, m_menuTab, Input::activeDeviceIsGamepad(), cursorOnTabs, mx, my);
+}
+
+// renderQuestLog — the QUESTS page.
+void Engine::renderQuestLog(u32 sw, u32 sh) {
+    s32 mx, my;
+    menuPointer(sw, sh, mx, my);
+    // The CLEAR_ZONE count is a property of the LIVE entity pool, not of saved progress, so it is
+    // passed in rather than stored — the same number the completion poll reads, so what the player
+    // sees and what finishes the quest can never be two different numbers. 0xFF = not standing in
+    // a quest zone, so there is no live row to show.
+    const u8 liveIdx = m_level.inZone ? Quest::indexForZone(m_level.zoneFloor) : 0xFF;
+    HUD::drawQuestLog(sw, sh, m_questProgress[m_localPlayerIndex],
+                      m_invCursorQuest, m_invJournalAct,
+                      liveIdx, zoneHostilesAlive(), m_zoneHostilesAtEntry, mx, my);
+}
+
+void Engine::renderInventoryHUD(u32 sw, u32 sh) {
+    s32 invMX, invMY;
+    menuPointer(sw, sh, invMX, invMY);
 
     // --- Skill bars ---------------------------------------------------------------------------
     // Drawn BEFORE drawInventoryScreen on purpose. HUD primitives are batched in submission order,
@@ -145,22 +171,13 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
                               selSlot, selEquip, invMX, invMY,
                               /*drawEquipment=*/!m_stashOpen);
 
-    // The right column hosts EITHER the Auto Loot & Equip build grid or the quest Journal — one
-    // panel at a time, chosen by which one the cursor is on (the mouse hit-test branches the same
-    // way). The stash panel would overlap both, so neither draws in stash mode.
+    // The right column hosts the Auto Loot & Equip build grid. The quest Journal used to share
+    // this space and be chosen by which panel the cursor was on — it is a PAGE of the menu now,
+    // which is what stops it from being a dark box overlapping the equipment column. The stash
+    // panel would overlap the grid, so it does not draw in stash mode.
     if (!m_stashOpen) {
-        if (m_invCursorPanel == INV_PANEL_JOURNAL) {
-            // The CLEAR_ZONE count is a property of the live entity pool, not of saved progress, so
-            // it is passed in rather than stored. 0xFF = not standing in a quest zone -> no live row.
-            const u8 liveIdx = m_level.inZone ? Quest::indexForZone(m_level.zoneFloor) : 0xFF;
-            HUD::drawJournalPanel(sw, sh, m_questProgress[m_localPlayerIndex],
-                                  m_invCursorQuest, m_invJournalAct,
-                                  liveIdx, zoneHostilesAlive(), m_zoneHostilesAtEntry,
-                                  invMX, invMY);
-        } else {
-            HUD::drawBuildGrid(sw, sh, m_inventories[m_localPlayerIndex].autoMode,
-                               m_inventories[m_localPlayerIndex].buildCell, invMX, invMY);
-        }
+        HUD::drawBuildGrid(sw, sh, m_inventories[m_localPlayerIndex].autoMode,
+                           m_inventories[m_localPlayerIndex].buildCell, invMX, invMY);
     }
 
     // Stash mode: the gold panel paints OVER the equipment side (its interactions are gated off
@@ -822,13 +839,22 @@ void Engine::renderHUD(u32 sw, u32 sh) {
     if (m_menu.confirmQuit) {
         // Paused: hide the entire game HUD (and inventory). Only the pause overlay
         // below is drawn, so the screen looks unremarkable at a glance.
-    } else if (m_characterScreenOpen) {
-        // Character-inspect overlay: live rotatable armored model (left) + grouped stats sheet
-        // (right). The 3D model was rendered into m_inspectColorTex earlier in render(); this
-        // composites it and draws the stat text. Takes priority over the inventory branch.
-        renderCharacterInspect(sw, sh);
     } else if (m_inventoryOpen) {
-        renderInventoryHUD(sw, sh);
+        // THE TABBED MENU. One backdrop + frame + tab bar for every page (so the pages cannot drift
+        // apart visually), then the page itself. Before this the inventory drew with NO backdrop at
+        // all — the live dungeon showed straight through the item grid and the quest text, which is
+        // most of why the screens read as unfinished.
+        renderMenuChrome(sw, sh);
+        if (m_menuTab == MENU_TAB_CHARACTER) {
+            // Live rotatable armored model (left) + grouped stats sheet (right). The 3D model was
+            // rendered into m_inspectColorTex earlier in render(); this composites it and draws
+            // the stat text.
+            renderCharacterInspect(sw, sh);
+        } else if (m_menuTab == MENU_TAB_QUESTS) {
+            renderQuestLog(sw, sh);
+        } else {
+            renderInventoryHUD(sw, sh);
+        }
     } else {
         Vec3 crossColor = (m_localPlayer.damageFlashTimer > 0.0f)
                         ? Vec3{1.0f, 0.3f, 0.3f}
@@ -1204,34 +1230,32 @@ void Engine::renderHUD(u32 sw, u32 sh) {
 
     // Enemy health bar at the top of the screen (Diablo 2 style). Also suppressed while paused —
     // see the note below on renderTutorials; the same gap let this bleed through too.
-    if (!m_characterScreenOpen && !m_menu.confirmQuit)
+    if (!m_inventoryOpen && !m_menu.confirmQuit)
         renderTargetBar(sw, sh);
 
-    // Tutorial tooltips are suppressed on the character-inspect screen so they don't draw over the
-    // stats sheet (the inspect overlay owns the whole screen while open), AND while paused: they
-    // sit at fixed y ~= 0.62-0.72*sh, horizontally centered — the same screen region as the PAUSED
-    // title and option rows (also centered). The pause branch above claims "only the pause overlay
-    // is drawn, so the screen looks unremarkable at a glance", but these two calls were gated only
-    // on !m_characterScreenOpen, an unrelated flag, so a live controls/shield/dodge/pickup tooltip
-    // kept rendering through the pause overlay whenever one happened to be showing when ESC was hit.
+    // Tutorial tooltips are suppressed while the MENU is up, and while paused. They sit at fixed
+    // y ~= 0.62-0.72*sh, horizontally centered — the same screen region as the PAUSED title and
+    // option rows, and squarely on top of the menu's own content. This tail runs AFTER the menu
+    // branch, so a live prompt paints over whatever the menu drew: the "Block" label and its Ctrl
+    // glyph landed on the quest narration and covered the giver line (measured).
     //
-    // ...and they are suppressed over a READING panel for the same reason. This tail runs AFTER the
-    // inventory branch, so a live prompt paints on top of whatever the inventory drew: the "Block"
-    // label at 0.62*sh and its Ctrl glyph land squarely on the Journal's narration and cover the
-    // giver line (measured). It does the same over the stash. Over a grid of item slots that is
-    // merely untidy — over a block of PROSE it hides the one thing the panel exists to show. The
-    // fix belongs here rather than in the draw order: a gameplay prompt is meant to be visible
-    // during play, and a full-screen inventory panel is the exception, so the exception states
-    // itself at the gate instead of being implied by who happens to submit last.
-    const bool readingPanelUp = m_inventoryOpen &&
-                                (m_stashOpen || m_invCursorPanel == INV_PANEL_JOURNAL);
-    if (!m_characterScreenOpen && !m_menu.confirmQuit && !readingPanelUp)
+    // The gate is now the whole menu rather than a hand-listed set of "reading" panels. That list
+    // was the bug's own shape in miniature — it named the stash and the journal, so the character
+    // sheet (a page of prose and numbers, every bit as coverable) was never protected, and any page
+    // added later would have had to remember to add itself. A gameplay prompt is meant to be
+    // visible during play; a full-screen menu is the exception, and the exception states itself
+    // once at the gate instead of being re-derived per page.
+    if (!m_inventoryOpen && !m_menu.confirmQuit)
         renderTutorials(sw, sh);
 
     // Quickbar — always visible at bottom of screen, EXCEPT while the inventory's item comparison
     // is up: the side-by-side tooltips land on the bottom action cluster, so the bar hides for
     // that frame just like the skill bars do (see inventoryComparisonActive).
-    if (!inventoryComparisonActive(sw, sh)) {
+    // ...and hidden on the menu's CHARACTER and QUESTS pages, where it covers their footer hints
+    // and nothing on those pages can use it. The INVENTORY page keeps it: assigning quickbar slots
+    // is done from there, so the bar is part of that page's job.
+    if (!inventoryComparisonActive(sw, sh) &&
+        !(m_inventoryOpen && m_menuTab != MENU_TAB_INVENTORY)) {
         f32 cdPct = 0.0f;
         WeaponState& ws = m_players[activeNetSlot()].weaponState; // local player's net slot
         // Get cooldown percentage for active quickbar weapon
@@ -1375,8 +1399,10 @@ void Engine::renderHUD(u32 sw, u32 sh) {
         }
     }
 
-    // Chat log — left side of screen, above the quickbar (scaled)
-    {
+    // Chat log — left side of screen, above the quickbar (scaled). Suppressed under the menu for
+    // the same reason the tutorial prompts are: it is a fading gameplay feed and it lands squarely
+    // on the character page's paper-doll and the quest log's list column.
+    if (!m_inventoryOpen) {
         f32 cs = static_cast<f32>(sh) / 720.0f;
         f32 chatX = 15.0f * cs;
         f32 chatY = 100.0f * cs; // above status icons and quickbar

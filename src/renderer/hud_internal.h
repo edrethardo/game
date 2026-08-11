@@ -13,5 +13,11 @@ void pushLine(f32 x0, f32 y0, f32 x1, f32 y1, Vec3 color);
 // Push a 2D quad outline (4 lines) into the current HUD vertex batch.
 void pushQuad(f32 x0, f32 y0, f32 x1, f32 y1, Vec3 color);
 
+// Fill an axis-aligned rect by scanlines. Every panel in the HUD was hand-rolling this same
+// `for (f32 y = y0; y < y1; y += 1.0f) pushLine(...)` loop — six copies, one of which walked the
+// rect in the wrong direction on a flipped input and drew nothing. Rects are normalised here, so
+// a caller may pass its corners in either order.
+void fillRect(f32 x0, f32 y0, f32 x1, f32 y1, Vec3 color);
+
 // Upload and draw all batched HUD lines, then reset the batch.
 void flushHUD();

@@ -57,6 +57,7 @@ add_executable(DungeonEngine
     renderer/hud_skill_bar.cpp
     renderer/hud_inventory.cpp
     renderer/hud_journal.cpp
+    renderer/hud_menu_frame.cpp
     renderer/hud_portraits.cpp
     renderer/minimap.cpp
     renderer/particles.cpp

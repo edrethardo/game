@@ -319,13 +319,14 @@ void Engine::update(f32 dt) {
         Input::setRelativeMouseMode(true);
         return;
     }
-    // Character inspect: same rule — ESC closes the screen instead of stacking the pause menu
-    // on top of it. (B already closes it via the MENU_BACK check next to its toggle; this is
-    // the ESC half, which the pause handler below would otherwise swallow.)
-    if (m_gameState == GameState::IN_GAME && m_characterScreenOpen &&
+    // Character page: same rule — ESC closes the menu instead of stacking the pause menu on top
+    // of it. (B already closes it via the MENU_BACK check next to its toggle; this is the ESC
+    // half, which the pause handler below would otherwise swallow.) The inventory page has its
+    // own ESC handler above; this one exists because the character page used to be a separate
+    // screen and ESC must keep closing it from there too.
+    if (m_gameState == GameState::IN_GAME && characterTabUp() &&
         Input::isKeyPressed(SDL_SCANCODE_ESCAPE)) {
-        m_characterScreenOpen = false;
-        Input::setRelativeMouseMode(!m_inventoryOpen);
+        closeMenu();
         return;
     }
 
@@ -805,7 +806,7 @@ void Engine::update(f32 dt) {
         // at their stats. The inspect-model rotation lives in gameUpdate (already run above) so
         // it keeps responding. MP never pauses — remote peers can't be held hostage by one
         // player's screen (mirrors the m_menu.confirmQuit pause policy).
-        if (m_netRole != NetRole::NONE || !m_characterScreenOpen) {
+        if (m_netRole != NetRole::NONE || !characterTabUp()) {
             tickSharedSystems(dt);
         }
         // Arena PvP: last damage source (shared projectiles) has run — close the registry.
@@ -2136,36 +2137,16 @@ void Engine::gameUpdate(f32 dt) {
     // co-op behavior (a shared session can't freeze for one player); inventory is simply not
     // a "safe" moment in split-screen. Mouse capture is toggled only for P0, the mouse owner
     // — otherwise P2 (controller-only) opening their inventory would release P1's mouse-look.
+    // Tab always opens on the INVENTORY page — deterministic, so the key you press tells you where
+    // you land. Tab again closes from any page, which is what a player expects from the key that
+    // opened it. (C and J are the same shape for their own pages.)
     if (Input::isActionPressed(GameAction::INVENTORY)) {
-        m_inventoryOpen = !m_inventoryOpen;
-        if (m_localPlayerIndex == 0) Input::setRelativeMouseMode(!m_inventoryOpen);
+        if (m_inventoryOpen) closeMenu();
+        else                 openMenu(MENU_TAB_INVENTORY);
         AudioSystem::play(SfxId::UI_CLICK);
-        if (m_inventoryOpen) {
-            m_inventoryOpenedOnce = true; // dismiss "Open Inventory" tooltip
-            // Seed the input mode by whichever device just opened the screen: a controller opens in
-            // cursor mode (highlight + tooltip showing), a keyboard/mouse in mouse mode. Either can
-            // switch by using the other input (updateInventoryInteraction's last-input-wins). Reset
-            // the mouse-motion baseline so the first frame doesn't read a phantom move. Player-0 only:
-            // the flag is the keyboard+mouse lane's; a split-screen P2 (always cursor) must not touch it.
-            if (m_localPlayerIndex == 0) {
-                // Seed from THIS lane's device, not the global one: in couch co-op the global
-                // flips to Gamepad the moment P2 touches a pad, which would open P1's inventory in
-                // cursor mode and make P1's mouse double-click inert.
-                m_invCursorActive = Input::laneDeviceIsGamepad(m_localPlayerIndex);
-                m_invLastMouseX = -1;
-                m_invLastMouseY = -1;
-            }
-            // Show equip tutorial on first inventory open after first pickup
-            if (m_firstPickupTooltipShown && !m_equipTooltipShown)
-                m_equipTooltipShown = true;
-        }
-        // Reset drag/click state when toggling inventory
-        m_dragState = {};
-        m_dblClickState = {};
     }
     if (Input::isActionPressed(GameAction::MENU_BACK) && m_inventoryOpen) {
-        m_inventoryOpen = false;
-        Input::setRelativeMouseMode(true);
+        closeMenu();
     }
     // Stash rides the inventory screen: whichever path closed the inventory (ESC, B, Tab,
     // respawn, drop-all) also closes the stash — and closing flushes stash.dat (atomic,
@@ -2178,34 +2159,52 @@ void Engine::gameUpdate(f32 dt) {
         if (m_invCursorPanel == INV_PANEL_STASH) { m_invCursorPanel = INV_PANEL_BACKPACK; m_invCursorIndex = 0; }
     }
 
-    // Toggle character inspect screen (C / LB+Plus). Freezes gameplay input via
-    // gameplayInputFrozen(). Unlike the inventory (which frees the cursor for slot
-    // clicks), the inspect screen has no clickable UI and instead uses mouse-drag to
-    // rotate the model, so it KEEPS the cursor captured (relative mode ON) while open.
-    // Closing restores relative mode unless the inventory is open (which wants it free).
+    // CHARACTER_SCREEN (C / LB+Plus) jumps straight to the character PAGE of the menu, opening
+    // the menu if it was closed and closing it if that page was already up. A direct hotkey to a
+    // page, exactly as J is for the quest log — the tab bar is the discoverable route, and these
+    // are the shortcuts for players who already know where they are going.
+    //
+    // NOTE the cursor rule changed with the tab bar: the menu now always FREES the mouse, because
+    // the tabs are clickable on every page. The inspect model is rotated by LEFT-BUTTON DRAG
+    // instead of by relative-mode delta (see the rotation block below), which is what the screen's
+    // own "Drag to rotate" footer always claimed.
     if (Input::isActionPressed(GameAction::CHARACTER_SCREEN)) {
-        m_characterScreenOpen = !m_characterScreenOpen;
-        if (m_localPlayerIndex == 0)
-            Input::setRelativeMouseMode(m_characterScreenOpen || !m_inventoryOpen);
+        if (characterTabUp()) closeMenu();
+        else                  openMenu(MENU_TAB_CHARACTER);
         AudioSystem::play(SfxId::UI_CONFIRM);
     }
-    if (Input::isActionPressed(GameAction::MENU_BACK) && m_characterScreenOpen) {
-        m_characterScreenOpen = false;
-        if (m_localPlayerIndex == 0 && !m_inventoryOpen)
-            Input::setRelativeMouseMode(true);
+    if (Input::isActionPressed(GameAction::MENU_BACK) && characterTabUp()) {
+        closeMenu();
     }
-    if (m_characterScreenOpen) {
-        // Rotate the inspect model from mouse-X drag (relative-mode delta) + right-stick X.
-        // The gentle idle auto-spin only applies when the player ISN'T actively rotating,
-        // so manual input always wins and the model stops where you leave it.
-        s32 mdx = 0, mdy = 0;
-        // Mouse is a single global device — gate it to lane 0 (P1), like the camera look and quickbar
-        // wheel do, or P1's mouse drag spins P2's inspect model in couch co-op. P2 rotates via stick.
-        if (Input::getActivePlayer() == 0) Input::getMouseDelta(mdx, mdy);
-        f32 stick  = Input::getStickX(true);                          // right-stick X (deadzone applied)
-        f32 manual = static_cast<f32>(mdx) * 0.01f + stick * 0.04f;
+    if (characterTabUp()) {
+        // Rotate the inspect model by a HELD LEFT-BUTTON DRAG + right-stick X. The gentle idle
+        // auto-spin only applies when the player is not actively rotating, so manual input always
+        // wins and the model stops where you leave it.
+        //
+        // It reads an ABSOLUTE-position delta rather than relative-mode delta because the tab bar
+        // made the pointer free on this page: relative mode is off, so getMouseDelta reports
+        // nothing here. Requiring the button also stops the model spinning while the player is
+        // merely moving the pointer toward a tab — with the old always-on read, every trip to the
+        // tab strip would have whipped the model around on the way.
+        f32 dragDX = 0.0f;
+        // Mouse is a single global device — gate it to lane 0 (P1), like the camera look and the
+        // quickbar wheel do, or P1's drag spins P2's model in couch co-op. P2 rotates via stick.
+        if (Input::getActivePlayer() == 0 && Input::isMouseButtonDown(SDL_BUTTON_LEFT)) {
+            s32 mxNow = 0, myNow = 0;
+            Input::getMousePosition(mxNow, myNow);
+            // -1 is the "no sample yet" sentinel the inventory's own mouse tracking uses, and it
+            // is what stops the first frame of a drag reading a full-screen jump as one delta.
+            if (m_inspectDragX >= 0) dragDX = static_cast<f32>(mxNow - m_inspectDragX);
+            m_inspectDragX = mxNow;
+        } else {
+            m_inspectDragX = -1;
+        }
+        const f32 stick  = Input::getStickX(true);              // right-stick X (deadzone applied)
+        const f32 manual = dragDX * 0.01f + stick * 0.04f;
         m_inspectYaw += manual;
-        if (mdx == 0 && stick == 0.0f) m_inspectYaw += 0.0025f;       // idle showcase spin only
+        if (dragDX == 0.0f && stick == 0.0f) m_inspectYaw += 0.0025f;   // idle showcase spin only
+    } else {
+        m_inspectDragX = -1;   // leaving the page must not leave a stale drag anchor behind
     }
 
     updateInventoryInteraction(dt);
