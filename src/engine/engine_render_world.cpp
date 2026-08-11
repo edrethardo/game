@@ -1047,6 +1047,34 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
         drawPrompt(doorStr, {0.3f, 1.0f, 0.4f}, static_cast<f32>(sh) * 0.4f);
     }
 
+    // ZONE GATES — a cave mouth, a stone circle, the Hellgate, a graveyard gate, a tube entrance,
+    // a service door, and the way back out of each. Modelled on the floor exit directly above:
+    // same green, same screen height, same "Hold -" treatment when loot is competing, because to
+    // the player these ARE the overworld's exits — the thing you walk into to leave one place for
+    // another. They had NO prompt at all: you walked up to an act's finale and nothing said it was
+    // a door, let alone where it went.
+    //
+    // The label names the DESTINATION, read from the same field enterZoneGate acts on
+    // (item.itemLevel), so what the prompt promises and what the button does cannot diverge.
+    if (st.zoneGateIdx >= 0 && m_gameState == GameState::IN_GAME) {
+        const WorldItem& g = m_worldItems.items[static_cast<u32>(st.zoneGateIdx)];
+        const char* dest = Zone::nameOf(static_cast<u8>(g.item.itemLevel));
+        char gateStr[80];
+        // An unnamed destination is a data error (a gate pointing at a floor no ZoneDef claims);
+        // say something true rather than printing a sentinel byte at the player.
+        std::snprintf(gateStr, sizeof(gateStr), dest ? "Enter %s" : "Enter", dest ? dest : "");
+        drawPrompt(gateStr, {0.3f, 1.0f, 0.4f}, static_cast<f32>(sh) * 0.4f);
+    }
+
+    // The two other overworld fixtures were equally silent. A waypoint you cannot tell is
+    // interactable is a stone, and an un-aligned Cairn Stone is the quest's whole mechanic.
+    if (st.waypointIdx >= 0 && st.itemIdx < 0 && m_gameState == GameState::IN_GAME) {
+        drawPrompt("Waypoint", {0.45f, 0.85f, 1.0f}, static_cast<f32>(sh) * 0.45f);
+    }
+    if (st.cairnIdx >= 0 && st.itemIdx < 0 && m_gameState == GameState::IN_GAME) {
+        drawPrompt("Align the Stone", {0.85f, 0.75f, 1.0f}, static_cast<f32>(sh) * 0.45f);
+    }
+
     // The post-Engine exit portal — the run's ending, so the label says so. (The Source ENTRY
     // portal deliberately has no prompt: it's a secret. This one must be found by everyone.)
     if (st.nearExitPortal && m_gameState == GameState::IN_GAME) {

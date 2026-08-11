@@ -301,6 +301,13 @@ Vec3 Engine::buildZoneLevel(const Zone::ZoneDef& def) {
         const Vec3 c = zoneRoomCentre(gen, zoneAnchorRoom(gen, zoneSeed, POI_FRAC_X, POI_FRAC_Z));
         m_zonePoiPos = c;
         zoneClearPad(static_cast<u32>(c.x), static_cast<u32>(c.z), 2);
+        // ...and where you LAND when you come back out through it (zoneArrivalPos). The same
+        // second pad the return gate carves for its own arrival, and for the same reason: the
+        // mouth's pad reaches exactly ARRIVAL_BACKOFF, so the landing sits on its boundary cell
+        // and one grid rounding away from being inside rock. Cleared HERE, in the builder, because
+        // spawnZoneContents runs after LevelMeshSystem::buildAll — ground opened there behaves as
+        // floor while still RENDERING as rock.
+        zoneClearPad(static_cast<u32>(c.x), static_cast<u32>(c.z + ARRIVAL_BACKOFF), 2);
     }
     // THE CAIRN STONES ride room centres for the same reason the waypoint and the POI mouth do:
     // every layout style guarantees a room centre open and connected, while a fixture stamped at a
@@ -413,6 +420,22 @@ Vec3 Engine::zoneArrivalPos(const Zone::ZoneDef& def, u8 fromFloor) {
     if (fromFloor == Zone::TOWN_FLOOR) {
         for (u8 d = 0; d < static_cast<u8>(Zone::Dir::COUNT); d++)
             if (def.neighbour[d] == Zone::TOWN_FLOOR) return zoneGatePos(static_cast<Zone::Dir>(d));
+    }
+
+    // COMING BACK OUT OF AN INTERIOR — arrive at the doorway you used, not in the middle of the
+    // zone. An interior (the Den, TristRAM, the Graveyard, Bank Station, the Hellgate) is reached
+    // by a POI mouth and has no shared border with its parent, so arrivalEdge above cannot answer;
+    // the fallback below then dropped the player at the parent's own return-gate area, which for a
+    // road zone is its CENTRE-south. Walk into the Den at the top-left of the Blood Buffer, walk
+    // out, and you were standing in the middle of the field with the mouth 25 m behind you —
+    // travel that reads as a teleport rather than as stepping back through a door.
+    //
+    // m_zonePoiPos is the room centre buildZoneLevel just cleared for that mouth, and it is the
+    // SAME value spawnZoneContents spawns the gate on — so the spot you land on and the door you
+    // land beside can never be two different places. buildZoneLevel has already run by the time
+    // enterZone asks for an arrival, which is what makes reading it here legal.
+    if (fromFloor != 0 && def.poiFloor == fromFloor) {
+        return { m_zonePoiPos.x, 0.0f, m_zonePoiPos.z + ARRIVAL_BACKOFF };
     }
     const f32 size = static_cast<f32>(def.gridSize);
     // Portal arrival (no shared border to come through): stand just outside the return gate rather

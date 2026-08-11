@@ -2445,7 +2445,17 @@ void Engine::updatePlayerPickup(f32 dt) {
     // item always wins a tap; a hold reaches past it to the shrine, then the exit.
     // The exit and The Source portal are one priority class: both are "leave the floor", both are
     // outranked by loot, and both are reachable by holding.
-    const bool hasExitTarget = st.nearExit || st.nearPortal || st.nearExitPortal || st.nearTownPortal;
+    // A ZONE GATE is an EXIT, not an item. It is the overworld's floor door — the thing you walk
+    // into to leave one world for another — so it takes the exit's rules: LOWEST priority, yielding
+    // to loot on a tap and reachable by a deliberate HOLD.
+    //
+    // It rode the ITEM class before, and that was a real bug rather than a stylistic difference:
+    // the gate branch fired on `wantItem` with no `st.itemIdx < 0` guard, so a gate STOLE the tap
+    // from loot lying in its mouth — you could not pick up a drop at the Den's entrance without
+    // being teleported into the Den. The exit class is precisely the rule that stops that, and it
+    // is already what the player has learned from fifty dungeon floors.
+    const bool hasExitTarget = st.nearExit || st.nearPortal || st.nearExitPortal ||
+                               st.nearTownPortal || (st.zoneGateIdx >= 0);
     const bool hasHoldTarget = (st.shrineIdx >= 0) || hasExitTarget;
     // Chests — real (world-item sentinel) or fake (dormant mimic entity) — compete in the
     // ITEM class of the tap rule: opening one is a tap, exactly like grabbing loot. Real
@@ -2455,7 +2465,7 @@ void Engine::updatePlayerPickup(f32 dt) {
     // to and press once, and putting them here means interact.h's Target enum needs no new value.
     const bool hasItemClass  = (st.itemIdx >= 0) || (st.chestIdx >= 0) || (st.mimicIdx >= 0) ||
                                (st.stashIdx >= 0) || (st.waypointIdx >= 0) ||
-                               (st.zoneGateIdx >= 0) || (st.cairnIdx >= 0) || (st.npcIdx >= 0);
+                               (st.cairnIdx >= 0) || (st.npcIdx >= 0);
     const bool down = !m_inventoryOpen && Input::isActionDown(GameAction::PICKUP);
     const Interact::Intent intent =
         Interact::poll(st.hold, down, hasHoldTarget, dt, GameConst::INTERACT_HOLD_SEC);
@@ -2470,6 +2480,14 @@ void Engine::updatePlayerPickup(f32 dt) {
         if (st.nearExitPortal)  m_creditsRequested = true;
         else if (st.nearTownPortal) m_townPortalRequested = true;
         else if (st.nearPortal) m_portalRequested = true;
+        else if (st.zoneGateIdx >= 0) {
+            // Resolved LOCALLY on every role, as it was in the item branch: a gate changes which
+            // world you stand in, and that change is host-decided and broadcast (enterZoneGate
+            // early-returns on a CLIENT). Routing it through CL_PICKUP_ITEM would CONSUME the
+            // fixture, which is exactly wrong for a doorway that must still be there behind you.
+            enterZoneGate(st.zoneGateIdx);
+            return;
+        }
         else                    m_descendRequested = true;   // updateFloorDoor owns the boss gate + net path
     }
 
@@ -2494,16 +2512,19 @@ void Engine::updatePlayerPickup(f32 dt) {
         return;
     }
 
-    if (wantItem && (st.waypointIdx >= 0 || st.zoneGateIdx >= 0)) {
-        if (st.waypointIdx >= 0) touchWaypoint(st.waypointIdx);
-        else                     enterZoneGate(st.zoneGateIdx);
+    // The waypoint stays in the ITEM class — it is a thing you walk up to and press once, not a
+    // doorway you walk into. It gains the `st.itemIdx < 0` guard its neighbours already carry, for
+    // the same reason the gate moved out entirely: a fixture must never steal the press aimed at
+    // loot at your feet.
+    if (wantItem && st.waypointIdx >= 0 && st.itemIdx < 0) {
+        touchWaypoint(st.waypointIdx);
         return;
     }
 
     // A Cairn Stone is local on every role for the same reason: it sets a per-character quest bit
     // and grants nothing. Ranked BELOW the gate and the waypoint because those change where you
     // are, and a stone standing beside one must never steal the press that was meant for the door.
-    if (wantItem && st.cairnIdx >= 0) {
+    if (wantItem && st.cairnIdx >= 0 && st.itemIdx < 0) {
         touchCairnStone(st.cairnIdx);
         return;
     }

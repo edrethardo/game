@@ -64,6 +64,27 @@ extern bool s_firstKillDropGiven;
 extern bool s_engineSlain;    // secret superboss — Engine defeated this session (victory variant)
 
 // ---------------------------------------------------------------------------
+// presentFrame — service a pending capture, then put the frame on screen.
+// See engine.h for why every swapBuffers site funnels through here.
+// ---------------------------------------------------------------------------
+void Engine::presentFrame(u32 sw, u32 sh) {
+    // The frame is composited but not yet presented, so glReadPixels sees exactly what is on
+    // screen (3D scene, and HUD unless F10 hid it). Cleared immediately = one file per request.
+    if (m_screenshotPending) {
+        m_screenshotPending = false;
+        // Timestamped name so sessions never overwrite each other's shots (the seq counter resets
+        // per launch); the trailing seq disambiguates two captures in the same second.
+        std::time_t t = std::time(nullptr);
+        char ts[24];
+        std::strftime(ts, sizeof(ts), "%Y%m%d-%H%M%S", std::localtime(&t));
+        char path[64];
+        std::snprintf(path, sizeof(path), "screenshot_%s_%02u.png", ts, ++m_screenshotSeq);
+        Screenshot::capture(path, sw, sh);
+    }
+    GLContext::swapBuffers(Window::getHandle());
+}
+
+// ---------------------------------------------------------------------------
 // renderTransitionScreens — draws non-IN_GAME full-screen states
 // (MENU, CONNECTING, FLOOR_TRANSITION, VICTORY, GAME_OVER, and any unknown
 // state). Returns true if one was drawn; render() early-outs on true.
@@ -72,7 +93,7 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
     if (m_gameState == GameState::MENU) {
         renderMenu();
         HUD::flush(sw, sh);
-        GLContext::swapBuffers(Window::getHandle());
+        presentFrame(sw, sh);
         return true;
     }
 
@@ -95,7 +116,7 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
         f32 pulse = (sinf(m_statsTimer * 6.0f) + 1.0f) * 0.5f;
         HUD::drawCrosshair(sw, sh, {pulse, pulse, 0.5f + pulse * 0.5f});
         HUD::flush(sw, sh);
-        GLContext::swapBuffers(Window::getHandle());
+        presentFrame(sw, sh);
         return true;
     }
 
@@ -161,7 +182,7 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
                              totalStr, {0.6f * alpha, 0.6f * alpha, 0.6f * alpha}, 2);
 
         HUD::flush(sw, sh);
-        GLContext::swapBuffers(Window::getHandle());
+        presentFrame(sw, sh);
         return true;
     }
 
@@ -194,7 +215,7 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
                              hint, {0.4f, 0.4f, 0.45f}, 1);
 
         HUD::flush(sw, sh);
-        GLContext::swapBuffers(Window::getHandle());
+        presentFrame(sw, sh);
         return true;
     }
 
@@ -261,7 +282,7 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
                              prompt, {0.5f, 0.5f, 0.5f}, 1);
 
         HUD::flush(sw, sh);
-        GLContext::swapBuffers(Window::getHandle());
+        presentFrame(sw, sh);
         return true;
     }
 
@@ -271,8 +292,13 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
         f32 titleW = FontSystem::textWidth(deathTitle, 4);
         FontSystem::drawText(sw, sh, (sw - titleW) * 0.5f, sh * 0.6f, deathTitle, {0.8f, 0.1f, 0.1f}, 4);
 
-        char floorStr[48];
-        std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_level.currentFloor);
+        // WHERE you died, not a floor number. This formatted `Floor %u` from m_level.currentFloor,
+        // which a zone never re-assigns — so every death in either act reported "Floor 51", the
+        // cleared marker, a place nobody has ever stood in. locationLabel is the same answer the
+        // HUD's own indicator gives, so the last thing you read before respawning matches the last
+        // thing you read while alive.
+        char floorStr[64];
+        locationLabel(floorStr, sizeof(floorStr));
         f32 floorW = FontSystem::textWidth(floorStr, 2);
         FontSystem::drawText(sw, sh, (sw - floorW) * 0.5f, sh * 0.48f, floorStr, {0.6f, 0.6f, 0.6f}, 2);
 
@@ -328,14 +354,14 @@ bool Engine::renderTransitionScreens(u32 sw, u32 sh) {
         }
 
         HUD::flush(sw, sh);
-        GLContext::swapBuffers(Window::getHandle());
+        presentFrame(sw, sh);
         return true;
     }
 
     if (m_gameState != GameState::IN_GAME) {
         // Unknown / lobby states — flush and present
         HUD::flush(sw, sh);
-        GLContext::swapBuffers(Window::getHandle());
+        presentFrame(sw, sh);
         return true;
     }
 
@@ -1001,22 +1027,6 @@ void Engine::render(f32 alpha) {
         glEnable(GL_DEPTH_TEST);
     }
 
-    // Service a pending screenshot now (F8 or the --screenshot-interval auto-timer): the full frame
-    // (3D scene, and HUD unless F10 hid it) is composited but not yet presented, so glReadPixels sees
-    // exactly what's on screen. Written to the CWD as screenshot_NNNN.png using a monotonic counter
-    // (m_frameCount resets every second, so it can't name files). Cleared immediately = one per shot.
-    if (m_screenshotPending) {
-        m_screenshotPending = false;
-        // Timestamped name so sessions never overwrite each other's shots (the seq counter resets
-        // per launch); the trailing seq disambiguates two captures in the same second.
-        std::time_t t = std::time(nullptr);
-        char ts[24];
-        std::strftime(ts, sizeof(ts), "%Y%m%d-%H%M%S", std::localtime(&t));
-        char path[64];
-        std::snprintf(path, sizeof(path), "screenshot_%s_%02u.png", ts, ++m_screenshotSeq);
-        Screenshot::capture(path, sw, sh);
-    }
-
     // Options opened from the pause menu: draw the real options screens OVER the live (frozen) scene.
     //
     // Composited here, at the very end, so it lands on top of the finished frame — world, HUD and
@@ -1029,5 +1039,5 @@ void Engine::render(f32 alpha) {
     // dungeon. renderMenu() draws no title on the options substates (3, 15-18), so what lands here
     // is exactly the options UI and nothing else.
 
-    GLContext::swapBuffers(Window::getHandle());
+    presentFrame(sw, sh);
 }

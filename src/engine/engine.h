@@ -1712,6 +1712,27 @@ private:
     // renderHUD helpers — extracted contiguous blocks, called in original order
     void renderInventoryHUD(u32 sw, u32 sh);          // inventory screen branch
     // The tabbed menu's shared chrome (backdrop + frame + tab strip), drawn before every page.
+    // Where the player IS, as a player-facing string: "Arena", "The Town", a zone's own name, or
+    // "Floor N". THE single answer — the HUD's location label and the DEATH SCREEN both call it.
+    //
+    // The death screen used to format `Floor %u` from m_level.currentFloor itself, and in the
+    // overworld that byte is deliberately stale (a zone's identity is m_level.zoneFloor; see
+    // CLAUDE.md), so dying anywhere in either act reported "Floor 51" — the cleared marker, a place
+    // no player has ever stood in. Two formatters for one fact, and only one of them had been
+    // taught about zones.
+    void locationLabel(char* out, u32 cap) const;
+
+    // Present the finished frame — services a pending --screenshot-interval / F8 capture, then
+    // swaps. THE one place a frame reaches the screen, and every swapBuffers site goes through it.
+    //
+    // The capture used to be serviced in exactly ONE of them, at the tail of the IN_GAME path, so
+    // it silently did nothing on the death, credits, victory and menu screens: renderTransitionScreens
+    // swaps and returns, and render() early-outs above the service point. Those are precisely the
+    // screens worth capturing, because logStats and updateAutoplay do not run there either — a run
+    // parked on one goes completely silent, which is how the credits park and the death-screen
+    // strand both stayed hidden for so long.
+    void presentFrame(u32 sw, u32 sh);
+
     void renderMenuChrome(u32 sw, u32 sh);
     // The quest log page. Thin: it resolves the LIVE clear-zone count (a property of the entity
     // pool, not of saved progress) and hands the rest to HUD::drawQuestLog.

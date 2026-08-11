@@ -93,6 +93,28 @@ bool Engine::inventoryComparisonActive(u32 sw, u32 sh) const {
 }
 
 // ---------------------------------------------------------------------------
+// locationLabel — the player-facing name of where they are standing.
+//
+// In the OVERWORLD the floor byte is a SENTINEL (52-96) identifying WHICH zone this is, not a
+// depth, so "Floor 57" is meaningless to a player standing in TristRAM — and m_level.currentFloor
+// is not even re-assigned on zone entry (it holds 51, the cleared marker), so it is worse than
+// meaningless there. Name the place; the sentinel is an implementation detail of how a world
+// replicates in six bytes.
+//
+// Buffer wants 64: the longest name ("The Den of Evil (Franchise Location #2)") is 38 characters,
+// and snprintf would truncate it safely but visibly, which looks deliberate and is a worse bug
+// than the one being fixed.
+void Engine::locationLabel(char* out, u32 cap) const {
+    if (!out || cap == 0) return;
+    if (m_level.inArena) { std::snprintf(out, cap, "Arena"); return; }
+    if (m_level.inTown)  { std::snprintf(out, cap, "The Town"); return; }
+    if (m_level.inZone) {
+        const char* n = Zone::nameOf(m_level.zoneFloor);
+        if (n) { std::snprintf(out, cap, "%s", n); return; }
+    }
+    std::snprintf(out, cap, "Floor %u", m_level.currentFloor);
+}
+
 // renderInventoryHUD — the entire m_inventoryOpen branch:
 // controller cursor, drawInventoryScreen, drag icon, button hints, equip tutorial.
 // ---------------------------------------------------------------------------
@@ -606,14 +628,7 @@ void Engine::renderMinimapAndFloor(u32 sw, u32 sh) {
         // (Franchise Location #2)") is 38 characters — snprintf would have truncated it safely but
         // visibly, which is a worse bug than the one being fixed because it looks deliberate.
         char floorStr[64];
-        // In the OVERWORLD the floor byte is a SENTINEL (52-96) that identifies which zone this is,
-        // not a depth — so "Floor 51" (or 57) is meaningless to a player standing in TristRAM. Name
-        // the place instead; the sentinel is an implementation detail of how the world replicates.
-        const Zone::ZoneDef* zdef = m_level.inZone ? Zone::find(m_level.zoneFloor) : nullptr;
-        if      (m_level.inArena) std::snprintf(floorStr, sizeof(floorStr), "Arena");
-        else if (m_level.inTown)  std::snprintf(floorStr, sizeof(floorStr), "The Town");
-        else if (zdef)            std::snprintf(floorStr, sizeof(floorStr), "%s", zdef->name);
-        else                      std::snprintf(floorStr, sizeof(floorStr), "Floor %u", m_level.currentFloor);
+        locationLabel(floorStr, sizeof(floorStr));
         FontSystem::drawText(sw, sh, 20.0f * hs, static_cast<f32>(sh) - 22.0f * hs,
                              floorStr, {0.7f, 0.7f, 0.7f}, 2);
         // Autoplay strap under the floor label: "AUTO" while the bot drives, "MANUAL Ns" once a

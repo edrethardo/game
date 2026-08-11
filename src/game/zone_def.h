@@ -351,6 +351,14 @@ inline constexpr u32 COUNT = sizeof(ZONES) / sizeof(ZONES[0]);
 // The zone on `floor`, or nullptr if that floor is not a zone. Callers MUST handle nullptr: a
 // corrupt save or a hostile packet can carry any byte, and routing an unknown floor into the zone
 // path would build an empty world.
+// The player-facing NAME of any world floor byte — a zone's own name, the town, or nothing.
+// Returns nullptr for an ordinary dungeon floor, which has no name, only a depth.
+//
+// Pure and engine-free so both the HUD's location label and the zone-gate prompt read ONE answer:
+// a gate that named a different place from the one it takes you to is exactly the drift the
+// layout/hit-test split exists to prevent, one layer up.
+inline const char* nameOf(u8 floor);
+
 inline const ZoneDef* find(u8 floor) {
     for (u32 i = 0; i < COUNT; i++)
         if (ZONES[i].floor == floor) return &ZONES[i];
@@ -386,6 +394,12 @@ inline Entrance entranceFor(u8 here, u8 there) {
 // entranceFor so the mesh and the map icon cannot disagree.
 inline bool isCaveBoundary(u8 here, u8 there) {
     return entranceFor(here, there) == Entrance::CAVE;
+}
+
+inline const char* nameOf(u8 floor) {
+    if (floor == TOWN_FLOOR) return "The Town";
+    const ZoneDef* z = find(floor);
+    return z ? z->name : nullptr;
 }
 
 // The zone reached by leaving `from` through `dir`, or NO_LINK. TOWN_FLOOR is a legal answer.

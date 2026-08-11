@@ -1192,9 +1192,16 @@ void Engine::run() {
             m_launchMenuPage = 0xFF;
         }
 
-        // Auto-screenshot (CLI --screenshot-interval): once IN_GAME, flag a capture every
-        // m_shotInterval seconds. Set before render() so it is serviced (and saved) this frame.
-        if (m_shotInterval > 0.0 && m_gameState == GameState::IN_GAME) {
+        // Auto-screenshot (CLI --screenshot-interval): flag a capture every m_shotInterval
+        // seconds. Set before render() so it is serviced (and saved) this frame.
+        //
+        // Deliberately NOT gated on IN_GAME any more. The non-gameplay screens — death, credits,
+        // victory, the menus — are precisely the ones that are hard to observe, because logStats
+        // and updateAutoplay do not run there either, so a run parked on one goes totally silent
+        // (this file records the credits park and the death-screen strand going unnoticed for
+        // exactly that reason). A capture tool that stops working on the screens you cannot
+        // otherwise see is the wrong way round.
+        if (m_shotInterval > 0.0) {
             m_shotTimer += frameTime;
             if (m_shotTimer >= m_shotInterval) { m_shotTimer = 0.0; m_screenshotPending = true; }
         }
