@@ -196,6 +196,19 @@ charge).
   quest ticks every objective regardless of stored `obj` — a v6-migrated hero has `obj` zeroed, and
   TALK is excluded from the completion test, so both legitimately produce a finished quest with
   empty boxes. Pinned by `tests/game/test_journal_layout.cpp` + `test_menu_frame.cpp`.
+- **A ZONE GATE is an EXIT, not an item.** Every doorway between overworld zones takes the floor
+  exit's arbitration rules — lowest priority, yields to loot on a tap, reachable by a HOLD — and its
+  prompt is styled to match (same green, same height, "Hold -" when loot competes), naming the
+  DESTINATION via `Zone::nameOf(item.itemLevel)`, the same field `enterZoneGate` acts on. It rode the
+  ITEM class before with no `st.itemIdx < 0` guard, so a gate stole the tap from loot lying in its
+  mouth. Waypoints and Cairn Stones stay ITEM-class (press-once fixtures, not doorways) but carry
+  that guard. **Any new interact target needs BOTH a `resolveInteractTargets` branch AND a
+  `renderInteractionPrompts` branch** — gates, waypoints and Cairn Stones each shipped with the
+  first and not the second, which is a fixture the player cannot tell is interactable.
+- **`Engine::locationLabel` is the ONE answer to "where am I"** ("Arena" / "The Town" / a zone's
+  name / "Floor N"), read by the HUD indicator and the death screen. `m_level.currentFloor` is
+  deliberately stale in a zone, so any second formatter of it reports the cleared marker — which is
+  exactly what the death screen did ("Floor 51") until both were routed through this.
 - **Gameplay feedback stands down over the MENU**, gated on `m_inventoryOpen` rather than on a
   hand-listed set of panels (that list named the stash and the journal and so never covered the
   character sheet): `renderTutorials`, `renderTargetBar`, the chat log and the damage **vignette**
@@ -523,6 +536,7 @@ No flags / `--help` / any invalid value → a warning + usage and a normal menu 
 | `--autoloot` | force Auto Loot & Equip on lane 0 |
 | `--autoplay` | arm the lane-0 Autoplay bot (implies `--autoloot`); a singleplayer AFK run (see CLAUDE.md "Autoplay mode") |
 | `--autoplay-couch [class]` | split-screen with BOTH lanes bot-driven; lane 1 defaults to Marksman so the pair is melee + ranged |
+| `--screenshot-interval <s>` | auto-capture every `<s>` seconds. Fires on EVERY screen (death/credits/victory/menus included) — every present goes through `Engine::presentFrame`, which services the pending capture then swaps. Run from the REPO ROOT or `assets/shaders/*` fail to load and the frame is a flat clear colour |
 | `--menu <inventory\|character\|quests>` | dev door onto a menu PAGE: opens the tabbed character menu on the first IN_GAME frame. Exists because the window-focus input gate zeroes synthetic keypresses, so on a headless or unfocused display there is no way to open a menu by hand — the pages were uncapturable. Applied once from the frame loop, not per launch branch. Pair with `--screenshot-interval` |
 | `--quests-done` | mark every act quest COMPLETE on lane 0. Stamps the mask AND folds it into `Quest::Progress` via `refreshQuestMask` — the mask alone left the Journal showing ten LOCKED rows on a "complete" hero |
 

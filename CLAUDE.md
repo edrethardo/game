@@ -745,6 +745,57 @@ with the page tabs, and each page tab is clickable across its whole drawn plate.
 **edge-sampled on purpose**: its first version probed plate CENTRES and passed against a hit-test
 shifted 40 px, which is the sabotage that caught it. Suite **863/863**.
 
+**THE OVERWORLD'S DOORWAYS NOW BEHAVE LIKE DOORS (2026-08-11, Aaron: "make the new entrances have
+the same tooltip and behavior as the dungeon exits" / "show the location you died in, not floor 51"
+/ "make the player spawn at the zone transition spot when moving from one zone to another").**
+Three reports, three different subsystems, one theme: the overworld's fixtures were built but never
+finished off with the small things that make a place readable.
+**(1) THE ENTRANCES HAD NO PROMPT AT ALL.** Every zone gate — the cave mouth, the stone circle, the
+Hellgate, the graveyard gate, the tube entrance, the service door — was a `ZONE_GATE_ID` sentinel
+resolved into `st.zoneGateIdx`, and `renderInteractionPrompts` had a branch for the floor exit, the
+exit portal, the stash, the town portal, the giver, the shrine, the chest and loot — and **none for
+gates, waypoints or Cairn Stones**. You walked up to an act's finale and nothing said it was a door,
+let alone where it led. The gate prompt is modelled on the floor exit directly above it (same green,
+same screen height, same "Hold -" treatment) and names the DESTINATION, read from the same
+`item.itemLevel` field `enterZoneGate` acts on, so what it promises and what the button does cannot
+diverge. `Zone::nameOf` is the shared lookup, so the prompt and the HUD's location label agree.
+**...and moving them to the EXIT class fixed a real bug, not just a style.** Gates rode the ITEM
+class (a tap), and their branch fired on `wantItem` with **no `st.itemIdx < 0` guard** — so a gate
+STOLE the tap from loot lying in its mouth, and a drop at the Den's entrance could not be picked up
+without being teleported into the Den. The exit class is exactly the rule that prevents that
+(lowest priority, yields to loot on a tap, reachable by a deliberate HOLD) and it is what the player
+has already learned from fifty dungeon floors. The waypoint and the Cairn Stone stay in the ITEM
+class — they are things you press once, not doorways you walk into — but gained the same
+`st.itemIdx < 0` guard their neighbours already carried.
+**(2) DYING IN THE ACTS REPORTED "FLOOR 51".** The death screen formatted `Floor %u` from
+`m_level.currentFloor`, which a zone deliberately never re-assigns — so every death in either act
+named the cleared marker, a place no player has ever stood in. The HUD's own indicator had been
+taught about zones; the death screen had not, because the rule lived in two formatters.
+`Engine::locationLabel` is the ONE answer now ("Arena" / "The Town" / the zone's name / "Floor N"),
+so the last thing you read before respawning matches the last thing you read while alive. Verified
+live: dying in zone 52 reads **"The Blood Buffer"**.
+**(3) COMING BACK OUT OF AN INTERIOR DROPPED YOU IN THE MIDDLE OF THE FIELD.** An interior (the Den,
+TristRAM, the Graveyard, Bank Station, the Hellgate) is reached by a POI mouth and shares no border
+with its parent, so `Zone::arrivalEdge` cannot answer and `zoneArrivalPos` fell through to the
+parent's own return-gate area — which for a road zone is its CENTRE. Walk into the Den at the Blood
+Buffer's top-left corner, walk out, and you were standing in the middle of the field with the mouth
+25 m behind you: travel that reads as a teleport rather than as stepping back through a door. The
+arrival now lands beside `m_zonePoiPos`, the room centre `buildZoneLevel` cleared for that mouth and
+the same value `spawnZoneContents` spawns the gate on — so the spot you land on and the door you
+land beside can never be two different places. Its landing pad is cleared in the BUILDER, beside the
+mouth's own, for the reason this file has already paid for twice: ground opened in
+`spawnZoneContents` behaves as floor while still RENDERING as rock. Measured with the bot doing the
+round trip on its own: returning from the Den lands at **(9.0, 11.3)** against a mouth at
+**(10.5, 10.5)**. The EDGE crossing was already correct and is unchanged — 52 -> 54 northbound lands
+at (25.7, 41.4), the south gate's `EDGE_ARRIVE_INSET`.
+**`--screenshot-interval` now captures on EVERY screen**, which is how (2) was verified at all. The
+capture was serviced in exactly one place, at the tail of the IN_GAME render path, while
+`renderTransitionScreens` swaps and returns above it — so the death, credits, victory and menu
+screens silently produced nothing. Those are precisely the screens worth capturing, because
+`logStats` and `updateAutoplay` do not run there either and a run parked on one goes completely
+silent (this file records the credits park and the death-screen strand staying hidden for exactly
+that reason). `Engine::presentFrame` is the single choke every `swapBuffers` site now goes through.
+
 **...and a cave entrance is now a CAVE, not a tinted pillar (2026-08-07, Aaron: "remodel the cave
 entrances using the tools").** The first pass reused the shrine's standing-pillar mesh with a grey
 tint. Diablo 2's Act 1 entrances are not monuments — they are a HOLE IN A ROCK, and that silhouette
