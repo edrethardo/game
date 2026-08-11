@@ -118,6 +118,7 @@ public:
     // straight into a state (host/join/single + load/new), skipping the menu. Sequences the same
     // start primitives the menu uses. No/invalid options leave the game at the normal menu.
     void applyLaunchOptions(const LaunchOptions& opt);
+    void applyQuestsDoneOption(const LaunchOptions& opt);  // --quests-done, shared by --zone and --town
 
 private:
     static constexpr f64 FIXED_DT            = 1.0 / 60.0;

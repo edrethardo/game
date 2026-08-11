@@ -1876,8 +1876,22 @@ void Engine::autoplayTownStep(f32 dt, bool uiOpen) {
     // host-authoritative transition, which re-checks the Inferno unlock for itself.
     Vec3 townGoal = m_level.townPortalPos;
     bool townPortalIsGoal = true;
-    if (ZoneRoute::objectiveZone(m_questMask[m_localPlayerIndex]) != 0 &&
-        FreePlay::overworldUnlocked(m_level.savedFloor, m_difficulty)) {
+    //
+    // ...AND SO DOES A FINISHED HERO'S FREE ROAM. The quest test alone covers only a run that is
+    // MIDWAY through the acts; a hero who has already finished them has objectiveZone() == 0, so the
+    // guard fell open and the town step took the portal — reported as "why did my autoplay bot enter
+    // the dungeon after playing the overworld". zoneBotGoal's roam already refuses to AIM at the
+    // town link, but that is not enough on its own: combat drift, the escape ladder and an ordinary
+    // edge crossing can all put the bot in the town without ever choosing it, and once there the
+    // portal was the only thing the town step knew how to want.
+    //
+    // Keyed on m_laneLoadedFromSave — the PLAYER's own hero, the same predicate that decides roam vs
+    // roll-on in zoneBotGoal, so the two halves of "whose character is this" cannot disagree. A
+    // mode-MINTED hero is untouched: it has no overworld session to protect and its ending mints the
+    // next run anyway, which is what keeps the act soak byte-identical.
+    const bool roamingOwnHero = m_laneLoadedFromSave[m_localPlayerIndex];
+    if (FreePlay::overworldUnlocked(m_level.savedFloor, m_difficulty) &&
+        (ZoneRoute::objectiveZone(m_questMask[m_localPlayerIndex]) != 0 || roamingOwnHero)) {
         // Aimed AT the border line, not at the crossing depth. planTownPortal deliberately stops
         // 1.5 m short of its target — a portal is a HOLD target you stand next to — so aiming at
         // the crossing depth parks the bot just OUTSIDE the trigger band, walking nowhere. Targeting

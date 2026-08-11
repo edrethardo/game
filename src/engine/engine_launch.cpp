@@ -116,6 +116,15 @@ void Engine::equipEndgameLoadout(u8 lane) {
              static_cast<u32>(lane), taken, static_cast<u32>(ilvl));
 }
 
+// --quests-done: hand the hero a finished act chain. Shared by every launch path that can reach the
+// overworld, because the state it creates (objectiveZone() == 0) changes behaviour in the TOWN as
+// well as in a zone — the town step's north-gate rule keys off it.
+void Engine::applyQuestsDoneOption(const LaunchOptions& opt) {
+    if (!opt.questsDone) return;
+    m_questMask[0] = (Quest::COUNT >= 64) ? ~0ull : ((1ull << Quest::COUNT) - 1ull);
+    LOG_INFO("Launch: --quests-done - both acts marked complete on lane 0 (%u quests)", Quest::COUNT);
+}
+
 void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     if (!opt.valid) return;  // parse failed → normal menu boot
 
@@ -297,6 +306,9 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     if (opt.town) {
         // Dev door (--town): land ANY hero in the town hub — no clear required. startGame is
         // skipped entirely; enterTown builds the world and places the player.
+        // Quests BEFORE entering: the town step reads objectiveZone() to decide north gate vs
+        // dungeon portal, so a mask applied afterwards would miss the first ticks that matter.
+        applyQuestsDoneOption(opt);
         enterTown();
         // Arm the bot here too. This branch returns before the startGame() path's enterAutoplayRun
         // below, so `--autoplay --town` used to land an UNARMED hero in the hub — the one dev door
@@ -344,11 +356,7 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         // --quests-done: hand the hero a finished act chain. Applied AFTER enterAutoplayRun (which
         // does not touch the mask) and BEFORE enterZone, so the very first tick in the zone already
         // sees the post-acts state — which is the tick that decides roam vs end-the-run.
-        if (opt.questsDone) {
-            m_questMask[0] = (Quest::COUNT >= 64) ? ~0ull : ((1ull << Quest::COUNT) - 1ull);
-            LOG_INFO("Launch: --quests-done - both acts marked complete on lane 0 (%u quests)",
-                     Quest::COUNT);
-        }
+        applyQuestsDoneOption(opt);
         enterZone(opt.zoneFloor, /*fromFloor=*/0);
         LOG_INFO("Launch: entered overworld zone %u (--zone)", (u32)opt.zoneFloor);
         return;
