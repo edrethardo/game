@@ -144,27 +144,63 @@ charge).
   HUD primitives are batched in submission order, so the item tooltips (drawn last, inside it) paint
   OVER the bars. That is deliberate — while an item tooltip is up the player is reading the item.
   There is no repositioning or z-logic; if you reorder those calls the bars will cover the tooltips.
+- **THE MENU IS ONE SCREEN WITH THREE PAGES** (Diablo 2 style): `MENU_TAB_INVENTORY` /
+  `MENU_TAB_CHARACTER` / `MENU_TAB_QUESTS`. `m_inventoryOpen` means "the menu is up" (it kept its
+  name — ~40 call sites read it) and **`m_menuTab` is the single fact for WHICH page**. There is no
+  second bool per page: `m_characterScreenOpen` was exactly that and is gone, replaced by the views
+  `characterTabUp()` / `questTabUp()`. The behaviours that keyed off it — the singleplayer world
+  PAUSE, the autoplay hard-freeze (`botMayAct`), the paper-doll FBO pass — key on the CHARACTER page
+  specifically, not on the menu, or flipping tabs would start and stop pausing.
+  **`m_menuTab` is per-lane**, so every writer must set the alias AND `m_menuTabArr[lane]`:
+  `swapInPlayer` re-reads the aliases from their arrays each per-player pass, so an alias-only write
+  made outside that pass is silently undone one frame later.
+- **`openMenu(page)` / `closeMenu()` / `cycleMenuTab(±1)` own the open-close ritual** (mouse mode,
+  cursor-mode seeding, tutorial dismissal, drag reset, stash-cursor parking). Every hotkey and the
+  tab strip go through them — the `worldClearLevelFlags` argument applied to the menu.
+- **Page switching — the primary route is NAVIGATION, not a hotkey.** The strip is a cursor
+  position (`INV_PANEL_MENUTAB`, outside the cycle like `INV_PANEL_STASH`): UP off the top of any
+  page lands on it, LEFT/RIGHT walk the pages, DOWN re-enters. So WASD and the D-pad reach it with
+  no new keys. It draws a gold ring + carets while it holds the cursor (cursor mode only — in mouse
+  mode the pointer already says where you are). DOWN is inert on the CHARACTER page, which has no
+  cursor panels to enter. Shortcuts on top: controller **LB/RB**; keyboard **PgUp/PgDn** or
+  **`[`/`]`** (never NAMED on screen — scancodes are physical positions, so `[` is **ü** on QWERTZ);
+  mouse **click a tab** (`InventoryUI::hitTestMenuTabs`, tested first — the strip draws over every
+  page so it must hit-test over every page). Direct hotkeys: `Tab` (inventory / close), **`T`** or
+  `K` (character — NOT `C`, which is `QUICKBAR_SLOT_3`), `J` (quests). All raw scancodes or an
+  existing `GameAction`, never a NEW one: `GameAction` ordinals ARE `controls.json`'s on-disk
+  format, so appending one means a `BINDINGS_REV` migration for a convenience key.
+  **The on-screen hint reads the ACTIVE DEVICE** (`Input::activeDeviceIsGamepad()` → "LB / RB",
+  else "PgUp / PgDn") — a fixed controller hint is why the first cut read as unswitchable on
+  keyboard. It names **PgUp/PgDn rather than the brackets** because SDL scancodes are physical key
+  POSITIONS: `SDL_SCANCODE_LEFTBRACKET` is `[` on US and **ü** on German QWERTZ.
+- **Cursor navigation accepts ARROW KEYS as well as WASD** (raw `SDL_SCANCODE_UP/DOWN/LEFT/RIGHT`).
+  Arrows were dead before, which on the quest log's act tabs was a dead end — and its footer named
+  them anyway.
 - **The gamepad synthesizes a cursor position** (`Engine::inventoryCursorToMouse`) so hover and
-  selection are ONE code path, not two. `m_invCursorPanel` cycles on L/R shoulder through
-  `INV_PANEL_BACKPACK/EQUIPMENT/CLASS_SKILL/EQUIP_SKILL/BUILD` and now `INV_PANEL_JOURNAL = 5`,
-  skipping the equip-skill panel when nothing equipped grants one. `INV_PANEL_STASH = 6` sits OUTSIDE
-  the cycle (its layout is only on screen while the stash is open). Pass `selectedSlot = 0xFF` while
-  on a skill panel so neither item panel paints a phantom highlight.
-- **The quest JOURNAL is panel 5, and it also has a fixed `J` key** (`SDL_SCANCODE_J`, handled in
-  `engine_inventory.cpp`). The key is not a convenience: the panel cycle is on the SHOULDER buttons
-  (controller only) and the Journal's mouse hit-test is consulted only while the Journal is ALREADY
-  the active panel — self-blocking, so without a key a mouse-and-keyboard player can navigate the
-  Journal and never enter it. It TOGGLES back to the panel it came from (a fixed key that only enters
-  is a trap), and it is a raw scancode rather than a new `GameAction` because those ordinals ARE
-  `controls.json`'s on-disk format — appending one would mean a `BINDINGS_REV` migration for a
-  convenience key. Same shape as the character screen's fixed T/K. Geometry is single-sourced in
-  `InventoryUI::journalLayout()` (`tests/game/test_journal_layout.cpp`); the right column hosts EITHER
-  the build grid or the Journal, never both.
-- **Gameplay prompts stand down over a READING panel.** `renderHUD`'s common tail draws
-  `renderTutorials` AFTER the inventory branch, so a live prompt paints on top of it — the "Block"
-  label at `0.62*sh` landed on the Journal's narration and covered the giver line. Suppressed at the
-  gate while `m_inventoryOpen && (m_stashOpen || panel == INV_PANEL_JOURNAL)`, NOT by reordering the
-  draw: a prompt is meant to be visible during play, and the full-screen panels are the exception.
+  selection are ONE code path, not two. Within the INVENTORY page `m_invCursorPanel` walks
+  `INV_PANEL_BACKPACK/EQUIPMENT/CLASS_SKILL/EQUIP_SKILL/BUILD` (`INV_PANEL_COUNT = 5`) by **D-pad
+  crossings**, not by the shoulders — those now page the menu. The crossing graph must stay CLOSED
+  (bag ⟷ equipment, bag right edge ⟷ build grid, bag/equipment bottom ⟷ skill bars): the build grid
+  and both skill bars were shoulder-only, so reassigning the shoulders would have made them
+  unreachable on a controller. `INV_PANEL_JOURNAL` is retired — the journal is a PAGE now, and the
+  id is not reused so a stale cursor cannot land on whatever took its number. `INV_PANEL_STASH = 6`
+  still sits outside the cycle. Pass `selectedSlot = 0xFF` while on a skill panel so neither item
+  panel paints a phantom highlight.
+- **Menu chrome is shared** (`HUD::drawMenuChrome`, `InventoryUI::menuFrameLayout`): one dimming
+  backdrop, one framed panel, one tab strip, drawn before whichever page renders, so the pages
+  cannot drift apart and every page lays out inside `contentX/Y/W/H`. Before it the inventory had
+  **no backdrop at all** and the live dungeon showed through the item grid.
+- **The quest log** is `HUD::drawQuestLog` (was `drawJournalPanel`), geometry single-sourced in
+  `InventoryUI::journalLayout()` and anchored to the frame's content box. Quest state is carried by
+  a marker's FILL (dim outline / outline / outline+pip / SOLID), not by colour alone. A COMPLETE
+  quest ticks every objective regardless of stored `obj` — a v6-migrated hero has `obj` zeroed, and
+  TALK is excluded from the completion test, so both legitimately produce a finished quest with
+  empty boxes. Pinned by `tests/game/test_journal_layout.cpp` + `test_menu_frame.cpp`.
+- **Gameplay feedback stands down over the MENU**, gated on `m_inventoryOpen` rather than on a
+  hand-listed set of panels (that list named the stash and the journal and so never covered the
+  character sheet): `renderTutorials`, `renderTargetBar`, the chat log and the damage **vignette**
+  all suppress. The quickbar is the deliberate exception, kept on the Inventory page because
+  assigning its slots is that page's job.
 - `Engine::buildEquipSkillSlots` builds the equip bar for BOTH screens (fixed order: boots, helmet,
   armor aura, weapon proc, ring passive, gloves passive) and reports each entry's source `ItemSlot` —
   the tooltip needs it, since Blood Nova reads differently on a weapon vs on armor.
@@ -436,7 +472,7 @@ Loader: `ItemLoader::loadItemDefs` (`src/game/item.cpp:98`). Mesh+material strin
 - **Net diagnostics & M12 bandwidth verification (F9 net-graph).** The F9 overlay (`engine_hud.cpp`, CLIENT + SERVER; toggle in `engine_update_player.cpp`) reports real per-second metrics from `Net::getMetrics()`/`getMetricsForSlot()`, computed by the pure header-only helper `src/net/net_metrics.h` (unit-tested in `tests/net/test_net_metrics.cpp`). **CLIENT** = 4 lines: rtt/est/**measured** loss (ENet `peer->packetLoss`, distinct from the injected `fakeloss%`); in-bandwidth KB/s payload + estimated-wire (`EST_PACKET_OVERHEAD_BYTES = 36` B/pkt) split into snap(ch1)/evt(ch0); snapshot rx Hz + baseline age; div/fakeloss/fakelat. **SERVER** keeps the host-IP line and adds one `CLI sN: out=…KB/s … delta=…% bage=…t` line per connected remote slot — the M12 read-off surface. Counters live as `Net::` statics (single-threaded net I/O — no atomics), incremented at the `sendImmediate_*` outbound layer (per-slot; broadcasts fan out per peer; *after* the fake-loss drop guard) and the single `ENET_EVENT_TYPE_RECEIVE` site, then folded to per-slot `NetMetrics` and zeroed once per second by `Net::tickMetricsWindow` at the existing 1 Hz `[NET-GRAPH]` log gate (now run for SERVER + CLIENT). To verify the doc's **M12 target** (≤25 KB/s per client @ 60 Hz delta): host + 2–3 clients, inject loss via `Net::setFakeLossPct(5)` (M14), F9 on the host, read each `CLI sN: out=…`. Bytes are **payload only** (matches the ~24 KB/s framing in `net.h`); `wire ~` adds the per-packet header estimate (ENet reliable retransmits under loss are not visible at this layer). A lightweight always-on `Ping: Nms` line also sits under the FPS counter (client only).
 - **Lag-comp window (history vs rewind decoupled).** `LAG_COMP_HISTORY_TICKS = 64` (~1 s pose buffer, `engine_combat.cpp`; the `lag_comp_ring.h` reference impl mirrors it at `LAG_COMP_HISTORY_TICKS_MAX = 64`) is now **independent** of `LAG_COMP_MAX_REWIND_TICKS = 24` (~400 ms — raised from 15 in the 2026-07-18 audit so fire rewind stays honest for 300+ ms-RTT players; the cap `computeLagCompTicks` clamps to before falling back to present-time resolution). Widening the buffer therefore does **not** widen how far back the server rewinds (the old `MAX_TICKS = HISTORY-1` coupling would have ballooned the rewind to ~1 s). The doc's `LAG_COMP_MAX_MS = 200` (~12 ticks) is the value to tighten the rewind cap to if desired. Memory: `s_entHistory[MAX_ENTITIES][64]` ≈ 256 KB BSS, plus a per-slot **player-pose ring** beside it (added 2026-07-18) that `beginLagComp`/`endLagComp` swap so **arena PvP victims are lag-compensated like entities** — a remote's PvP query tests each rival where the firer actually saw them; `pvpApplyHit`'s `seedRemoteView` resets the view to present before applying, so the rewound pose never leaks into `m_players[]`.
 - **Mouse-controllable overlays (death + pause).** The SP `GAME_OVER` death screen, the networked-MP dead overlay, and the in-game pause menu all support mouse hover+click in addition to keyboard/gamepad, reusing the main menu's pattern (free cursor, `hudY = sh - my`, layout-matched centered hit-tests). Hit-tests live in `engine_update.cpp` (`deathOptionHit`/`deathConfirmHit`/`deathRespawnPromptHit`/`pauseMenuHit`) and **must stay in sync with the render layouts** in `engine_render.cpp` (death) / `engine_hud.cpp` (pause). Cursor handling: SP `GAME_OVER` frees the cursor on death entry and re-captures on respawn/reload; the networked-MP dead overlay frees it while the local player is dead via the edge flag `m_deathCursorFree` (driven once per transition at the top of the per-player loop, reset in `startGame`, gated to `NetRole != NONE` — split-screen keeps the cursor captured for the live teammate); the pause menu was already cursor-free. `m_deathHover` is the SP death option under the cursor (renderer highlights it).
-- **Pause-menu freeze (MP).** In SP the pause menu (`m_menu.confirmQuit`) early-returns and freezes the whole world; in MP the world keeps running for everyone else (commit 98eeb58), so the *pausing* player is frozen individually via `Engine::gameplayInputFrozen()` (`= m_inventoryOpen || m_characterScreenOpen || m_menu.confirmQuit || m_menu.optionsFromPause || m_menagerieOpen` — the pause menu's sub-pages CLEAR confirmQuit while open, so they carry their own terms). The options-from-pause and menagerie overlays follow the same MP policy as the pause menu itself: their update() early-returns are SP-gated (`m_netRole == NONE`), because an unconditional return on the HOST skips serverNetPre/Post and freezes every client via input starvation — the host in ANY menu must never pause the session. That predicate replaced the old `!m_inventoryOpen` gates on movement/aim/collision/dodge, weapon fire, viewmodel bob, shield block (`engine_update.cpp`) and class/boot/helm skill activation (`engine_update_skills.cpp`), so a paused MP player stands still exactly like an inventory-open one (potion still works — intentionally not gated, matching inventory). The CLIENT also strips skill ext-bits and **zeroes `NetInput.moveFlags`** on the wire when frozen (`clientNetPre` → `Client::captureAndSendInput(..., freezeMovement)`) so the server-side `NetPlayer` stays put too (no rubber-band from held keys). The host needs no wire change — its `gameUpdate` simply skips movement while frozen.
+- **Pause-menu freeze (MP).** In SP the pause menu (`m_menu.confirmQuit`) early-returns and freezes the whole world; in MP the world keeps running for everyone else (commit 98eeb58), so the *pausing* player is frozen individually via `Engine::gameplayInputFrozen()` (`= m_inventoryOpen || m_menu.confirmQuit || m_menu.optionsFromPause || m_menagerieOpen` — the character sheet is a PAGE of the menu now, so `m_inventoryOpen` already covers it — the pause menu's sub-pages CLEAR confirmQuit while open, so they carry their own terms). The options-from-pause and menagerie overlays follow the same MP policy as the pause menu itself: their update() early-returns are SP-gated (`m_netRole == NONE`), because an unconditional return on the HOST skips serverNetPre/Post and freezes every client via input starvation — the host in ANY menu must never pause the session. That predicate replaced the old `!m_inventoryOpen` gates on movement/aim/collision/dodge, weapon fire, viewmodel bob, shield block (`engine_update.cpp`) and class/boot/helm skill activation (`engine_update_skills.cpp`), so a paused MP player stands still exactly like an inventory-open one (potion still works — intentionally not gated, matching inventory). The CLIENT also strips skill ext-bits and **zeroes `NetInput.moveFlags`** on the wire when frozen (`clientNetPre` → `Client::captureAndSendInput(..., freezeMovement)`) so the server-side `NetPlayer` stays put too (no rubber-band from held keys). The host needs no wire change — its `gameUpdate` simply skips movement while frozen.
 - **Host-left handling (client).** The host sends no explicit "leaving" packet — graceful quit and crash both surface to the client as `Net::isConnected() == false`. The in-game detector is a poll at the top of `Engine::clientNetPre` (`engine_net.cpp`): on loss it **saves the client's game then returns to menu** (`saveCharacter(0, m_activeSaveSlot)` — a client is a single local lane — → `Net::disconnect()` → role `NONE` → `GameState::MENU` → `AudioSystem::stopMusic()`), mirroring the pause-menu "Save and Quit". `saveCharacter`'s general no-downgrade guard (`engine_persist.cpp`) keeps a higher-progress save from being overwritten by the host's lower floor regardless of role, so the ordering relative to the role reset no longer matters for correctness (still saved first, to match the pause path). This is the only in-game host-loss path; `GAME_OVER`/`VICTORY`/`FLOOR_TRANSITION` don't run `clientNetPre`, so host-loss there isn't specially handled.
 - **`CL_JOIN_REQUEST` layout = `PacketHeader`(4) + `version` u32(4) + `chosenClass` u8(1) = 9 bytes.** The class byte is the joiner's `PlayerClass` (the Join menu now runs class-selection before connecting; the client calls `Net::setLocalPlayerClass` before `connectToServer`). The server reads it in `serverHandlePacket` and passes it to the join callback; the size guard accepts ≥ 8 bytes (the class byte is optional — `0xFF`/absent ⇒ Warrior). **`Engine::onPlayerJoin` signature is `(u8 slot, u8 classId)`** — the `Net::OnPlayerJoinFn` typedef carries the class; `onPlayerJoin` validates `classId < CLASS_COUNT` (else Warrior) and uses it for `np.playerClass`, health, energy, and the starting-loadout grant. A fresh joining client also mirrors that class's starting loadout locally in the `startGame` CLIENT branch so both ends agree on a new run. **Mid-run inventory replication (a joiner seeing their server-side gear in an in-progress game) is still TODO via `SV_INVENTORY_SYNC` — defined but not dispatched.**
 - **Idle-handshake reaping (N12):** a peer that completes the ENet handshake but never sends `CL_JOIN_REQUEST` is dropped after `CONNECTING_TIMEOUT_MS` (5000 ms) by a sweep at the end of `Net::poll` (timestamped via `enet_time_get()` in `NetPlayerSlot.connectTimeMs`, cleared on ACTIVE), so it can't hold a slot until ENet's default timeout. `enet_peer_timeout` is also tightened on connect to reap silently-dead joined peers.
@@ -487,6 +523,8 @@ No flags / `--help` / any invalid value → a warning + usage and a normal menu 
 | `--autoloot` | force Auto Loot & Equip on lane 0 |
 | `--autoplay` | arm the lane-0 Autoplay bot (implies `--autoloot`); a singleplayer AFK run (see CLAUDE.md "Autoplay mode") |
 | `--autoplay-couch [class]` | split-screen with BOTH lanes bot-driven; lane 1 defaults to Marksman so the pair is melee + ranged |
+| `--menu <inventory\|character\|quests>` | dev door onto a menu PAGE: opens the tabbed character menu on the first IN_GAME frame. Exists because the window-focus input gate zeroes synthetic keypresses, so on a headless or unfocused display there is no way to open a menu by hand — the pages were uncapturable. Applied once from the frame loop, not per launch branch. Pair with `--screenshot-interval` |
+| `--quests-done` | mark every act quest COMPLETE on lane 0. Stamps the mask AND folds it into `Quest::Progress` via `refreshQuestMask` — the mask alone left the Journal showing ten LOCKED rows on a "complete" hero |
 
 **Env overrides (diagnostics, not flags):** `AUTOPLAY_STALL_SEC=<n>` lowers the `[STALL]` autopsy's
 5-minute gate so a short repro run emits the per-tick geometry dump (under 300 it also samples every

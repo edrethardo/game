@@ -539,7 +539,9 @@ which cut **nine of the ten quest blurbs mid-sentence**, several of them losing 
 what to DO. The rule moved out to a pure `game/chat_line.h` (128 bytes, and a speakerless line no
 longer renders with a stray leading `": "` — the majority of callers are speakerless) precisely so a
 test could pin it against the real quest table; but the real answer is that a paragraph belongs in a
-panel, not in a line that fades. `INV_PANEL_JOURNAL = 5` in the inventory's shoulder cycle (STASH
+panel, not in a line that fades. (**Superseded 2026-08-11** — the Journal is a PAGE of the tabbed
+menu now, not a panel in the cursor cycle; see "THE TABBED CHARACTER MENU" below. What follows
+describes the shape it shipped in.) `INV_PANEL_JOURNAL = 5` in the inventory's shoulder cycle (STASH
 moved to 6), layout single-sourced in `InventoryUI::journalLayout()` so draw and hit-test cannot
 drift, narration WORD-WRAPPED. It is also reachable by the **`J` key**, and that is not a
 convenience: the panel cycle is on the SHOULDER buttons (controller only) and the Journal's mouse
@@ -620,6 +622,128 @@ NOT re-offered a quest they had finished, where a fresh hero in the same zone IS
 the file at **1988 bytes, version 7**, with `state[0..9] == COMPLETE`, the other 22 slots LOCKED and
 `obj` all zero (right for a migrated hero — a mask has no detail to restore); and that v7 file
 round-trips.
+
+**THE TABBED CHARACTER MENU — one screen, three pages, and the quest log finally reads as one
+(2026-08-11, Aaron: "fix the quest menu and the whole questing. make it like in diablo 2 remake and
+rework for that the Inventory menu to allow to switch to the quest log and character screen like in
+Diablo 2").** The quest engine shipped its Journal as a *panel of the inventory*, and that was the
+mistake: it drew a dark box over the middle of a screen that had **no backdrop at all**, so the live
+dungeon showed through the item grid on one side and the equipment column was clipped by the box on
+the other. The character sheet was a THIRD, unrelated screen you could not reach from either.
+**The three are one screen now**, with a tab strip across the top — Diablo 2's shape, where the
+shoulder buttons page between Inventory / Character / Quests and the stick navigates within a page.
+**`m_menuTab` IS the single fact for which page is up**, and that is the load-bearing decision.
+`m_characterScreenOpen` is GONE: it was a second bool that had to agree with `m_inventoryOpen` at 17
+sites, which is the stored-twice shape this file records over and over. The pages are pure views —
+`characterTabUp()` / `questTabUp()` — so the behaviours that keyed off the old flag (the
+singleplayer world PAUSE, the autoplay hard-freeze, the paper-doll FBO pass) still key on exactly
+the character page and nothing else. Flipping to Inventory must not start pausing and flipping to
+Character must not stop, which a menu-wide predicate would have got wrong in both directions.
+**`openMenu(page)` / `closeMenu()` own the ritual.** There were seven sites writing
+`m_inventoryOpen = false` and three writing it true, each re-deriving the mouse-mode and drag-reset
+steps by hand, plus a second such set for the character screen. Three hotkeys (Tab / C / J) and the
+tab strip go through the two helpers instead — the `worldClearLevelFlags` argument, applied to the
+menu, and the step a new page would otherwise forget is the mouse capture, which strands the pointer.
+**The per-lane array is the trap, and it bit immediately.** `swapInPlayer` re-reads every aliased
+field from its per-lane array at the top of each per-player pass, so `openMenu` writing only the
+`m_menuTab` alias was silently undone one frame later — measured exactly that way: `--menu quests`
+opened on the Inventory page. Every writer now sets the alias AND `m_menuTabArr`, like the
+`m_inventoryOpenArr` sites beside them.
+**Reassigning the shoulders forced the D-pad graph to be COMPLETED.** LB/RB used to cycle the
+inventory's five cursor panels; the build grid and both skill bars were reachable ONLY that way, so
+handing the shoulders to the pages would have made them unreachable on a controller. The bag's right
+edge now crosses into the build grid and back, and its bottom row drops into the skill bars and
+climbs back — a closed graph, not a list of one-way moves.
+**The quest log is a PAGE with D2's furniture:** act tabs as real plates, a quest MARKER whose FILL
+carries state (dim outline = not met, outline = offered, outline+pip = active, SOLID = complete —
+fill, not colour, so it survives a small screen and a colour-blind player), a wide reading pane with
+the giver named and the narration word-wrapped, drawn checkbox objectives with the live CLEAR_ZONE
+count, and an act progress line. **A COMPLETE quest ticks every objective regardless of `obj`**, and
+that is correctness rather than licence: a v6 hero migrates in COMPLETE with `obj` zeroed because a
+mask carries no detail, and TALK is deliberately excluded from the completion test — so both produce
+a genuinely finished quest with empty boxes, and "QUEST COMPLETE" over a column of unticked boxes
+states the opposite of the truth.
+**`--quests-done` was HALF-WORKING and the page is what exposed it.** It stamped `m_questMask[0]`
+and nothing else, so `ZoneRoute` and the gate refusals saw a finished chain while `Quest::Progress`
+— what the Journal, the givers and `reevaluate()` actually read — stayed empty. The quest log showed
+ten LOCKED rows and "0 of 5 complete" on a hero the log line called complete. It calls
+`refreshQuestMask(0)` now, which folds the mask into the state before re-deriving.
+**THE BUG WORTH REMEMBERING IS THE DRAW ORDER.** HUD line primitives (`pushLine`/`pushQuad`/the new
+`fillRect`) are BATCHED and rasterised by `flushHUD()`; `FontSystem::drawText` draws IMMEDIATELY. So
+a panel that fills a plate, then draws its label, then flushes, paints the plate **over** the label.
+The first build of this screen drew every tab and every selected row and showed **not one word** on
+any of them. Fills first, `flushHUD()`, then text — which is what every older panel here already
+did, so the rule was only ever implicit. It is stated at both new call sites now.
+**Gameplay feedback stands down over the menu**, and the gate is the whole menu rather than a
+hand-listed set of panels. The tutorial prompts' list named the stash and the journal, so the
+character sheet — a page of prose and numbers, every bit as coverable — was never protected and any
+page added later had to remember to add itself. The chat log (it lands on the paper-doll and the
+quest list), the enemy target bar (it lands on the tab strip) and the **damage vignette** now
+suppress together; the vignette was measured washing the quest log red at 11% HP. The quickbar is
+the deliberate exception, kept on the Inventory page because assigning its slots is that page's job.
+**`--menu <inventory|character|quests>`** is the new dev door, and it exists because the pages were
+literally uncapturable otherwise: the window-focus input gate zeroes every synthetic keypress, so on
+a headless or unfocused display there is no way to open a menu by hand. Applied once on the first
+IN_GAME frame from the frame loop, NOT at each of `applyLaunchOptions`' six terminal branches —
+"do this once we are in a world" is one rule, and a rule needed at six sites gets missed at a
+seventh. Named rather than numbered, so it cannot silently follow the enum if a page is inserted.
+**...and the first cut of it was UNSWITCHABLE ON KEYBOARD, which is what Aaron reported ("I can't
+switch the tab").** Three separate holes, all of the same kind — the controls existed and the screen
+lied about them. (1) There was **no keyboard page-cycle key at all**: the shoulders are the
+controller's route, and a mouse-and-keyboard player could only change page by clicking a tab or by
+already knowing the direct hotkeys. (2) The chrome's hint said **"LB / RB switch page"
+unconditionally** — the one thing on screen claiming to explain paging named two buttons a keyboard
+player does not have, which is worse than silence. It reads the ACTIVE DEVICE now. (3) The inventory
+cursor accepted **WASD only**; the arrow keys were dead, and the quest log's own footer said
+"Left/Right change act", pointing at keys that were not wired. Arrows work everywhere WASD does now,
+and `PgUp`/`PgDn` + `[`/`]` cycle pages.
+**...and then the hotkeys themselves were the wrong answer** (Aaron: "t and j are bad better use the
+mouse and the wasd keys"). A page you reach by memorising a letter is not navigable; a page you
+reach by *moving* is. **The tab strip is a CURSOR POSITION now** — `INV_PANEL_MENUTAB`, outside the
+cycle like the stash. Press UP off the top of any page (bag row 0, equipment slot 0, the build
+grid's toggle row, the quest list's first row) and the cursor lands on the strip; LEFT/RIGHT walk
+the pages, DOWN drops back in. One rule at every page's top edge rather than a list of special
+cases, and it costs no new keys at all: WASD and the D-pad already do it, and the tabs are
+clickable. `PgUp`/`PgDn` and `[`/`]` stay bound as shortcuts but are no longer advertised — naming a
+shortcut instead of the navigation is how the first cut ended up unusable.
+**The strip SHOWS when it holds the cursor** — a gold ring plus a caret either side of the active
+tab. Without it a pad player who pressed UP cannot tell whether their next A/D moves between items
+or between PAGES; the two states are one keypress apart and looked identical. Drawn only in cursor
+mode, since in mouse mode the pointer already says where you are and a second marker is two cursors
+on one screen.
+**DOWN does nothing on the CHARACTER page**, deliberately: that page has no cursor panels at all (a
+model and a stats sheet), so entering it would park the highlight on a backpack slot the page never
+draws.
+**No label names a bracket key.** SDL scancodes are physical key POSITIONS: `SDL_SCANCODE_LEFTBRACKET`
+is the slot carrying `[` on a US layout and **ü** on the German QWERTZ this project is developed on.
+The keys stay bound; only WASD and the shoulders are ever named.
+**...AND THE MOUSE WAS DEAD ON THE QUEST PAGE ENTIRELY** (Aaron: "möuse doesn't work"), which is the
+most important bug of the whole pass and PREDATES the tab bar. `updateInventoryInteraction` runs the
+cursor-navigation block BEFORE the physical-mouse path, and three panel blocks inside it end in an
+unconditional `return`: the build grid, the quest page, and (newly) the tab strip. So whenever one
+of those was on screen the mouse was dead **for the entire menu** — on the quest log you could not
+click a quest row, an act tab, a page tab or anything else, and on the build grid the same was true
+across the whole inventory. The journal shipped with this on 2026-08-10; making the journal a PAGE
+widened it from "the cursor is parked on that panel" to "that page is open at all".
+The gate is `cursorDrives = cursorMode || navR || navL || navD || navU` — a frame carrying only
+mouse input now falls through to the mouse path, while a nav press still routes to the page that
+owns it. **`cursorMode` alone is not enough**: it is sampled BEFORE this frame's nav presses, so the
+first W in mouse mode would fall past these blocks into the generic item handling with a non-item
+page on screen.
+**Verified by a discriminating control, not by reasoning**: a probe at the top of the mouse path
+fired **0 times** with the old predicate and **4 times** with the fix, on the same 16 s run with the
+quest page open; then a real `xdotool` click resolved to `SlotHit::MENU_TAB idx=1` and `idx=2`.
+Note what made this hard to catch from the outside: synthetic clicks are ALSO swallowed by the
+window-focus input gate, so a failed click test proves nothing on its own — the reachability probe
+is what separated "the code never runs" from "the input never arrived".
+**Two more labels were simply wrong** and are the same failure in miniature: the character page's
+footer said "C to close" (inherited from before the quickbar took C — the page is `T`, with `K` as
+an alias), and a hint that names a key which does something ELSE is the worst kind.
+**Verified live on all three pages** (`--town --endgame`, screenshots at 720p) and pinned by
+`tests/game/test_menu_frame.cpp` — the content box is inside the frame, the act tabs never collide
+with the page tabs, and each page tab is clickable across its whole drawn plate. That last case is
+**edge-sampled on purpose**: its first version probed plate CENTRES and passed against a hit-test
+shifted 40 px, which is the sabotage that caught it. Suite **863/863**.
 
 **...and a cave entrance is now a CAVE, not a tinted pillar (2026-08-07, Aaron: "remodel the cave
 entrances using the tools").** The first pass reused the shrine's standing-pillar mesh with a grey
