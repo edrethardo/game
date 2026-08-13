@@ -95,6 +95,18 @@ void Engine::openMenu(u8 tab) {
         if (m_firstPickupTooltipShown && !m_equipTooltipShown) m_equipTooltipShown = true;
     }
 
+    // Open the quest log on the act the player is actually IN. D2R does this, and the alternative
+    // is worse than it sounds: m_invJournalAct persists, so a player who glanced at Act I in the
+    // town and then walked into Act 2 opens the log to five completed rows and no sign of the
+    // quest they are on. Only on a fresh open, so paging away and back keeps your place.
+    if (!wasOpen && m_level.inZone) {
+        const u8 act = Quest::actOf(m_level.zoneFloor);
+        if (act >= 1 && act - 1 < InventoryUI::JOURNAL_TABS) {
+            const u8 tab = static_cast<u8>(act - 1);
+            if (tab != m_invJournalAct) { m_invJournalAct = tab; m_invCursorQuest = 0; }
+        }
+    }
+
     // A drag begun on a previous open must not survive into this one.
     m_dragState = {};
     m_dblClickState = {};
@@ -238,7 +250,7 @@ void Engine::inventoryCursorToMouse(u32 sw, u32 sh, s32& mx, s32& my) const {
         const f32 bpGap  = InventoryUI::BP_GAP  * uiScale;
         const u32 col = m_invCursorIndex % InventoryUI::BP_COLS;
         const u32 row = m_invCursorIndex / InventoryUI::BP_COLS;
-        const f32 bpX = static_cast<f32>(sw) * 0.42f;
+        const f32 bpX = InventoryUI::backpackOriginX(sw, uiScale);
         const f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f * uiScale;
         mx = static_cast<s32>(bpX + col * (bpCell + bpGap) + bpCell * 0.5f);
         my = static_cast<s32>(bpStartY - row * (bpCell + bpGap) + bpCell * 0.5f);
@@ -246,7 +258,7 @@ void Engine::inventoryCursorToMouse(u32 sw, u32 sh, s32& mx, s32& my) const {
         const f32 eqH = InventoryUI::EQ_H   * uiScale;
         const f32 eqW = InventoryUI::EQ_W   * uiScale;
         const f32 eqGap = InventoryUI::EQ_GAP * uiScale;
-        const f32 eqX = static_cast<f32>(sw) * 0.12f;
+        const f32 eqX = InventoryUI::equipmentOriginX(sw);
         const f32 eqStartY = static_cast<f32>(sh) * 0.5f + 220.0f * uiScale;
         mx = static_cast<s32>(eqX + eqW * 0.5f);
         my = static_cast<s32>(eqStartY - m_invCursorIndex * (eqH + eqGap) + eqH * 0.5f);
@@ -790,53 +802,73 @@ void Engine::updateInventoryInteraction(f32 dt) {
     // Tick double-click timer
     m_dblClickState.timer += dt;
 
+    // ---- WHICH PAGE OWNS THE MOUSE ------------------------------------------------------------
+    // Decided ONCE, here, before any item machinery. Every hit-test below (hitTest, hitTestStash,
+    // hitTestBuildGrid) is pure GEOMETRY — it answers from the layout alone and neither knows nor
+    // cares which page is on screen. So while the Character or Quests page was up, the inventory's
+    // panels were still fully clickable where they would have been drawn:
+    //   * right-click on a quest row landed on the invisible EQUIPMENT column and dropped the
+    //     equipped item on the floor, behind an opaque menu, with no icon and no tooltip to warn;
+    //   * a left-click that missed a quest row fell through to the invisible BACKPACK grid, so a
+    //     double-click on narration equipped a bag item and a 3 px drag DROPPED it;
+    //   * a click on the stats sheet hit the invisible BUILD GRID and silently re-geared the whole
+    //     character;
+    //   * Q (drop the entire backpack) and middle-click fired from any page at all.
+    // The gate is the page, applied once, rather than a condition repeated per mouse button — the
+    // per-button version is what let right-click, Q and middle-click slip through while left-click
+    // looked handled.
+
+    // The TAB STRIP is the one thing clickable on every page: it is drawn over all of them, so it
+    // is tested over all of them, and it is the only mouse route between pages.
+    if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT) && m_dragState.source == DragSource::NONE) {
+        const InventoryUI::SlotHit mt = InventoryUI::hitTestMenuTabs(sw, sh, mx, my);
+        if (mt.panel == InventoryUI::SlotHit::MENU_TAB && mt.index < MENU_TAB_COUNT) {
+            if (mt.index != m_menuTab) {
+                // Go through the shared cycler rather than assigning: it carries the stash-cursor
+                // parking rule, which a direct write here would miss.
+                cycleMenuTab(static_cast<s8>(static_cast<s16>(mt.index) -
+                                             static_cast<s16>(m_menuTab)));
+            }
+            return;
+        }
+    }
+
+    // The QUESTS page owns its own clicks — act tabs and quest rows — and NOTHING else. It returns
+    // unconditionally: a miss inside this page is a miss, not a fall-through into the bag.
+    if (questTabUp()) {
+        if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT)) {
+            const InventoryUI::SlotHit jr = InventoryUI::hitTestJournal(sw, sh, mx, my);
+            if (jr.panel == InventoryUI::SlotHit::JOURNAL_TAB &&
+                jr.index < InventoryUI::JOURNAL_TABS) {
+                m_invJournalAct  = jr.index;
+                m_invCursorQuest = 0;      // per-act row cursor — see the nav block
+                AudioSystem::play(SfxId::UI_CLICK);
+            } else if (jr.panel == InventoryUI::SlotHit::JOURNAL_ROW) {
+                // The hit-test reports any row in the column; only the ones this act actually
+                // fills are selectable, or the detail pane would draw nothing and read broken.
+                u8 rows = 0;
+                for (u32 i = 0; i < Quest::COUNT; i++)
+                    if (Quest::actOf(Quest::QUESTS[i].zoneFloor) == m_invJournalAct + 1) rows++;
+                if (jr.index < rows) {
+                    m_invCursorQuest = jr.index;
+                    AudioSystem::play(SfxId::UI_CLICK);
+                }
+            }
+        }
+        return;
+    }
+
+    // The CHARACTER page has no clickable content at all — a model and a stats sheet. Its only
+    // mouse gesture is the drag-rotate, which gameUpdate reads directly from the button state.
+    if (m_menuTab == MENU_TAB_CHARACTER) return;
+
+    // ---- INVENTORY page: the item machinery ---------------------------------------------------
     if (m_dragState.source == DragSource::NONE) {
         // --- No drag active ---
 
         // Left mouse pressed: detect double-click or begin potential drag
         if (Input::isMouseButtonPressed(SDL_BUTTON_LEFT)) {
-            // THE PAGE TABS come first, before any page's own hit-test. They are drawn on top of
-            // every page, so they must be tested on top of every page too — and being able to
-            // click them is what makes the menu navigable at all for a mouse player, who has no
-            // shoulder buttons.
             {
-                const InventoryUI::SlotHit mt = InventoryUI::hitTestMenuTabs(sw, sh, mx, my);
-                if (mt.panel == InventoryUI::SlotHit::MENU_TAB && mt.index < MENU_TAB_COUNT) {
-                    if (mt.index != m_menuTab) {
-                        // Go through the shared cycler rather than assigning: it carries the
-                        // stash-cursor parking rule, which a direct write here would miss.
-                        cycleMenuTab(static_cast<s8>(static_cast<s16>(mt.index) -
-                                                     static_cast<s16>(m_menuTab)));
-                    }
-                    return;
-                }
-            }
-
-            // The quest page owns the whole content area, so its hit-test runs instead of — never
-            // beside — the inventory page's. Checked before the item hit-test so a click here
-            // cannot also start a phantom drag on a slot that is not even on screen.
-            if (questTabUp()) {
-                const InventoryUI::SlotHit jr = InventoryUI::hitTestJournal(sw, sh, mx, my);
-                if (jr.panel == InventoryUI::SlotHit::JOURNAL_TAB &&
-                    jr.index < InventoryUI::JOURNAL_TABS) {
-                    m_invJournalAct  = jr.index;
-                    m_invCursorQuest = 0;      // per-act row cursor — see the nav block
-                    AudioSystem::play(SfxId::UI_CLICK);
-                    return;
-                }
-                if (jr.panel == InventoryUI::SlotHit::JOURNAL_ROW) {
-                    // The hit-test reports any row in the column; only the ones this act actually
-                    // fills are selectable, or the detail pane would draw nothing and read broken.
-                    u8 rows = 0;
-                    for (u32 i = 0; i < Quest::COUNT; i++)
-                        if (Quest::actOf(Quest::QUESTS[i].zoneFloor) == m_invJournalAct + 1) rows++;
-                    if (jr.index < rows) {
-                        m_invCursorQuest = jr.index;
-                        AudioSystem::play(SfxId::UI_CLICK);
-                        return;
-                    }
-                }
-            } else {
                 const InventoryUI::SlotHit bg = InventoryUI::hitTestBuildGrid(sw, sh, mx, my);
                 if (bg.panel == InventoryUI::SlotHit::BUILD_TOGGLE) {
                     PlayerInventory& binv = m_inventories[m_localPlayerIndex];

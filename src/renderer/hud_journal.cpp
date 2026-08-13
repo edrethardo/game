@@ -32,7 +32,7 @@ Vec3 stateColour(Quest::State s) {
         case Quest::State::COMPLETE: return Vec3{1.00f, 0.85f, 0.35f};   // gold
         case Quest::State::ACTIVE:   return Vec3{0.95f, 0.95f, 0.95f};   // white
         case Quest::State::OFFERED:  return Vec3{0.70f, 0.76f, 0.88f};   // grey-blue
-        default:                     return Vec3{0.38f, 0.38f, 0.42f};   // dim: not yet known
+        default:                     return Vec3{0.52f, 0.52f, 0.58f};   // dim: not yet known
     }
 }
 
@@ -205,7 +205,9 @@ void HUD::drawQuestLog(u32 sw, u32 sh, const Quest::Progress& prog,
         const f32 x0 = r.tabX + (r.tabW + r.tabGap) * static_cast<f32>(t);
         const bool on  = (t == actTab);
         const bool hov = hover.panel == InventoryUI::SlotHit::JOURNAL_TAB && hover.index == t;
-        const char* label = (t == 0) ? "ACT I" : "ACT II";
+        // Indexed, not a ternary: a third act silently mislabelled as ACT II otherwise.
+        static const char* kActNames[] = { "ACT I", "ACT II", "ACT III", "ACT IV" };
+        const char* label = (t < 4) ? kActNames[t] : "ACT ?";
         const Vec3  col   = on  ? Vec3{1.0f, 0.90f, 0.50f}
                           : hov ? Vec3{0.85f, 0.85f, 0.90f}
                                 : Vec3{0.52f, 0.52f, 0.58f};
@@ -232,7 +234,7 @@ void HUD::drawQuestLog(u32 sw, u32 sh, const Quest::Progress& prog,
                       static_cast<u32>(doneCount), static_cast<u32>(rowCount));
         FontSystem::drawText(sw, sh, r.listX + 4.0f * s,
                              r.listTopY - r.rowH * static_cast<f32>(rowCount) - 20.0f * s,
-                             sum, Vec3{0.50f, 0.52f, 0.60f}, 0.9f * s);
+                             sum, Vec3{0.62f, 0.64f, 0.74f}, tx);
     }
 
     if (selectedRow >= rowCount) return;   // empty act, or a stale cursor after a tab flip
@@ -246,7 +248,7 @@ void HUD::drawQuestLog(u32 sw, u32 sh, const Quest::Progress& prog,
 
     if (st == Quest::State::LOCKED) {
         FontSystem::drawText(sw, sh, r.detailX, y, "Not yet known.",
-                             Vec3{0.45f, 0.45f, 0.5f}, tx);
+                             Vec3{0.58f, 0.58f, 0.64f}, tx);
         return;
     }
 
@@ -260,7 +262,7 @@ void HUD::drawQuestLog(u32 sw, u32 sh, const Quest::Progress& prog,
     // showing the wrong name, so it is bounded here and not trusted.
     if (qd.giverIdx < Quest::GIVER_COUNT) {
         FontSystem::drawText(sw, sh, r.detailX, y, Quest::GIVERS[qd.giverIdx].name,
-                             Vec3{0.62f, 0.68f, 0.80f}, 0.95f * s);
+                             Vec3{0.66f, 0.74f, 0.88f}, tx);
         y -= lineH * 1.5f;
     }
 
@@ -268,7 +270,7 @@ void HUD::drawQuestLog(u32 sw, u32 sh, const Quest::Progress& prog,
                     Vec3{0.80f, 0.80f, 0.84f}, tx, lineH);
     y -= lineH * 1.1f;
 
-    FontSystem::drawText(sw, sh, r.detailX, y, "OBJECTIVES", Vec3{0.85f, 0.74f, 0.40f}, 0.9f * s);
+    FontSystem::drawText(sw, sh, r.detailX, y, "OBJECTIVES", Vec3{0.92f, 0.80f, 0.44f}, tx);
     y -= lineH * 1.25f;
 
     for (u32 o = 0; o < qd.objectiveCount && o < Quest::MAX_OBJ; o++) {
@@ -291,10 +293,17 @@ void HUD::drawQuestLog(u32 sw, u32 sh, const Quest::Progress& prog,
             //
             // Clamped because a breeder (Hot Reloader summons Null Pointers) can push the live
             // count ABOVE the count recorded at spawn, and an unsigned wrap would print 65534/4.
-            const u32 killed = (liveRemaining >= liveTotal)
-                             ? 0u : static_cast<u32>(liveTotal - liveRemaining);
-            std::snprintf(row, sizeof(row), "%s  %u/%u", od.text,
-                          killed, static_cast<u32>(liveTotal));
+            // REMAINING, not killed. The label is "Hostiles remaining" and the number printed
+            // beside it was liveTotal - liveRemaining — the body count — so a zone with 3 of 8
+            // dead read "Hostiles remaining 3/8" while 5 were still hunting you. Same defect as
+            // "QUEST COMPLETE" over empty boxes: the row states the opposite of the truth.
+            //
+            // Clamped because a breeder (Hot Reloader summons Null Pointers) can push the live
+            // count ABOVE the count recorded at spawn; showing more remaining than the zone
+            // started with is honest, so only the display total is widened to match.
+            const u32 left  = static_cast<u32>(liveRemaining);
+            const u32 total = (liveRemaining > liveTotal) ? left : static_cast<u32>(liveTotal);
+            std::snprintf(row, sizeof(row), "%s  %u/%u", od.text, left, total);
         } else if (od.required > 1) {
             std::snprintf(row, sizeof(row), "%s  %u/%u", od.text,
                           static_cast<u32>(Quest::objectiveProgress(prog, q, static_cast<u8>(o))),
@@ -306,11 +315,21 @@ void HUD::drawQuestLog(u32 sw, u32 sh, const Quest::Progress& prog,
         // The tick is drawn, not typed: "[x]" and "[ ]" differ by one glyph in the middle of a
         // fixed-width bracket pair, which at HUD scale is nearly invisible. A filled vs hollow box
         // reads instantly and matches the quest markers in the list beside it.
-        const Vec3 col = done ? Vec3{0.55f, 0.85f, 0.55f} : Vec3{0.80f, 0.80f, 0.84f};
+        //
+        // A TALK objective gets NO box at all — it is narration, not a requirement. reevaluate()
+        // deliberately excludes TALK from the completion test (a quest completes on its DEED; the
+        // conversation is flavour), so drawing it as an unticked checkbox stated an obligation the
+        // design does not have, on the majority of quests, for as long as they were active.
+        const bool optional = (od.trigger == Quest::Trigger::TALK);
+        const Vec3 col = optional ? Vec3{0.62f, 0.66f, 0.78f}
+                       : done     ? Vec3{0.55f, 0.85f, 0.55f}
+                                  : Vec3{0.80f, 0.80f, 0.84f};
         const f32  bx = r.detailX + 2.0f * s, by = y + 1.0f * s, bs = 8.0f * s;
-        if (done) fillRect(bx, by, bx + bs, by + bs, col);
-        else      pushQuad(bx, by, bx + bs, by + bs, Vec3{0.45f, 0.45f, 0.50f});
-        flushHUD();
+        if (!optional) {
+            if (done) fillRect(bx, by, bx + bs, by + bs, col);
+            else      pushQuad(bx, by, bx + bs, by + bs, Vec3{0.45f, 0.45f, 0.50f});
+            flushHUD();
+        }
 
         FontSystem::drawText(sw, sh, bx + bs + 8.0f * s, y, row, col, tx);
         y -= lineH * 1.15f;
@@ -327,5 +346,5 @@ void HUD::drawQuestLog(u32 sw, u32 sh, const Quest::Progress& prog,
     // a label that sends the player at a key which is not wired is worse than no label.
     FontSystem::drawText(sw, sh, r.detailX, m.contentY + 6.0f * s,
                          "W/S select quest    A/D change act    W at the top for the page tabs",
-                         Vec3{0.44f, 0.44f, 0.52f}, 0.9f * s);
+                         Vec3{0.56f, 0.56f, 0.66f}, tx);
 }

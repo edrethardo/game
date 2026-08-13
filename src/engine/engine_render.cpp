@@ -566,12 +566,16 @@ void Engine::renderPostOverlays(u32 sw, u32 sh) {
         lowHp = (GameConst::LOW_HP_FRACTION - hpFrac) / GameConst::LOW_HP_FRACTION * 0.40f;   // 0 at threshold -> 0.40 near death, constant per frame
     f32 vig = fmaxf(m_localPlayer.hurtVignette, lowHp);
     if (vig > 0.60f) vig = 0.60f;
-    // Stands down under the character menu, like the tutorial prompts and the target bar. It is
-    // drawn AFTER the HUD, so over a full-screen page it is a red wash across the very text the
-    // page exists to show — measured on the quest log at 11% HP, where the list was barely
-    // legible. Nothing is lost by hiding it: the menu already covers the world it is warning
-    // about, and the warning it carries ("you are low") is on the page's own Health row.
-    if (m_inventoryOpen) vig = 0.0f;
+    // Stands down under the menu ONLY where the world is frozen anyway — singleplayer, where the
+    // menu now pauses on every page. It is drawn after the HUD, so over a full-screen page it is a
+    // red wash across the very text the page exists to show (measured on the quest log at 11% HP,
+    // barely legible), and with the world stopped it warns about nothing.
+    //
+    // In MULTIPLAYER the world keeps running and cannot be paused, so it stays: that is the only
+    // damage cue left on a menu page, and the earlier blanket suppression removed it. The comment
+    // it replaced claimed the warning "is on the page's own Health row" — only the CHARACTER page
+    // has one, and that is the page where nothing can hurt you.
+    if (m_inventoryOpen && m_netRole == NetRole::NONE) vig = 0.0f;
     if (vig > 0.0f) {
         glDisable(GL_DEPTH_TEST);
         glEnable(GL_BLEND);

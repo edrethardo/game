@@ -89,7 +89,7 @@ InventoryUI::SlotHit InventoryUI::hitTest(u32 sw, u32 sh, s32 mx, s32 my) {
 
     // --- Backpack grid (right side) ---
     {
-        f32 bpX = static_cast<f32>(sw) * 0.42f;
+        f32 bpX = backpackOriginX(sw, uiScale);
         f32 bpStartY = static_cast<f32>(sh) * 0.5f + 180.0f * uiScale;
         f32 cell = BP_CELL * uiScale;
         f32 gap  = BP_GAP * uiScale;
@@ -110,7 +110,7 @@ InventoryUI::SlotHit InventoryUI::hitTest(u32 sw, u32 sh, s32 mx, s32 my) {
 
     // --- Equipment panel (left side) ---
     {
-        f32 eqX = static_cast<f32>(sw) * 0.12f;
+        f32 eqX = equipmentOriginX(sw);
         f32 centerY = static_cast<f32>(sh) * 0.5f;
         f32 eqStartY = centerY + 220.0f * uiScale;
         f32 eqW = EQ_W * uiScale;
@@ -298,10 +298,33 @@ InventoryUI::SlotHit InventoryUI::hitTestJournal(u32 sw, u32 sh, s32 mx, s32 my)
 // The inset is generous but not full-screen: a visible margin of dimmed world is what makes the
 // thing read as a panel laid over the game instead of a new screen the game switched to.
 // ---------------------------------------------------------------------------------------------
+f32 InventoryUI::equipmentOriginX(u32 sw) {
+    return static_cast<f32>(sw) * 0.12f;
+}
+
+f32 InventoryUI::backpackOriginX(u32 sw, f32 uiScale) {
+    const f32 wide = static_cast<f32>(sw) * 0.42f;               // the roomy 16:9 anchor
+    // ...but never left of the equipment column's right edge plus a gutter. See the header: at a
+    // narrow viewport the fraction and the fixed-width column cross over.
+    const f32 minX = equipmentOriginX(sw) + EQ_W * uiScale + 24.0f * uiScale;
+    return (wide > minX) ? wide : minX;
+}
+
 InventoryUI::MenuFrameRects InventoryUI::menuFrameLayout(u32 sw, u32 sh) {
     MenuFrameRects r;
     const f32 fsw = static_cast<f32>(sw), fsh = static_cast<f32>(sh);
+    // FLOORED. Every HUD metric in this game is height/720, which in a horizontal split-screen
+    // viewport (1280x360) is 0.5 — and this menu's own hint block records that even 0.85 smudged
+    // "LB / RB" into "LD / RD" on the 5x7 pixel atlas. At 0.5 the quest narration is unreadable,
+    // and the menu is the one screen made almost entirely of prose.
+    //
+    // The floor makes the LAYOUT tighter rather than the text smaller: the frame keeps its inset,
+    // so rows and pads get proportionally more of a short viewport. test_menu_frame.cpp pins that
+    // the content box still fits at both split geometries — the failure mode of a floor is that
+    // the page grows past its frame, so that has to be asserted rather than assumed.
+    constexpr f32 kMinUiScale = 0.75f;
     r.uiScale = fsh / 720.0f;
+    if (r.uiScale < kMinUiScale) r.uiScale = kMinUiScale;
 
     // Horizontal inset is a FRACTION, vertical is nearly the full height: the inventory page's
     // existing panels (equipment column, backpack grid, build grid, skill bars) already span from

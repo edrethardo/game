@@ -1019,6 +1019,20 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
                           : (heldSec >= GameConst::INTERACT_HOLD_SEC ? 1.0f
                              : heldSec / GameConst::INTERACT_HOLD_SEC);
 
+    // Prompts STACK. Each one drawn takes the next line down from a common top, because the
+    // fixture prompts were every one of them hard-coded to 0.45*sh: a shrine beside a waypoint, or
+    // a giver beside the town stash, drew two centred strings on the SAME baseline and overprinted
+    // into mush. Zones contain both shrines and waypoints, so this was reachable, not theoretical.
+    //
+    // The row is claimed by the DRAW, so the order of the `if`s below IS the priority order and
+    // nothing hand-picks a screen height any more. EVERY prompt goes through it, including the
+    // floor exit and the portals: they used to sit at a fixed 0.4*sh while the fixtures stacked
+    // down from 0.45*sh, so two fixtures plus an exit put a third string exactly on the exit's
+    // line — the collision moved rather than went away.
+    u32 promptRow = 0;
+    const f32 promptTop  = static_cast<f32>(sh) * 0.45f;
+    const f32 promptStep = 18.0f * (static_cast<f32>(sh) / 720.0f);
+
     // Draws "[E] Label" (or "[E] Hold — Label"), plus a fill bar tracking the hold. The bar is the
     // only thing telling the player the press is being counted rather than ignored.
     auto drawPrompt = [&](const char* label, Vec3 col, f32 cy) {
@@ -1044,7 +1058,7 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
     if (st.nearExit && m_gameState == GameState::IN_GAME) {
         char doorStr[32];
         std::snprintf(doorStr, sizeof(doorStr), "Descend to Floor %u", m_level.currentFloor + 1);
-        drawPrompt(doorStr, {0.3f, 1.0f, 0.4f}, static_cast<f32>(sh) * 0.4f);
+        drawPrompt(doorStr, {0.3f, 1.0f, 0.4f}, promptTop - promptStep * static_cast<f32>(promptRow++));
     }
 
     // ZONE GATES — a cave mouth, a stone circle, the Hellgate, a graveyard gate, a tube entrance,
@@ -1063,30 +1077,32 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
         // An unnamed destination is a data error (a gate pointing at a floor no ZoneDef claims);
         // say something true rather than printing a sentinel byte at the player.
         std::snprintf(gateStr, sizeof(gateStr), dest ? "Enter %s" : "Enter", dest ? dest : "");
-        drawPrompt(gateStr, {0.3f, 1.0f, 0.4f}, static_cast<f32>(sh) * 0.4f);
+        drawPrompt(gateStr, {0.3f, 1.0f, 0.4f}, promptTop - promptStep * static_cast<f32>(promptRow++));
     }
 
     // The two other overworld fixtures were equally silent. A waypoint you cannot tell is
     // interactable is a stone, and an un-aligned Cairn Stone is the quest's whole mechanic.
     if (st.waypointIdx >= 0 && st.itemIdx < 0 && m_gameState == GameState::IN_GAME) {
-        drawPrompt("Waypoint", {0.45f, 0.85f, 1.0f}, static_cast<f32>(sh) * 0.45f);
+        drawPrompt("Waypoint", {0.45f, 0.85f, 1.0f}, promptTop - promptStep * static_cast<f32>(promptRow++));
     }
     if (st.cairnIdx >= 0 && st.itemIdx < 0 && m_gameState == GameState::IN_GAME) {
-        drawPrompt("Align the Stone", {0.85f, 0.75f, 1.0f}, static_cast<f32>(sh) * 0.45f);
+        drawPrompt("Align the Stone", {0.85f, 0.75f, 1.0f}, promptTop - promptStep * static_cast<f32>(promptRow++));
     }
 
     // The post-Engine exit portal — the run's ending, so the label says so. (The Source ENTRY
     // portal deliberately has no prompt: it's a secret. This one must be found by everyone.)
     if (st.nearExitPortal && m_gameState == GameState::IN_GAME) {
-        drawPrompt("Leave the Dungeon", {1.0f, 0.85f, 0.4f}, static_cast<f32>(sh) * 0.4f);
+        drawPrompt("Leave the Dungeon", {1.0f, 0.85f, 0.4f}, promptTop - promptStep * static_cast<f32>(promptRow++));
     }
 
     // Town: the account stash and the to-dungeon portal.
     if (st.stashIdx >= 0 && st.itemIdx < 0 && m_gameState == GameState::IN_GAME) {
-        drawPrompt("Open Stash", {1.0f, 0.85f, 0.4f}, static_cast<f32>(sh) * 0.45f);
+        drawPrompt("Open Stash", {1.0f, 0.85f, 0.4f}, promptTop - promptStep * static_cast<f32>(promptRow++));
     }
     if (st.nearTownPortal && m_gameState == GameState::IN_GAME) {
-        drawPrompt("Enter the Dungeon", {0.5f, 1.0f, 0.5f}, static_cast<f32>(sh) * 0.4f);
+        // Same green as the floor exit and the zone gates — one colour for "this takes you
+    // somewhere else", rather than two greens a shade apart for the same idea.
+    drawPrompt("Enter the Dungeon", {0.3f, 1.0f, 0.4f}, promptTop - promptStep * static_cast<f32>(promptRow++));
     }
 
     // "Speak to <name>" — the giver's own name, so the player knows WHO they are walking up to
@@ -1098,7 +1114,7 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
         if (g.questGiver < Quest::GIVER_COUNT) {
             char prompt[96];
             std::snprintf(prompt, sizeof(prompt), "Speak to %s", Quest::GIVERS[g.questGiver].name);
-            drawPrompt(prompt, {0.75f, 0.85f, 1.0f}, static_cast<f32>(sh) * 0.45f);
+            drawPrompt(prompt, {0.75f, 0.85f, 1.0f}, promptTop - promptStep * static_cast<f32>(promptRow++));
         }
     }
 
@@ -1108,7 +1124,7 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
         const u8 buff = Shrine::buffOf(m_worldItems.items[st.shrineIdx].item);
         const Vec3 c = Shrine::colorOf(buff);
         drawPrompt(Shrine::nameOf(buff), {c.x * 0.9f + 0.1f, c.y * 0.9f + 0.1f, c.z * 0.9f + 0.1f},
-                   static_cast<f32>(sh) * 0.45f);
+                   promptTop - promptStep * static_cast<f32>(promptRow++));
     }
 
     // Chest — real (CHEST_ID world-item sentinel) or mimic (dormant entity): ONE prompt, one
@@ -1120,7 +1136,7 @@ void Engine::renderInteractionPrompts(u32 sw, u32 sh) {
     if ((st.chestIdx >= 0 || st.mimicIdx >= 0) && st.itemIdx < 0 &&
         m_gameState == GameState::IN_GAME) {
         drawPrompt("Open Chest", {0.85f, 0.62f, 0.28f},
-                   static_cast<f32>(sh) * (st.shrineIdx >= 0 ? 0.5f : 0.45f));
+                   promptTop - promptStep * static_cast<f32>(promptRow++));
     }
 
     // Item pickup prompt — names the item the button will actually grab. It reads the ONE resolved

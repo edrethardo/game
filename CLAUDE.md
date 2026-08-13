@@ -796,6 +796,67 @@ screens silently produced nothing. Those are precisely the screens worth capturi
 silent (this file records the credits park and the death-screen strand staying hidden for exactly
 that reason). `Engine::presentFrame` is the single choke every `swapBuffers` site now goes through.
 
+**THE ADVERSARIAL UI REVIEW, AND THE TWO CRITICALS IT FOUND (2026-08-13).** Aaron commissioned an
+independent UI/UX review of the tabbed menu. Two findings were severe enough to cost a player gear
+or a life, and BOTH were regressions from the pass that built the menu.
+**(1) THE MOUSE HIT-TESTS WERE LIVE UNDER PAGES THAT DO NOT DRAW THEM.** `hitTest`,
+`hitTestBuildGrid` and `hitTestStash` answer from LAYOUT ALONE — they neither know nor care which
+page is on screen. The cursor path had been gated per page; the MOUSE path had not, and only its
+left-click was even partly handled. So with the Character or Quests page up, the inventory's panels
+were still fully clickable where they *would* have been drawn: a **right-click on a quest row landed
+on the invisible equipment column and dropped the equipped item on the floor**, behind an opaque
+menu, with no icon and no tooltip to show it had happened; a left-click that missed a quest row fell
+through to the invisible backpack, so a double-click on narration equipped a bag item and a 3 px
+drag dropped it; a click on the stats sheet hit the build grid and silently re-geared the character;
+and `Q` (drop the whole bag) and middle-click fired from any page at all.
+**The fix is ONE page test at the top of the mouse path, not a condition per button** — the
+per-button version is exactly what let right-click, Q and middle-click slip through while left-click
+looked handled. The tab strip is tested first (it is the only thing drawn on every page), the quest
+page then owns its clicks and RETURNS unconditionally, the character page returns outright, and only
+the inventory page reaches the item machinery.
+**(2) THE MENU WAS OPAQUE OVER AN UNPAUSED WORLD WITH EVERY DAMAGE CUE OFF.** The health bar has
+always lived in the non-menu branch, but this pass made the backdrop opaque AND suppressed the
+vignette, the target bar and the chat log. Before it, you could at least see the dungeon through the
+item grid. After it, on the two pages that do not pause, a player had no HP readout, no vignette and
+no target bar while enemies kept attacking. The comment justifying the vignette suppression claimed
+"the warning is on the page's own Health row" — only the CHARACTER page has one, and that is the one
+page where the world is already frozen. **Singleplayer now pauses on EVERY page** (Aaron's call);
+MP still never pauses — a remote peer cannot be held hostage by one player's screen — so there the
+vignette stays lit, because it is the only cue left. `botMayAct` follows the same split: in SP the
+bot stands down under the menu (the world is stopped; driving a character round a frozen level is
+nonsense), in MP it keeps playing, which is what the "fight while I re-gear" carve-out is for.
+**Everything else the review found was true but smaller,** and worth recording as one lesson: *the
+screen kept contradicting itself about its own controls.* The inventory's gamepad hint still read
+**"L / R Panels"** one frame away from the chrome's "LB / RB switch page" — two hints, same screen,
+opposite claims about the same two buttons. The keyboard had **no action hints at all** (the whole
+row is gamepad-gated), so `F` — which DROPS the selected item — was undiscoverable. And
+**"Hostiles remaining 3/8" printed the number KILLED**, so a zone with five hunters left told you
+three remained: the same defect class as "QUEST COMPLETE" over unticked boxes, which this page was
+built to fix.
+**Split-screen was structurally broken in two ways, both now pinned by test.** Every HUD metric is
+height/720, which in a horizontal split viewport (1280x360) is **0.5** — and this menu's own hint
+block already recorded that 0.85 smudged "LB / RB" into "LD / RD". The menu floors its scale at
+0.75 and lets the LAYOUT compress instead; the test asserts the content box, the tab strip and the
+quest log's full row span still fit, because the way a scale clamp fails is by pushing the page out
+of its frame. Separately, the equipment column is a FRACTION of the width plus a FIXED `240*scale`,
+so at 640 wide it spanned 77..317 while the backpack started at 269 — **a 48 px overlap of two live
+panels**, silently awarded to whichever hit-test ran first. Both anchors are single-sourced and
+clamped now (`equipmentOriginX` / `backpackOriginX`); each had THREE copies before, in draw,
+hit-test and the controller cursor. Sabotage-verified in both directions.
+**A TALK objective no longer draws a checkbox.** `reevaluate()` deliberately excludes TALK from the
+completion test — a quest completes on its DEED, the conversation is narration — so drawing it as an
+unticked box told the player they owed a conversation the design does not require, on most quests,
+for as long as they were active.
+**Prompts STACK now.** Every fixture prompt was hard-coded to `0.45*sh` and every exit/portal to
+`0.4*sh`, so a shrine beside a waypoint, or a giver beside the town stash, drew two centred strings
+on ONE baseline. A running row counter claimed by the draw means the order of the `if`s IS the
+priority order and nothing hand-picks a height. Routing only the fixtures would have moved the
+collision onto the exit's line rather than removing it, so all ten go through it.
+**What was deliberately NOT changed:** the death screen's left-anchored option rows read slightly
+off-axis under a centred title, but `deathOptionHit` scales identically to the draw and re-centring
+means moving both — churn on a working hit-test for a nit. And the quest page really is about
+two-thirds empty; that is a content decision (D2R fills it with art), not a bug to invent a fix for.
+
 **...and a cave entrance is now a CAVE, not a tinted pillar (2026-08-07, Aaron: "remodel the cave
 entrances using the tools").** The first pass reused the shrine's standing-pillar mesh with a grey
 tint. Diablo 2's Act 1 entrances are not monuments — they are a HOLE IN A ROCK, and that silhouette

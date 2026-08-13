@@ -429,7 +429,7 @@ void HUD::drawBuildGrid(u32 sw, u32 sh, u8 autoMode, u8 buildCell, s32 mouseX, s
 
     // Column headers above, row labels beside — labels OUTSIDE the cells, so 54px cells stay clean.
     static const char* colNames[3] = {"Magic", "Melee", "Ranged"};
-    static const char* rowNames[3] = {"Tanky", "Modrt", "Glass"};
+    static const char* rowNames[3] = {"Tanky", "Mid", "Glass"};
     for (u8 col = 0; col < 3; col++) {
         const f32 x = r.gridX + col * (r.cell + r.gap);
         const f32 tw = FontSystem::textWidth(colNames[col], 1);
@@ -563,7 +563,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
     f32 centerY = static_cast<f32>(sh) * 0.5f;
 
     // --- Equipment panel (left side, raised to leave room for tooltips below) ---
-    f32 eqX      = static_cast<f32>(sw) * 0.12f;
+    f32 eqX      = InventoryUI::equipmentOriginX(sw);
     f32 eqStartY = centerY + 220.0f * uiScale;
     f32 slotW    = 240.0f * uiScale;
     f32 slotH    = 32.0f * uiScale;
@@ -647,7 +647,7 @@ void HUD::drawInventoryScreen(u32 sw, u32 sh,
     }
 
     // --- Backpack panel (closer to equipment, raised for tooltip space below) ---
-    f32 bpX      = static_cast<f32>(sw) * 0.42f;
+    f32 bpX      = InventoryUI::backpackOriginX(sw, uiScale);
     f32 bpStartY = centerY + 180.0f * uiScale;
     f32 cellSize = 32.0f * uiScale;
     f32 cellGap  = 4.0f * uiScale;

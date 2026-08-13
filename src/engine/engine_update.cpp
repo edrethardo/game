@@ -806,7 +806,13 @@ void Engine::update(f32 dt) {
         // at their stats. The inspect-model rotation lives in gameUpdate (already run above) so
         // it keeps responding. MP never pauses — remote peers can't be held hostage by one
         // player's screen (mirrors the m_menu.confirmQuit pause policy).
-        if (m_netRole != NetRole::NONE || !characterTabUp()) {
+        // ...on ANY page of the menu, not just the character sheet. The menu draws an OPAQUE
+        // backdrop, and the HUD's health bar lives in the non-menu branch, so a player reading the
+        // quest log had no vignette, no HP bar, no target bar and no chat — and the world was still
+        // running. Blind and mortal at once. MP still never pauses: remote peers cannot be held
+        // hostage by one player's screen (the confirmQuit policy), so there the vignette stays on
+        // instead (renderPostOverlays).
+        if (m_netRole != NetRole::NONE || !m_inventoryOpen) {
             tickSharedSystems(dt);
         }
         // Arena PvP: last damage source (shared projectiles) has run — close the registry.

@@ -141,3 +141,42 @@ TEST_CASE("the act tabs never collide with the page tabs") {
     REQUIRE(InventoryUI::hitTestMenuTabs(sw, sh, mx, my).panel == InventoryUI::SlotHit::NONE);
     REQUIRE(j.tabY + j.tabH <= m.tabY);
 }
+
+TEST_CASE("the menu survives split-screen viewports") {
+    // The menu draws INSIDE a per-player viewport in couch co-op: 1280x360 on a horizontal split,
+    // 640x720 on a vertical one. Both were broken in different ways — the first shrank the pixel
+    // font to 0.5 (illegible), the second overlapped two live item panels — so both are pinned.
+    struct V { u32 w, h; const char* what; };
+    const V views[] = { {1280, 720, "full"}, {1280, 360, "horizontal split"},
+                        {640, 720, "vertical split"}, {960, 540, "small window"} };
+
+    for (const V& v : views) {
+        CAPTURE(v.what);
+        const InventoryUI::MenuFrameRects m = InventoryUI::menuFrameLayout(v.w, v.h);
+
+        // The floor is what keeps the text legible; without it a half-height viewport reports 0.5.
+        REQUIRE(m.uiScale >= 0.75f);
+
+        // ...and the floor must not push the page out of its own frame, which is the way a scale
+        // clamp fails. The content box and the tab strip both stay inside.
+        REQUIRE(m.contentH > 0.0f);
+        REQUIRE(m.contentY >= m.y);
+        REQUIRE(m.contentY + m.contentH <= m.y + m.h);
+        REQUIRE(m.tabY + m.tabH <= m.y + m.h);
+        REQUIRE(m.y + m.h <= static_cast<f32>(v.h));
+
+        // The quest log is the deepest page: its whole visible row span must fit the content box,
+        // or rows are drawn below the frame and the act summary lands off-screen.
+        const InventoryUI::JournalRects j = InventoryUI::journalLayout(v.w, v.h);
+        const f32 rowsBottom = j.listTopY - j.rowH * static_cast<f32>(InventoryUI::JOURNAL_ROWS);
+        REQUIRE(rowsBottom >= m.contentY);
+        REQUIRE(j.detailX + j.detailW <= m.contentX + m.contentW);
+
+        // The equipment column and the backpack grid must never overlap. At 640 wide the fraction
+        // anchor (0.42*sw = 269) fell LEFT of the equipment column's right edge (317).
+        const f32 eqX = InventoryUI::equipmentOriginX(v.w);
+        const f32 eqR = eqX + InventoryUI::EQ_W * (static_cast<f32>(v.h) / 720.0f);
+        const f32 bpX = InventoryUI::backpackOriginX(v.w, static_cast<f32>(v.h) / 720.0f);
+        REQUIRE(bpX >= eqR);
+    }
+}

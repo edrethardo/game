@@ -232,6 +232,18 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
     }
 
     // Inventory button hints (always visible when inventory is open)
+    if (!Input::activeDeviceIsGamepad()) {
+        // The keyboard's equivalents. This row did not exist: the block below is gamepad-gated, so
+        // a mouse-and-keyboard player was never told that E equips or — more to the point — that F
+        // DROPS the selected item. An undiscoverable destructive key is the worst kind.
+        const f32 hintY = 10.0f, hintX = 10.0f;
+        HUD::drawKeySymbol(sw, sh, hintX, hintY, "E", true);
+        FontSystem::drawText(sw, sh, hintX + 22.0f, hintY + 3.0f, "Equip", {0.6f, 0.6f, 0.6f}, 1);
+        HUD::drawKeySymbol(sw, sh, hintX + 75.0f, hintY, "F", true);
+        FontSystem::drawText(sw, sh, hintX + 97.0f, hintY + 3.0f, "Drop", {0.8f, 0.4f, 0.4f}, 1);
+        FontSystem::drawText(sw, sh, hintX + 145.0f, hintY + 3.0f, "WASD  Move",
+                             {0.6f, 0.6f, 0.6f}, 1);
+    }
     if (Input::activeDeviceIsGamepad()) {
         f32 hintY = 10.0f;
         f32 hintX = 10.0f;
@@ -241,11 +253,13 @@ void Engine::renderInventoryHUD(u32 sw, u32 sh) {
         FontSystem::drawText(sw, sh, hintX + 97.0f, hintY + 3.0f, "Drop", {0.6f, 0.6f, 0.6f}, 1);
         HUD::drawKeySymbol(sw, sh, hintX + 145.0f, hintY, "-", true);
         FontSystem::drawText(sw, sh, hintX + 167.0f, hintY + 3.0f, "Drop All", {0.8f, 0.4f, 0.4f}, 1);
-        HUD::drawKeySymbol(sw, sh, hintX + 240.0f, hintY, "L", true);
-        FontSystem::drawText(sw, sh, hintX + 262.0f, hintY + 3.0f, "/", {0.6f, 0.6f, 0.6f}, 1);
-        HUD::drawKeySymbol(sw, sh, hintX + 272.0f, hintY, "R", true);
-        // L/R now cycles four panels (backpack / equipment / class skills / equip skills), not two.
-        FontSystem::drawText(sw, sh, hintX + 294.0f, hintY + 3.0f, "Panels", {0.6f, 0.6f, 0.6f}, 1);
+        // NOT "L / R Panels" any more. The shoulders switch PAGES now (engine_inventory.cpp's
+        // pageL/pageR -> cycleMenuTab); panels are reached with the D-pad. This row sat one frame
+        // away from the chrome's own "LB / RB switch page" hint and flatly contradicted it — two
+        // hints on one screen claiming opposite things about the same two buttons.
+        HUD::drawKeySymbol(sw, sh, hintX + 240.0f, hintY, "D", true);
+        FontSystem::drawText(sw, sh, hintX + 262.0f, hintY + 3.0f, "Pad", {0.6f, 0.6f, 0.6f}, 1);
+        FontSystem::drawText(sw, sh, hintX + 294.0f, hintY + 3.0f, "Move", {0.6f, 0.6f, 0.6f}, 1);
     }
 
     // Equip tutorial — shown until the player equips an item (floor 1 only)

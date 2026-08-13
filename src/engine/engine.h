@@ -697,7 +697,14 @@ private:
     // open — NOT while a hard-freeze UI (pause / character inspect / options / menagerie) is up.
     bool botMayAct() const {
         if (!m_autoplayActive || !m_autoplayControl.botInControl()) return false;
-        return !(characterTabUp() || m_menu.confirmQuit || m_menu.optionsFromPause || m_menagerieOpen);
+        // Hard-freeze UIs stop the bot outright.
+        if (m_menu.confirmQuit || m_menu.optionsFromPause || m_menagerieOpen) return false;
+        // The menu pauses the world in SINGLEPLAYER now, so there is nothing there for the bot to
+        // act on — letting it drive would walk a character around a frozen level. In MP the world
+        // keeps running for everyone, so the "keep fighting while I re-gear" carve-out still holds
+        // and the bot plays on through an open menu, which is what it is for.
+        if (m_inventoryOpen && m_netRole == NetRole::NONE) return false;
+        return true;
     }
 
     // Networking

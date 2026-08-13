@@ -29,6 +29,15 @@ namespace InventoryUI {
     static constexpr f32 QB_SIZE = 40.0f;
     static constexpr f32 QB_GAP  = 4.0f;
 
+    // ---- Item-panel anchors (equipment column, backpack grid) --------------------------------
+    // Shared by draw AND hit-test AND the controller cursor, because all three had their own copy
+    // of `sw * 0.12f` / `sw * 0.42f` and one of them was going to drift. They also CLAMP, which is
+    // the actual bug: the equipment column is a FRACTION of the width plus a FIXED 240*scale, so in
+    // a vertical split (640 wide, uiScale still 1.0) it spans 77..317 while the backpack starts at
+    // 269 — a 48 px overlap of two live panels, silently awarded to whichever hitTest checks first.
+    f32 equipmentOriginX(u32 sw);
+    f32 backpackOriginX(u32 sw, f32 uiScale);
+
     struct SlotHit {
         enum Panel : u8 { NONE, BACKPACK, EQUIPMENT, QUICKBAR, STASH, STASH_TAB,
                           BUILD_CELL, BUILD_TOGGLE, JOURNAL_ROW, JOURNAL_TAB, MENU_TAB };
