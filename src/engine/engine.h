@@ -987,6 +987,9 @@ private:
         // The post-Engine TOWN hub (sentinel floor 98). inTown flips the sky/lighting, gates the
         // NPCs' stay-home AI, and routes saves to keep the CLEARED header floor (never 98).
         bool          inTown             = false;
+        // Trailer stage (engine_stage.cpp): outdoors-lit like town/arena, no world logic. Transient
+        // — never serialized (saves write fields explicitly), cleared by worldClearLevelFlags.
+        bool          inStage            = false;
         // The PvP ARENA (Arena mode, sentinel floor 97, engine_arena.cpp). inArena shares the
         // town's daylight rendering, gates ALL PvP damage (Combat::pvpActive), and firewalls
         // progression: no XP, no loot, no drops, no saves. Like inTown, never serialized.
@@ -1734,6 +1737,10 @@ private:
     // no player has ever stood in. Two formatters for one fact, and only one of them had been
     // taught about zones.
     void locationLabel(char* out, u32 cap) const;
+
+    // Trailer staging (engine_stage.cpp, WB-266/267): worlds entered purely to be filmed.
+    Vec3 buildChakramRoom();
+    void enterChakramRoom(u32 discs);
 
     // Present the finished frame — services a pending --screenshot-interval / F8 capture, then
     // swaps. THE one place a frame reaches the screen, and every swapBuffers site goes through it.

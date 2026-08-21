@@ -55,6 +55,9 @@ struct LaunchOptions {
     // offline 60 fps encode (tools/encode_trailer.sh) is bit-perfect real-time footage no matter
     // how slowly the machine rendered while capturing. Empty = off.
     char recordDir[200] = "";
+    // --chakram-room [N]: the trailers' signature stage — a sealed room with N Infinity Chakrams
+    // (default 40, cap 60) in permanent flight. 0 = off.
+    u32 chakramRoom = 0;
 
     bool town = false;                         // --town: after --load/--new, enter the TOWN hub
     bool arena = false;                        // --arena: after --load/--new, enter the PvP ARENA

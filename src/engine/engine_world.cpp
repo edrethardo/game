@@ -48,6 +48,7 @@ void Engine::worldResetPools() {
 // exactly this).
 void Engine::worldClearLevelFlags() {
     m_level.inTown             = false;
+    m_level.inStage            = false;
     m_level.inArena            = false;
     m_level.inSourceChamber    = false;
     m_level.inZone             = false;

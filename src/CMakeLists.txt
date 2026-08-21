@@ -40,6 +40,7 @@ add_executable(DungeonEngine
     engine/engine_render_world.cpp
     engine/engine_render_character.cpp
     engine/engine_hud.cpp
+    engine/engine_stage.cpp
     engine/engine_render_menus.cpp
     renderer/gl_context.cpp
     renderer/shader.cpp

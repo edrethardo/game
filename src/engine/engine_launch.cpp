@@ -328,6 +328,12 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     }
 
     // --- SINGLE or HOST: enter the game (startGame sets m_gameState = IN_GAME) ---
+    if (opt.chakramRoom > 0) {
+        // Trailer stage (WB-269): straight into the chakram room. Before --town in the chain only
+        // because a stage is narrower than a world — nothing else composes with it.
+        enterChakramRoom(opt.chakramRoom);
+        return;
+    }
     if (opt.town) {
         // Dev door (--town): land ANY hero in the town hub — no clear required. startGame is
         // skipped entirely; enterTown builds the world and places the player.

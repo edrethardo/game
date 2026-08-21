@@ -69,6 +69,7 @@ void logUsage() {
     LOG_INFO("  --screenshot-interval <s>  auto-save a 1080p screenshot every <s> seconds in-game");
     LOG_INFO("  --menu <page>              open the character menu on inventory|character|quests (dev)");
     LOG_INFO("  --record <dir>             lockstep the sim and dump every frame as PNG (trailer capture)");
+    LOG_INFO("  --chakram-room [n]         trailer stage: sealed room, n Infinity Chakrams in flight (dev)");
     LOG_INFO("  --net-loss <0-90>      drop this %% of packets both directions (netcode stress rig)");
     LOG_INFO("  --net-latency <ms>     add one-way fake latency to every send (0-1000)");
     LOG_INFO("  --net-jitter <ms>      add per-packet [0,ms] jitter on top of latency (0-500)");
@@ -171,6 +172,18 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             // whether the overworld bot roams or ends its run.
             opt.questsDone = true;
             opt.active     = true;
+        } else if (ieq(a, "--chakram-room")) {
+            // Optional count; a bare flag means the default storm.
+            opt.chakramRoom = 40;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                long n = std::strtol(argv[++i], nullptr, 10);
+                if (n < 1 || n > 60) {
+                    LOG_WARN("--chakram-room expects 1-60 discs (got %ld)", n);
+                    opt.valid = false; break;
+                }
+                opt.chakramRoom = static_cast<u32>(n);
+            }
+            opt.active = true;
         } else if (ieq(a, "--record")) {
             const char* v = (i + 1 < argc) ? argv[++i] : "";
             if (!v[0]) { LOG_WARN("--record expects a directory"); opt.valid = false; break; }
