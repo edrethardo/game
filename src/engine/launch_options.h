@@ -62,6 +62,9 @@ struct LaunchOptions {
     // "glide:ax,ay,az:bx,by,bz:secs[:lx,ly,lz]". Parsed by CineCam::parse at APPLY time (a
     // malformed spec refuses the launch rather than arming a wrong shot). Empty = off.
     char camera[160] = "";
+    // --stage <file>: shot-dressing script (spawn/loot/equip lines) run at the first IN_GAME
+    // frame. Composes with every world door. Empty = off.
+    char stageFile[200] = "";
 
     bool town = false;                         // --town: after --load/--new, enter the TOWN hub
     bool arena = false;                        // --arena: after --load/--new, enter the PvP ARENA

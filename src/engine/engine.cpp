@@ -1191,6 +1191,9 @@ void Engine::run() {
         // town, zone, source, arena, victory, plain start — because "do this once we are in a
         // world" is one rule, and a rule needed at six sites gets missed at a seventh (this file
         // has already paid for that shape with the world-flag clears).
+        // --stage: dress the shot once a world exists (same reasoning as --menu below).
+        if (m_stageFile[0] && m_gameState == GameState::IN_GAME) runStageFile();
+
         if (m_launchMenuPage != 0xFF && m_gameState == GameState::IN_GAME) {
             LOG_INFO("Launch: --menu opened the character menu on page %u",
                      static_cast<u32>(m_launchMenuPage));

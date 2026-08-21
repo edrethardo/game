@@ -673,6 +673,9 @@ private:
     // and a hand-jitter or a hit-shake on a dolly shot would defeat its whole purpose.
     CineCam::Path m_cinePath;
     u32           m_cineTick = 0;
+    // --stage <file>: shot-dressing script, run once on the first IN_GAME frame then cleared.
+    char          m_stageFile[200] = "";
+    void runStageFile();
     ViewmodelState  m_viewmodelState;
 
     // Death-screen mouse control. m_deathHover is the option the mouse is over on the SP

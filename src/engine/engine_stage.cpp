@@ -137,3 +137,137 @@ void Engine::enterChakramRoom(u32 discs) {
     LOG_INFO("Launch: --chakram-room armed — %u Infinity Chakrams in flight (of %u asked)",
              spawned, discs);
 }
+
+// ---------------------------------------------------------------------------------------------
+// --stage <file>: the generic shot-dressing language (WB-271). Runs ONCE on the first IN_GAME
+// frame (the --menu hook pattern), so it composes with every world door: --town, --zone,
+// --chakram-room, --vhall, a plain dungeon. Lines:
+//
+//     # comment
+//     spawn <x> <z> <count> <docile|aggro> <enemy name ...>
+//     loot  <x> <z> <count> <ilvl>
+//     equip <item name ...>
+//
+// Numerics come FIRST and the name LAST, so def names with spaces ("The Garbage Collector",
+// "Infinity Chakram") need no quoting. Unknown names are LOUD errors: a stage that silently
+// skipped its monster would only be discovered after a wasted capture run.
+//
+// Staged enemies keep their AUTHORED stats — no floor/difficulty scaling. These are film extras:
+// a shot's combat is composed against --endgame's known player power, and the scaling curve at
+// effective floor 200 would put a "docile" extra at 200k HP where the take wants it to die on cue.
+// ---------------------------------------------------------------------------------------------
+void Engine::runStageFile() {
+    if (!m_stageFile[0]) return;
+    FILE* f = std::fopen(m_stageFile, "r");
+    if (!f) {
+        LOG_ERROR("--stage: cannot open '%s'", m_stageFile);
+        m_stageFile[0] = '\0';
+        return;
+    }
+    char line[256];
+    u32 lineNo = 0, acted = 0;
+    while (std::fgets(line, sizeof(line), f)) {
+        lineNo++;
+        // Strip the newline; skip blanks and comments.
+        line[std::strcspn(line, "\r\n")] = '\0';
+        const char* s = line;
+        while (*s == ' ' || *s == '\t') s++;
+        if (!*s || *s == '#') continue;
+
+        f32 x = 0, z = 0;
+        u32 count = 0, ilvl = 0;
+        char word[16] = {};
+        int  consumed = 0;
+
+        if (std::sscanf(s, "spawn %f %f %u %15s %n", &x, &z, &count, word, &consumed) == 4) {
+            const bool docile = (std::strcmp(word, "docile") == 0);
+            if (!docile && std::strcmp(word, "aggro") != 0) {
+                LOG_ERROR("--stage:%u: expected docile|aggro, got '%s'", lineNo, word);
+                continue;
+            }
+            const char* name = s + consumed;
+            s32 defIdx = -1;
+            for (u32 i = 0; i < m_enemyDefs.count; i++)
+                if (std::strcmp(m_enemyDefs.defs[i].name, name) == 0) { defIdx = (s32)i; break; }
+            if (defIdx < 0) { LOG_ERROR("--stage:%u: no enemy named '%s'", lineNo, name); continue; }
+            const EnemyDef& d = m_enemyDefs.defs[defIdx];
+
+            StageRng rng(0x57A6Eu + lineNo);   // per-line seed: rearranging lines does not reshuffle
+            u32 placed = 0;
+            for (u32 i = 0; i < count; i++) {
+                // Loose ring packing around the anchor — extras standing in a grid read as extras.
+                const f32 ang = rng.frac() * 6.2831853f;
+                const f32 rad = (count > 1) ? 0.8f + rng.frac() * (1.0f + 0.35f * (f32)count) : 0.0f;
+                const Vec3 pos = { x + std::cos(ang) * rad, 0.5f, z + std::sin(ang) * rad };
+                EntityHandle h = EntitySystem::spawn(m_entities, pos, d.halfExtents, d.flying,
+                                                     d.health, d.moveSpeed, d.detectionRange,
+                                                     d.attackRange, d.attackCooldown, d.damage);
+                Entity* e = handleGet(m_entities, h);
+                if (!e) break;   // pool full — the log line below carries the honest count
+                e->meshId       = d.meshId;
+                e->materialId   = d.materialId;
+                e->enemyType    = d.enemyType;
+                e->enemyRole    = d.role;
+                e->aiPreference = d.aiPreference;
+                e->enemyDefIdx  = static_cast<u8>(defIdx);
+                e->baseMoveSpeed      = e->moveSpeed;
+                e->baseAttackCooldown = e->attackCooldown;
+                // Docile = a zero detection bubble: it never aggros, never flees, just exists on
+                // camera. Per-entity, so one stage can mix a docile crowd with an aggro pack.
+                if (docile) e->detectionRange = 0.0f;
+                placed++;
+            }
+            LOG_INFO("--stage:%u: spawned %u/%u '%s' (%s) at (%.1f, %.1f)",
+                     lineNo, placed, count, name, docile ? "docile" : "aggro", x, z);
+            acted++;
+        } else if (std::sscanf(s, "loot %f %f %u %u", &x, &z, &count, &ilvl) == 4) {
+            StageRng rng(0x100Du + lineNo);
+            u32 placed = 0;
+            for (u32 i = 0; i < count; i++) {
+                // Every 6th roll is FORCED legendary-or-better: a loot shower whose top tier only
+                // maybe shows up is a retake, and the guaranteed-drop path exists for exactly this.
+                const Rarity floorR = (i % 6 == 5) ? Rarity::LEGENDARY : Rarity::COMMON;
+                ItemInstance it = ItemGen::rollItem(static_cast<u8>(ilvl > 255 ? 255 : ilvl),
+                                                    m_itemDefs, m_itemDefCount,
+                                                    m_affixDefs, m_affixDefCount, floorR);
+                if (isItemEmpty(it)) continue;
+                const f32 ang = rng.frac() * 6.2831853f;
+                const f32 rad = rng.frac() * (0.8f + 0.22f * (f32)count);
+                const Vec3 pos = { x + std::cos(ang) * rad, 0.4f, z + std::sin(ang) * rad };
+                if (WorldItemSystem::spawn(m_worldItems, it, pos, &m_level.grid) != 0xFFFF) placed++;
+            }
+            LOG_INFO("--stage:%u: loot shower %u/%u items (ilvl %u) at (%.1f, %.1f)",
+                     lineNo, placed, count, ilvl, x, z);
+            acted++;
+        } else if (std::strncmp(s, "equip ", 6) == 0) {
+            const char* name = s + 6;
+            s32 defIdx = -1;
+            for (u32 i = 0; i < m_itemDefCount; i++)
+                if (std::strcmp(m_itemDefs[i].name, name) == 0) { defIdx = (s32)i; break; }
+            if (defIdx < 0) { LOG_ERROR("--stage:%u: no item named '%s'", lineNo, name); continue; }
+            const ItemDef& d = m_itemDefs[defIdx];
+            // A named def at its BEST rarity and a fixed level 50 — the weapon-wall shot wants the
+            // item at its most recognisable, and mirrors rollItem's own construction (item_gen.cpp)
+            // minus the variance: a stage take should not roll a visibly weak copy.
+            ItemInstance it;
+            it.defId     = static_cast<u16>(defIdx);
+            it.itemLevel = 50;
+            it.rarity    = d.maxRarity;
+            const f32 levelMult = 1.0f + 0.08f * 50.0f;
+            it.damage      = d.baseDamage * levelMult;
+            it.bonusHealth = d.baseHealth * levelMult;
+            ItemGen::rollAffixes(it, 50, d.slot, m_affixDefs, m_affixDefCount, d.weaponType);
+            const s8 slot = Inventory::addToBackpack(m_inventories[0], it);
+            if (slot < 0) { LOG_ERROR("--stage:%u: backpack full for '%s'", lineNo, name); continue; }
+            Inventory::equip(m_inventories[0], static_cast<u8>(slot), m_itemDefs);
+            LOG_INFO("--stage:%u: equipped '%s' (%s)", lineNo, name,
+                     rarityName(it.rarity));
+            acted++;
+        } else {
+            LOG_ERROR("--stage:%u: cannot parse '%s'", lineNo, s);
+        }
+    }
+    std::fclose(f);
+    LOG_INFO("--stage: %s done — %u directives", m_stageFile, acted);
+    m_stageFile[0] = '\0';   // once, ever — the hook fires per IN_GAME frame
+}

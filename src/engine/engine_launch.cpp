@@ -140,6 +140,10 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     // Display / capture modifiers apply whether or not a game-jump (host/join/load/new) was asked.
     if (opt.fullscreen) Window::enterFullscreenExternal();
     m_shotInterval = (f64)opt.shotInterval;
+    // --stage: staged at the first IN_GAME frame (the --menu hook), not here — the world the
+    // script dresses does not exist yet.
+    std::snprintf(m_stageFile, sizeof(m_stageFile), "%s", opt.stageFile);
+
     // --camera: arm the cinematic path. Parsed HERE so a typo refuses the launch loudly —
     // discovered any later, it would have cost a whole capture run pointed the wrong way.
     if (opt.camera[0]) {
