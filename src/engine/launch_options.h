@@ -58,6 +58,10 @@ struct LaunchOptions {
     // --chakram-room [N]: the trailers' signature stage — a sealed room with N Infinity Chakrams
     // (default 40, cap 60) in permanent flight. 0 = off.
     u32 chakramRoom = 0;
+    // --camera <spec>: cinematic camera path — "orbit:cx,cz,r,secsPerLap[,h[,lookY]]" or
+    // "glide:ax,ay,az:bx,by,bz:secs[:lx,ly,lz]". Parsed by CineCam::parse at APPLY time (a
+    // malformed spec refuses the launch rather than arming a wrong shot). Empty = off.
+    char camera[160] = "";
 
     bool town = false;                         // --town: after --load/--new, enter the TOWN hub
     bool arena = false;                        // --arena: after --load/--new, enter the PvP ARENA

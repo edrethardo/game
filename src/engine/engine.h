@@ -22,7 +22,8 @@
 #include "game/zone_def.h"      // Zone::ZoneDef / Dir — the overworld zone graph (sentinel floors 52-96)
 #include "game/quest_def.h"     // Quest::QuestDef — the Act 1 chain
 #include "game/chat_line.h"     // Chat::LINE_LEN / Chat::format — the HUD chat line rule
-#include "game/quest_state.h"   // Quest::Progress — the per-character authority
+#include "game/quest_state.h"
+#include "game/cine_cam.h"   // Quest::Progress — the per-character authority
 #include "game/stash.h"
 #include "game/arena.h"   // PvP deathmatch rules (Arena mode, floor 97)
 #include "game/combat.h"  // Combat::PvpHit/PvpHitOutcome — the arena's atomic hit apply
@@ -667,6 +668,11 @@ private:
     bool        m_recordActive = false;
     char        m_recordDir[200] = "";
     u32         m_recordFrame = 0;
+    // --camera (WB-270): cinematic camera path. While armed, tickMiscTimers overwrites the render
+    // camera with CineCam::eval's pose AFTER the normal follow/bob/shake — the path is absolute,
+    // and a hand-jitter or a hit-shake on a dolly shot would defeat its whole purpose.
+    CineCam::Path m_cinePath;
+    u32           m_cineTick = 0;
     ViewmodelState  m_viewmodelState;
 
     // Death-screen mouse control. m_deathHover is the option the mouse is over on the SP

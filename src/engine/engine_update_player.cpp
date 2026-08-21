@@ -770,4 +770,29 @@ void Engine::tickMiscTimers(f32 dt) {
         m_camera.pitch += sinf(m_localPlayer.hitShakeTimer * 60.0f) * shake;
         m_camera.position.x += sinf(m_localPlayer.hitShakeTimer * 47.0f) * shake * 0.3f;
     }
+
+    // --camera (WB-270): the cinematic path OVERWRITES the camera, deliberately last — after the
+    // follow, the bob and the shake — because a path shot is absolute: hand-jitter and hit-flinch
+    // on a dolly frame are retakes, not texture. The player keeps playing underneath (their input
+    // and viewmodel state advance normally; the viewmodel render stands down separately). prev*
+    // stay untouched: they were written at the top of this function from the LAST tick's pose, so
+    // the render interpolation glides along the path instead of smearing from the player's eye.
+    if (m_cinePath.mode != CineCam::Mode::OFF && m_localPlayerIndex == 0) {
+        const CineCam::Pose pose = CineCam::eval(m_cinePath, m_cineTick++);
+        m_camera.position = pose.position;
+        m_camera.yaw      = pose.yaw;
+        m_camera.pitch    = pose.pitch;
+        m_camera.roll     = 0.0f;
+        m_camera.forward  = normalize(Vec3{-sinf(pose.yaw) * cosf(pose.pitch),
+                                            sinf(pose.pitch),
+                                           -cosf(pose.yaw) * cosf(pose.pitch)});
+        m_camera.right    = normalize(cross(m_camera.forward, Vec3{0.0f, 1.0f, 0.0f}));
+        // First armed tick: snap prev to the path's start or the opening frame lerps in from
+        // wherever the player's eye happened to be.
+        if (m_cineTick == 1) {
+            m_camera.prevPosition = m_camera.position;
+            m_camera.prevYaw      = m_camera.yaw;
+            m_camera.prevPitch    = m_camera.pitch;
+        }
+    }
 }

@@ -70,6 +70,7 @@ void logUsage() {
     LOG_INFO("  --menu <page>              open the character menu on inventory|character|quests (dev)");
     LOG_INFO("  --record <dir>             lockstep the sim and dump every frame as PNG (trailer capture)");
     LOG_INFO("  --chakram-room [n]         trailer stage: sealed room, n Infinity Chakrams in flight (dev)");
+    LOG_INFO("  --camera <spec>            cinematic camera: orbit:cx,cz,r,lapSec[,h[,lookY]] | glide:a:b:secs[:look]");
     LOG_INFO("  --net-loss <0-90>      drop this %% of packets both directions (netcode stress rig)");
     LOG_INFO("  --net-latency <ms>     add one-way fake latency to every send (0-1000)");
     LOG_INFO("  --net-jitter <ms>      add per-packet [0,ms] jitter on top of latency (0-500)");
@@ -172,6 +173,11 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             // whether the overworld bot roams or ends its run.
             opt.questsDone = true;
             opt.active     = true;
+        } else if (ieq(a, "--camera")) {
+            const char* v = (i + 1 < argc) ? argv[++i] : "";
+            if (!v[0]) { LOG_WARN("--camera expects a spec (orbit:... or glide:...)"); opt.valid = false; break; }
+            std::snprintf(opt.camera, sizeof(opt.camera), "%s", v);
+            opt.active = true;
         } else if (ieq(a, "--chakram-room")) {
             // Optional count; a bare flag means the default storm.
             opt.chakramRoom = 40;

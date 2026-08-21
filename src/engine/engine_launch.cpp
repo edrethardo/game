@@ -140,6 +140,21 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     // Display / capture modifiers apply whether or not a game-jump (host/join/load/new) was asked.
     if (opt.fullscreen) Window::enterFullscreenExternal();
     m_shotInterval = (f64)opt.shotInterval;
+    // --camera: arm the cinematic path. Parsed HERE so a typo refuses the launch loudly —
+    // discovered any later, it would have cost a whole capture run pointed the wrong way.
+    if (opt.camera[0]) {
+        if (!CineCam::parse(opt.camera, m_cinePath)) {
+            LOG_ERROR("--camera: cannot parse '%s' — camera NOT armed", opt.camera);
+        } else {
+            m_cineTick = 0;
+            // A cinematic take is HUD-free by definition (F10's flag): the path exists for staged
+            // shots, and a health bar sliding through a dolly frame is a retake nobody wants.
+            m_hideHud = true;
+            LOG_INFO("Launch: --camera armed (%s) — HUD hidden, player input still live",
+                     opt.camera);
+        }
+    }
+
     // --record: arm the trailer capture. The directory is created here, not lazily at the first
     // frame — a bad path should refuse at launch, when the message is readable, not one frame in.
     if (opt.recordDir[0]) {

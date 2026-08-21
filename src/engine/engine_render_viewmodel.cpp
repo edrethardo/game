@@ -58,6 +58,9 @@ extern bool s_firstKillDropGiven;
 // ---------------------------------------------------------------------------
 void Engine::renderViewmodel() {
     if (m_inventoryOpen) return;
+    // Cinematic camera: the viewmodel is welded to the CAMERA, so on a dolly shot the player's
+    // weapon would fly through the scene at the lens. The player still plays; only the arms hide.
+    if (m_cinePath.mode != CineCam::Mode::OFF) return;
     if (m_gameState != GameState::IN_GAME) return;
 
     // Resolve equipped weapon mesh — show fist if unarmed
