@@ -1163,6 +1163,12 @@ void Engine::run() {
         // hold-to-repeat, which must advance in wall time regardless of how many substeps follow.
         Input::update(static_cast<f32>(frameTime));
         m_accumulator += frameTime;
+        // --record LOCKSTEP: force exactly ONE sim tick per rendered frame. The accumulator is
+        // overwritten, not accumulated — wall time is irrelevant while recording, because the
+        // offline encode replays the frames at the fixed tick rate. Without this, PNG writing
+        // (~tens of ms/frame) pushes the loop below 60 fps and the accumulator runs multiple
+        // ticks per rendered frame — dropped sim frames, i.e. a silently sped-up video.
+        if (m_recordActive) m_accumulator = FIXED_DT;
         m_firstTick = true;
         while (m_accumulator >= FIXED_DT) {
             update(static_cast<f32>(FIXED_DT));
@@ -1221,6 +1227,19 @@ void Engine::run() {
             m_statsTimer  -= 1.0;
             m_updateCount  = 0;
             m_frameCount   = 0;
+        }
+    }
+
+    // --record: the take's manifest, written once on orderly exit. Carries the encode contract
+    // (fps + frame count) so tools/encode_trailer.sh needs no guessing; a crashed run loses only
+    // this file and the script defaults to 60 fps, so nothing is unrecoverable.
+    if (m_recordActive && m_recordDir[0]) {
+        char mpath[256];
+        std::snprintf(mpath, sizeof(mpath), "%s/manifest.txt", m_recordDir);
+        if (FILE* mf = std::fopen(mpath, "w")) {
+            std::fprintf(mf, "fps=60\nframes=%u\n", m_recordFrame);
+            std::fclose(mf);
+            LOG_INFO("record: %u frames -> %s", m_recordFrame, m_recordDir);
         }
     }
 }

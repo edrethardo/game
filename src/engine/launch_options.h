@@ -50,6 +50,11 @@ struct LaunchOptions {
     u16  port = DEFAULT_PORT;                  // host/join
     bool upnp = true;                          // host: --lan clears this
     char address[64] = "127.0.0.1";            // for Role::JOIN
+    // --record <dir>: trailer capture. Locksteps the sim (exactly ONE tick per rendered frame,
+    // wall speed irrelevant) and writes every presented frame as <dir>/frame_NNNNNN.png, so an
+    // offline 60 fps encode (tools/encode_trailer.sh) is bit-perfect real-time footage no matter
+    // how slowly the machine rendered while capturing. Empty = off.
+    char recordDir[200] = "";
 
     bool town = false;                         // --town: after --load/--new, enter the TOWN hub
     bool arena = false;                        // --arena: after --load/--new, enter the PvP ARENA

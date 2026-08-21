@@ -81,6 +81,22 @@ void Engine::presentFrame(u32 sw, u32 sh) {
         std::snprintf(path, sizeof(path), "screenshot_%s_%02u.png", ts, ++m_screenshotSeq);
         Screenshot::capture(path, sw, sh);
     }
+    // --record (WB-268): every presented frame becomes a numbered PNG. Screenshot::capture's own
+    // header calls itself "NOT a per-frame path" — that warning is about REAL-TIME cost, and the
+    // record lockstep (Engine::run) makes real time irrelevant: the sim waits for the writer.
+    // Every screen is captured (menus, death, credits included) — the cut decides what survives,
+    // and the screens the game cannot otherwise show are exactly the ones a trailer may want.
+    if (m_recordActive && m_recordDir[0]) {
+        char rpath[256];
+        std::snprintf(rpath, sizeof(rpath), "%s/frame_%06u.png", m_recordDir, m_recordFrame);
+        if (Screenshot::capture(rpath, sw, sh)) m_recordFrame++;
+        else {
+            // A full disk mid-take must not silently produce a video with holes: stop the take,
+            // keep the game alive, say so once.
+            LOG_ERROR("record: frame %u failed to write — recording STOPPED", m_recordFrame);
+            m_recordActive = false;
+        }
+    }
     GLContext::swapBuffers(Window::getHandle());
 }
 

@@ -22,6 +22,8 @@
 #include "platform/steam.h"   // Steam::joinLobby for +connect_lobby cold-start
 
 #include <cstring>
+#include <cerrno>      // --record: mkdir failure reporting
+#include <sys/stat.h>  // mkdir — the --record target directory
 
 // Configure lane 0 for a freshly-chosen class: base HP/move/energy, the 4 class skill states, and
 // the split-screen mirror arrays. Mirrors engine_menu.cpp (subState 2 confirm) exactly — keep the
@@ -138,6 +140,19 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     // Display / capture modifiers apply whether or not a game-jump (host/join/load/new) was asked.
     if (opt.fullscreen) Window::enterFullscreenExternal();
     m_shotInterval = (f64)opt.shotInterval;
+    // --record: arm the trailer capture. The directory is created here, not lazily at the first
+    // frame — a bad path should refuse at launch, when the message is readable, not one frame in.
+    if (opt.recordDir[0]) {
+        std::snprintf(m_recordDir, sizeof(m_recordDir), "%s", opt.recordDir);
+        if (mkdir(m_recordDir, 0755) != 0 && errno != EEXIST) {
+            LOG_ERROR("--record: cannot create '%s' (%s) — recording disabled",
+                      m_recordDir, strerror(errno));
+        } else {
+            m_recordActive = true;
+            LOG_INFO("Launch: --record armed -> %s (lockstep: 1 tick/frame, encode with "
+                     "tools/encode_trailer.sh)", m_recordDir);
+        }
+    }
     // Deferred to the first IN_GAME frame (Engine::run) — every game-jump branch below returns
     // from a different place, and the menu can only open once a world exists.
     m_launchMenuPage = opt.menuPage;

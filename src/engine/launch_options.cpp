@@ -12,6 +12,7 @@
 
 #include <cstring>
 #include <cstdlib>
+#include <cstdio>   // snprintf — the --record path copy
 
 namespace {
 
@@ -67,6 +68,7 @@ void logUsage() {
     LOG_INFO("  --fullscreen           real fullscreen on the external widescreen monitor");
     LOG_INFO("  --screenshot-interval <s>  auto-save a 1080p screenshot every <s> seconds in-game");
     LOG_INFO("  --menu <page>              open the character menu on inventory|character|quests (dev)");
+    LOG_INFO("  --record <dir>             lockstep the sim and dump every frame as PNG (trailer capture)");
     LOG_INFO("  --net-loss <0-90>      drop this %% of packets both directions (netcode stress rig)");
     LOG_INFO("  --net-latency <ms>     add one-way fake latency to every send (0-1000)");
     LOG_INFO("  --net-jitter <ms>      add per-packet [0,ms] jitter on top of latency (0-500)");
@@ -169,6 +171,11 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             // whether the overworld bot roams or ends its run.
             opt.questsDone = true;
             opt.active     = true;
+        } else if (ieq(a, "--record")) {
+            const char* v = (i + 1 < argc) ? argv[++i] : "";
+            if (!v[0]) { LOG_WARN("--record expects a directory"); opt.valid = false; break; }
+            std::snprintf(opt.recordDir, sizeof(opt.recordDir), "%s", v);
+            opt.active = true;
         } else if (ieq(a, "--menu")) {
             // Named rather than numbered: "--menu 2" would silently follow the enum if a page were
             // ever inserted, and the whole point of a screenshot door is that it names the screen.

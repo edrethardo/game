@@ -661,6 +661,12 @@ private:
     // onto the menu SCREENS, which are otherwise uncapturable on a headless or unfocused display
     // (the window-focus input gate zeroes synthetic keypresses).
     u8          m_launchMenuPage = 0xFF;
+    // --record: trailer frame capture (WB-268). While active the frame loop LOCKSTEPS — exactly
+    // one sim tick per rendered frame — and presentFrame writes every frame as PNG into
+    // m_recordDir. Offline encode at 60 fps then IS real time, however slowly the capture ran.
+    bool        m_recordActive = false;
+    char        m_recordDir[200] = "";
+    u32         m_recordFrame = 0;
     ViewmodelState  m_viewmodelState;
 
     // Death-screen mouse control. m_deathHover is the option the mouse is over on the SP
