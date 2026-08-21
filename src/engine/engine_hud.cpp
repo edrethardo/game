@@ -115,6 +115,15 @@ void Engine::locationLabel(char* out, u32 cap) const {
     std::snprintf(out, cap, "Floor %u", m_level.currentFloor);
 }
 
+bool Engine::worldIsOutdoors() const {
+    if (m_level.inTown || m_level.inArena || m_level.inStage) return true;
+    if (m_level.inZone) {
+        const Zone::ZoneDef* z = Zone::find(m_level.zoneFloor);
+        return z && !z->underground;
+    }
+    return false;
+}
+
 // renderInventoryHUD — the entire m_inventoryOpen branch:
 // controller cursor, drawInventoryScreen, drag icon, button hints, equip tutorial.
 // ---------------------------------------------------------------------------

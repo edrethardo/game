@@ -1747,6 +1747,15 @@ private:
     // taught about zones.
     void locationLabel(char* out, u32 cap) const;
 
+    // Is the player under open sky? THE one predicate for the renderer's daylight treatment
+    // (sky clear colour + sun instead of the dungeon light bubble). It exists because the
+    // condition was open-coded as `inTown || inArena` in two places and the OVERWORLD was in
+    // neither: every surface zone of both acts rendered under a black sky — grass, brick and all —
+    // for the whole life of the feature, while the LevelState comment claimed "like the town these
+    // are daylight worlds". Act 2's tunnels (ZoneDef::underground) stay dark on purpose: the roof
+    // coming down IS the act's tonal shift.
+    bool worldIsOutdoors() const;
+
     // Trailer staging (engine_stage.cpp, WB-266/267): worlds entered purely to be filmed.
     Vec3 buildChakramRoom();
     void enterChakramRoom(u32 discs);
