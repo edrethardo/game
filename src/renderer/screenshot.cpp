@@ -53,6 +53,14 @@ bool capture(const char* path, u32 w, u32 h) {
         std::free(scratch);
     }
 
+    // Fast lossless encode. PNG is lossless at EVERY compression level — these two knobs only
+    // trade file size for speed — and the --record path calls this once per simulated frame:
+    // at 1920x1080 the default (level 8 + adaptive filtering) measured ~0.7 fps wall with two
+    // concurrent captures, which turns a 28-take trailer shoot into a 6-hour job. Level 1 with
+    // filtering off is a several-fold speedup; the larger PNGs are deleted right after the
+    // take is encoded to its CRF-18 master anyway.
+    stbi_write_png_compression_level = 1;
+    stbi_write_force_png_filter = 0;
     const int ok = stbi_write_png(path, (int)w, (int)h, 3, pixels, (int)rowBytes);
     std::free(pixels);
 

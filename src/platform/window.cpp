@@ -18,7 +18,17 @@ static s32 s_height = 0;
 static bool s_shouldClose = false;
 static Window::DisplayMode s_displayMode = Window::DisplayMode::WINDOWED;  // user Display setting; persisted in video settings
 
+// --res: creation-size override, consumed once by init(). 0 = no override.
+static s32 s_overrideW = 0;
+static s32 s_overrideH = 0;
+
+void Window::overrideInitialSize(s32 width, s32 height) {
+    s_overrideW = width;
+    s_overrideH = height;
+}
+
 bool Window::init(const char* title, s32 width, s32 height) {
+    if (s_overrideW > 0 && s_overrideH > 0) { width = s_overrideW; height = s_overrideH; }
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         LOG_ERROR("SDL_Init failed: %s", SDL_GetError());
         return false;
@@ -62,16 +72,21 @@ bool Window::init(const char* title, s32 width, s32 height) {
     if (SDL_getenv("DE_GLDEBUG")) wantGlDebug = true;
     if (wantGlDebug) SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
 
+#ifdef __SWITCH__
+    const u32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN;
+#else
+    // An overridden size goes BORDERLESS: --res 1920x1080 on a 1920x1080 desktop is the whole
+    // point (native-res capture), and with decorations the WM clamps the window to fit —
+    // measured 1850x1016 out of a 1920x1080 ask, which silently un-does the flag.
+    const u32 windowFlags = SDL_WINDOW_OPENGL |
+        ((s_overrideW > 0) ? SDL_WINDOW_BORDERLESS : SDL_WINDOW_RESIZABLE);
+#endif
     s_window = SDL_CreateWindow(
         title,
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
         width, height,
-#ifdef __SWITCH__
-        SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN
-#else
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
-#endif
+        windowFlags
     );
 
     if (!s_window) {

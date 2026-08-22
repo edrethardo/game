@@ -66,6 +66,7 @@ void logUsage() {
     LOG_INFO("  --difficulty <0-3>     difficulty for --new (0=Normal 1=Nightmare 2=Hell 3=Inferno)");
     LOG_INFO("  --port <n>  --lan      host/join port; --lan skips UPnP");
     LOG_INFO("  --fullscreen           real fullscreen on the external widescreen monitor");
+    LOG_INFO("  --res <WxH>            window creation size (native-res --record captures)");
     LOG_INFO("  --screenshot-interval <s>  auto-save a 1080p screenshot every <s> seconds in-game");
     LOG_INFO("  --menu <page>              open the character menu on inventory|character|quests (dev)");
     LOG_INFO("  --record <dir>             lockstep the sim and dump every frame as PNG (trailer capture)");
@@ -260,6 +261,16 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             opt.upnp = false;
         } else if (ieq(a, "--fullscreen")) {
             opt.fullscreen = true;          // display modifier — not a game-jump directive
+        } else if (ieq(a, "--res")) {
+            // WxH creation size, e.g. --res 1920x1080. Bounded to keep a typo from asking SDL for
+            // a 100000-pixel surface; the small end refuses sizes the HUD layout can't survive.
+            const char* v = nextVal(i); if (!v) break;
+            int w = 0, h = 0;
+            if (std::sscanf(v, "%dx%d", &w, &h) != 2 || w < 640 || h < 360 || w > 7680 || h > 4320) {
+                LOG_WARN("--res expects <W>x<H> between 640x360 and 7680x4320 (got '%s')", v);
+                opt.valid = false; break;
+            }
+            opt.resW = (u16)w; opt.resH = (u16)h;   // display modifier — not a game-jump directive
         } else if (ieq(a, "--screenshot-interval") || ieq(a, "--shot-interval")) {
             const char* v = nextVal(i); if (!v) break;
             long n; if (!parseInt(v, n) || n < 1 || n > 3600) {

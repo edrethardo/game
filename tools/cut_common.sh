@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # cut_common.sh — shared helpers for the two trailer cut scripts (WB-273).
-# Everything renders to uniform 1280x720/60/yuv420p segments, hard cuts via concat,
-# then ONE final pass adds the music bed and upscales to the 1920x1080 Steam master.
+# Everything renders to uniform 1920x1080/60/yuv420p segments, hard cuts via concat, then ONE
+# final pass adds the music bed. v6: takes are captured NATIVELY at 1080p (--res 1920x1080), so
+# the old 720p-intermediate + final-upscale shape would have thrown the native pixels away —
+# the scale in each segment helper is now a passthrough for 1080p input and an upscale only for
+# any legacy 720p take still referenced.
 set -euo pipefail
 TAKES="${TAKES:-/home/aaron/game_takes}"
 WORK="$TAKES/.cut_work"; mkdir -p "$WORK"
@@ -17,20 +20,20 @@ next_seg() { SEG=$((SEG+1)); OUT=$(printf '%s/seg_%03d.mp4' "$WORK" "$SEG"); }
 clip() {
   next_seg; local out="$OUT"
   ffmpeg -hide_banner -loglevel error -y -ss "$2" -t "$3" -i "$TAKES/$1/take.mp4" \
-    -vf "scale=1280:720,fps=60,format=yuv420p" -an -c:v libx264 -preset fast -crf 18 "$out"
+    -vf "scale=1920:1080:flags=lanczos,fps=60,format=yuv420p" -an -c:v libx264 -preset fast -crf 18 "$out"
   echo "file '$out'" >> "$LIST"
 }
 
 # card <text> <dur> [fade=in|out|both|none]  — \n in text = line break
 card() {
   next_seg; local out="$OUT" fade filt; fade="${3:-none}"
-  filt="drawtext=fontfile=$FONT:text='$1':fontcolor=0xE8D9A0:fontsize=54:line_spacing=18:x=(w-text_w)/2:y=(h-text_h)/2"
+  filt="drawtext=fontfile=$FONT:text='$1':fontcolor=0xE8D9A0:fontsize=81:line_spacing=27:x=(w-text_w)/2:y=(h-text_h)/2"
   case "$fade" in
     in)   filt="$filt,fade=t=in:st=0:d=0.8";;
     out)  filt="$filt,fade=t=out:st=$(echo "$2-0.9"|bc):d=0.9";;
     both) filt="$filt,fade=t=in:st=0:d=0.8,fade=t=out:st=$(echo "$2-0.9"|bc):d=0.9";;
   esac
-  ffmpeg -hide_banner -loglevel error -y -f lavfi -i "color=c=0x0A0A10:s=1280x720:r=60:d=$2" \
+  ffmpeg -hide_banner -loglevel error -y -f lavfi -i "color=c=0x0A0A10:s=1920x1080:r=60:d=$2" \
     -vf "$filt,format=yuv420p" -an -c:v libx264 -preset fast -crf 18 "$out"
   echo "file '$out'" >> "$LIST"
 }
@@ -38,7 +41,7 @@ card() {
 # pngcard <png> <dur> [fade=in|out|both|none] — a still card from store/trailer/, the OLD title
 # sequence's own look (user call: those overlays were cooler than the drawtext-on-black v1 cards).
 pngcard() {
-  next_seg; local out="$OUT" fade="${3:-none}" filt="scale=1280:720,fps=60"
+  next_seg; local out="$OUT" fade="${3:-none}" filt="scale=1920:1080:flags=lanczos,fps=60"
   case "$fade" in
     in)   filt="$filt,fade=t=in:st=0:d=0.6";;
     out)  filt="$filt,fade=t=out:st=$(echo "$2-0.8"|bc):d=0.8";;
@@ -48,10 +51,10 @@ pngcard() {
   echo "file '$out'" >> "$LIST"
 }
 
-# mp4seg <file> — a ready-made video segment (the animated logo walk), normalised to 720p60.
+# mp4seg <file> — a ready-made video segment (the animated logo walk), normalised to 1080p60.
 mp4seg() {
   next_seg; local out="$OUT"
-  ffmpeg -hide_banner -loglevel error -y -i "$1"     -vf "scale=1280:720,fps=60,format=yuv420p" -an -c:v libx264 -preset fast -crf 18 "$out"
+  ffmpeg -hide_banner -loglevel error -y -i "$1"     -vf "scale=1920:1080:flags=lanczos,fps=60,format=yuv420p" -an -c:v libx264 -preset fast -crf 18 "$out"
   echo "file '$out'" >> "$LIST"
 }
 
@@ -62,7 +65,7 @@ finish() {
   local dur; dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$silent")
   ffmpeg -hide_banner -loglevel error -y -i "$silent" -i "$TAKES/PLACEHOLDER_music_bed.wav" \
     -filter_complex "[1:a]atrim=0:$dur,afade=t=out:st=$(echo "$dur-2.5"|bc):d=2.5[a]" \
-    -map 0:v -map "[a]" -vf "scale=1920:1080:flags=lanczos" \
+    -map 0:v -map "[a]" \
     -c:v libx264 -preset slow -crf 18 -c:a aac -b:a 192k -movflags +faststart -shortest "$1"
   echo "== $1: $(ffprobe -v error -show_entries format=duration -of csv=p=0 "$1") s =="
 }

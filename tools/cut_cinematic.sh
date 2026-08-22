@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cut_cinematic.sh — the CINEMATIC trailer's edit list (WB-273, epic WB-266). v3.
+# cut_cinematic.sh — the CINEMATIC trailer's edit list (WB-273, epic WB-266). v6.
 #
 # v2 fixed the balance (biome tour, chakrams only as the finale); v3 swaps every text overlay for
 # the OLD title sequence's art (store/trailer): the word-by-word CURSE/OF/THE/DUNGEON-ENGINE
@@ -39,4 +39,4 @@ clip chakram_follow   0.0 4.5
 clip chakram_orbit    0.5 6.5
 mp4seg "$ST/logo_walk.mp4"
 pngcard "$ST/card_out_now.png" 3.0 out
-finish "$TAKES/trailer_cinematic_v5.mp4"
+finish "$TAKES/trailer_cinematic_v6.mp4"

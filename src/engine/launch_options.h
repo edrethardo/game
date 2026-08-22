@@ -69,6 +69,10 @@ struct LaunchOptions {
     // --stage <file>: shot-dressing script (spawn/loot/equip lines) run at the first IN_GAME
     // frame. Composes with every world door. Empty = off.
     char stageFile[200] = "";
+    // --res <WxH>: window CREATION size (desktop). The trailer captures read the framebuffer at
+    // window size, so this is what makes --record produce NATIVE 1080p instead of a 720p upscale.
+    // Applied in main() before Engine::init (the window exists before options are applied).
+    u16 resW = 0, resH = 0;   // 0 = default 1280x720
 
     bool town = false;                         // --town: after --load/--new, enter the TOWN hub
     bool arena = false;                        // --arena: after --load/--new, enter the PvP ARENA

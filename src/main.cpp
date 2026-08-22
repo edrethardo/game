@@ -25,6 +25,7 @@
 // console into a specific scenario for a measurement; launch_options.cpp was already in the Switch
 // source list, only this include was gated.
 #include "engine/launch_options.h"
+#include "platform/window.h"  // --res: pre-init window size override
 
 // Change CWD to the directory containing the executable so that relative
 // asset paths ("assets/...") resolve correctly regardless of where the
@@ -96,6 +97,10 @@ int main(int argc, char* argv[]) {
 
     // Heap-allocate Engine to avoid ~500KB on the stack (Switch stack is limited)
     Engine* engine = new Engine();
+    // Parse launch flags BEFORE init: --res must reach Window::init, which runs inside
+    // engine->init() — applying options afterwards (the old order) could never size the window.
+    const LaunchOptions launchOpts = parseLaunchArgs(argc, argv);
+    if (launchOpts.resW > 0) Window::overrideInitialSize(launchOpts.resW, launchOpts.resH);
     engine->init();
     // Launch flags jump straight into a requested state (host/join/single + load/new, --vhall,
     // --autoplay, ...). No flags, bad flags or --help fall through to the normal menu boot.
@@ -104,7 +109,7 @@ int main(int argc, char* argv[]) {
     // console into a specific, repeatable scenario. Without them a device measurement depends on a
     // human walking to the right kind of floor and holding still, which is neither repeatable nor
     // fair to ask for. Harmless in a normal launch from the homebrew menu: argc is 1.
-    engine->applyLaunchOptions(parseLaunchArgs(argc, argv));
+    engine->applyLaunchOptions(launchOpts);
     engine->run();
     engine->shutdown();
     delete engine;

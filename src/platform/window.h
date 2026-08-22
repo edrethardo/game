@@ -6,6 +6,12 @@ struct SDL_Window;
 
 namespace Window {
     bool init(const char* title, s32 width, s32 height);
+    // --res: pre-init override of the CREATION size (desktop only; Switch derives its own).
+    // Exists because Engine::init builds the window BEFORE launch options are applied, so a
+    // native-resolution capture (--res 1920x1080 --record) can't reach init()'s parameters —
+    // and creating at the right size beats resizing after: every GL surface and HUD metric
+    // then starts life at the final resolution instead of trusting the resize path.
+    void overrideInitialSize(s32 width, s32 height);
     void shutdown();
     void pollEvents();
     bool shouldClose();
