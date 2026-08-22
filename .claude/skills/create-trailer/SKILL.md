@@ -5,6 +5,11 @@ description: Produce or update a DungeonEngine trailer — shoot deterministic t
 
 # Create / update a trailer
 
+**Genre layers:** for the actual trailer WORKFLOWS load the dedicated skill on top of this
+one — `create-gameplay-trailer` (HUD-on, dungeon-only, the beat recipes) or
+`create-cinematic-trailer` (HUD-free camera paths, biome tour, montage staging). This skill
+owns what both share: the shoot/encode/cards/cut/QC/deliver pipeline and the hard rules.
+
 The whole pipeline is deterministic: **the command is the take, the script is the edit.**
 Masters, takes, stages, proofs live in `/home/aaron/game_takes/` (PERMANENT — never only /tmp).
 
