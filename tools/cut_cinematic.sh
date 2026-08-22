@@ -13,23 +13,26 @@ pngcard "$ST/frame_2_of.png" 0.55
 pngcard "$ST/frame_3_the.png" 0.55
 pngcard "$ST/frame_4_dungeon_engine.png" 1.4
 clip town_reveal      2.0 5.0
-clip biome_dungeon    0.3 4.2
-clip biome_catacombs  4.0 4.2
-clip biome_caverns    4.0 4.2
-clip biome_descent    4.0 4.2
+# v6: the dungeon/catacombs/void biome beats ride the _2 re-shoots on DEEPER floors of the
+# same theme (7/18/47) — an endgame hero on floor 3 raced empty corridors, and an empty
+# corridor is not a spectacle. Trims sit in each take's scanned clean windows.
+clip biome_dungeon2   7.2 4.2
+clip biome_cata2      4.0 4.2
+clip biome_caverns   10.3 4.2
+clip biome_descent    6.3 4.2
 clip lava_glide_v2    3.0 5.5
-clip biome_void       4.0 4.2
+clip biome_void2      2.8 4.2
 # THE WEAPON MONTAGE (user: "show more weapon variety") — seven legendaries, one beat each, all
 # IN ACTION on staged --hidehud bot runs: claymore sweep, scythe, bow, revolver, hellfire
 # launcher, void flask fire, staff bolts. Trim windows sit inside each take's longest clean
 # stretch (transition slates mapped by frame size — the couch lesson, third appearance).
-clip wpn_claymore     6.0 2.2
-clip wpn_scythe       3.0 2.2
+clip wpn_claymore     4.2 2.2
+clip wpn_scythe       8.0 2.2
 clip wpn_bow          3.0 2.2
-clip wpn_revolver     2.5 2.2
+clip wpn_revolver     3.4 2.2
 clip wpn_launcher     1.2 2.2
-clip wpn_flask        2.5 2.2
-clip wpn_staff        4.0 2.2
+clip wpn_flask        1.5 2.2
+clip wpn_staff        1.5 2.2
 clip loot_shower      1.0 6.0
 clip take_stage       1.5 3.0
 # No INFINITE CHAKRAMS card (user: "bewerbe sie nicht — zeig sie in Action"): the weapon sells

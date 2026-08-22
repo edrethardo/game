@@ -21,6 +21,9 @@ CARDS = [
     ("card_actual_gameplay.png", [("ACTUAL GAMEPLAY", SUB)],            0.62),
     ("card_9_classes.png",       [("9 CLASSES", GOLD)],                 0.52),
     ("card_dungeon_engine.png",  [("THE", SUB), ("DUNGEON ENGINE", RED)], 0.62),
+    # v6: the boss beat shows three MILESTONE bosses (user: no Dungeon Engine fight in the
+    # trailer) — the count card mirrors "9 CLASSES" and 11 is the real bosses.json roster.
+    ("card_11_bosses.png",       [("11 BOSSES", RED)],                  0.55),
     ("card_infinite.png",        [("INFINITE", SUB), ("CHAKRAMS", GOLD)], 0.55),
     ("card_couch.png",           [("COUCH CO-OP", GOLD)],               0.58),
 ]

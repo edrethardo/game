@@ -20,6 +20,13 @@ Masters, takes, stages, proofs live in `/home/aaron/game_takes/` (PERMANENT — 
 
 ## 1. Shoot a take
 
+**Native 1080p:** add `--res 1920x1080` (goes BORDERLESS — a decorated window is WM-clamped
+below the desktop size). PNG writes are fast-lossless (level 1, no filter) since v6; even so,
+1080p locksteps at ~4-7 fps wall. Frames are ~2.5 MB each: encode each take right after the
+shoot and DELETE the PNGs (`take.mp4` at CRF 18 is the keeper; the command re-creates the rest).
+Tutorial hints (Attack/Skill, Block, Dodge Roll) are auto-suppressed while `--record` is armed —
+every dev-door hero is fresh, and the bot may never perform the action that dismisses a hint.
+
 ```
 ./build/src/DungeonEngine <world> <actors> <camera> --record /home/aaron/game_takes/<take>
 ```
@@ -64,6 +71,14 @@ DUNGEON-only (Aaron's call — no overworld clips there).
 
 ## 5. QC — sight it before calling it done
 
+- `tools/scan_take.py <take.mp4>` finds trim windows on the ENCODED take (no PNGs left):
+  `clean` = no slates/death screens (adaptive threshold), `--busy D` ranks D-second windows by
+  action (busier frames compress worse), `--blue` ranks frozen-orb frost (pale TEAL, g~=b —
+  a b>g test finds nothing). `tools/log_time.py <take.log> <regex>` maps any log line to the
+  exact sim second — each recorded frame logs its own "screenshot saved" line, so the
+  interleave is a frame-accurate clock (wall timestamps are useless at 4-7 fps capture).
+- Contact sheets for window hunting: `ffmpeg -ss A -to B -vf "fps=1,scale=480:270,tile=4x3"`.
+
 - Extract frames at every cut boundary (`ffmpeg -ss T -frames:v 1`), READ them. Montage sheets
   mislead (glob order) — judge single frames.
 - Known traps, all shipped once: **floor-transition slates** in trim windows (endgame bots clear
@@ -72,6 +87,18 @@ DUNGEON-only (Aaron's call — no overworld clips there).
   find its frames by SIZE, the near-black screen is ~30 KB vs ~500 KB); segment counters in
   subshells (`$(seg_out)` didn't increment — the first render was the end card ten times).
 - Verify audio (`volumedetect`), duration, and that the takes named in the EDL have a take.mp4.
+- **Boss beats:** the bot + endgame gear melts bosses in seconds — find the fight via the NEXT
+  floor's build line in the log, then sheet the seconds before it. A named boss barely frames
+  itself; pick the moment the nameplate + body + numbers coincide.
+- **Frozen-orb beat recipe:** fresh sorcerer + staged FULL legendary kit incl. `equip Frost
+  Staff` (grants frozen_orb; the granted-rail spam becomes orb spam). `--endgame` is WRONG for
+  this shot: the bag holds a better wand and auto-equip swaps the staff back out mid-take
+  (measured twice), and optimal gear melts rooms so fast no cast ever shows.
+- **Never rewrite a shoot script while its bash instances run** — bash reads script files
+  lazily, and a rewrite underneath a running instance re-seeks mid-token ("syntax error near
+  `;;`", two takes killed mid-batch). Copy the loop into a new driver file instead.
+- **`--autoplay-couch` needs `--new <class>` beside it** or the parser falls back to the menu
+  and the "recording" is zero frames with the warning buried in a block-buffered log.
 
 ## 6. Deliver
 

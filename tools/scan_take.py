@@ -63,7 +63,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("take")
     ap.add_argument("--step", type=float, default=0.25)
-    ap.add_argument("--min-kb", type=float, default=45.0)
+    ap.add_argument("--min-kb", type=float, default=0.0,
+                    help="absolute clean threshold; 0 = adaptive (55%% of the take's median)")
+    ap.add_argument("--busy", type=float, default=0.0, metavar="DUR",
+                    help="also print the top sub-windows of DUR seconds ranked by mean sample "
+                         "size — busier frames compress worse, so this finds the ACTION, while "
+                         "'clean' only proves the absence of slates")
     ap.add_argument("--blue", action="store_true",
                     help="also rank frozen-orb moments by bright-blue pixel mass")
     a = ap.parse_args()
@@ -71,14 +76,31 @@ def main():
     s = sample(a.take, a.step)
     if not s:
         sys.exit("no samples decoded")
+    med = sorted(x[1] for x in s)[len(s) // 2]
+    # adaptive threshold: a slate/death frame compresses several-fold smaller than the take's
+    # own median gameplay frame — an absolute KB number is wrong for every new sample size
+    # (the first default, 45 KB, judged EVERY frame of EVERY take dirty).
+    thr = a.min_kb if a.min_kb > 0 else max(4.0, 0.55 * med)
     print(f"{len(s)} samples over {s[-1][0]:.1f}s  "
-          f"(kb min/med/max {min(x[1] for x in s):.0f}/{sorted(x[1] for x in s)[len(s)//2]:.0f}/{max(x[1] for x in s):.0f})")
-    for w in windows(s, a.min_kb)[:6]:
+          f"(kb min/med/max {min(x[1] for x in s):.0f}/{med:.0f}/{max(x[1] for x in s):.0f}, thr {thr:.0f})")
+    for w in windows(s, thr)[:6]:
         print(f"clean {w[0]:7.2f} +{w[1]:.2f}s")
+    if a.busy > 0:
+        k = max(1, int(a.busy / a.step))
+        best = []
+        for i in range(0, len(s) - k):
+            seg = s[i:i + k]
+            if min(x[1] for x in seg) < thr or min(x[2] for x in seg) < 14.0:
+                continue   # a busy window that contains a slate is not usable
+            best.append((sum(x[1] for x in seg) / k, seg[0][0]))
+        for kb, t in sorted(best, reverse=True)[:5]:
+            print(f"busy  {t:7.2f} +{a.busy:.1f}s  mean {kb:.0f}kb")
     if a.blue:
         scored = []
         for t, _, _, px in s:
-            blue = sum(1 for r, g, b in px.getdata() if b > 120 and b > r + 30 and b > g + 15)
+            # frozen-orb frost is pale TEAL, not blue — measured (96,160,160) on a known orb
+            # frame, i.e. g ~= b with red suppressed. A b>g test finds nothing (shipped once).
+            blue = sum(1 for r, g, b in px.getdata() if b > 120 and g > 120 and r < min(g, b) - 35)
             scored.append((blue, t))
         for blue, t in sorted(scored, reverse=True)[:8]:
             print(f"blue  {t:7.2f}  mass={blue}")

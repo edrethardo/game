@@ -768,11 +768,17 @@ void Engine::renderTutorials(u32 sw, u32 sh) {
                              static_cast<f32>(sh) * 0.65f, lockText, lockColor, 3);
     }
 
+    // Tutorial hints stand down during a --record capture: every trailer take is a FRESH hero
+    // (the dev doors mint one), so without this gate "Dodge Roll" sits pulsing mid-screen in
+    // otherwise perfect footage — a capture is not a first playthrough, and the bot may never
+    // perform the action that dismisses a hint (measured: 45 s of frozen-orb spectacle with
+    // the dodge hint parked over it).
+    if (m_recordActive) { /* skip Attack/Skill, Block and Dodge Roll hints */ }
     // Floor 1 controls tutorial — LMB Attack / RMB Skill.
     // Layout is MEASURED left-to-right (glyph, label, gap, glyph, label centered as one strip) —
     // the old fixed offsets (cx-120/cx-98/cx+35) only fit scale-3 labels; scale-4 "Attack" would
     // run under the Skill glyph.
-    if (m_controlsTooltipTimer > 0.0f) {
+    else if (m_controlsTooltipTimer > 0.0f) {
         f32 alpha = (m_controlsTooltipTimer < 1.0f)
                     ? m_controlsTooltipTimer : 1.0f;
         bool mouseLit = (sinf(m_controlsTooltipTimer * 5.0f) > 0.0f);
@@ -801,7 +807,7 @@ void Engine::renderTutorials(u32 sw, u32 sh) {
     }
 
     // Shield tutorial — shown whenever a shield is equipped until the player blocks
-    if (!m_shieldBlockedOnce) {
+    if (!m_recordActive && !m_shieldBlockedOnce) {
         const ItemInstance& offhand = m_inventories[m_localPlayerIndex].equipped[static_cast<u8>(ItemSlot::OFFHAND)];
         bool hasShield = !isItemEmpty(offhand) &&
                          m_itemDefs[offhand.defId].slot == ItemSlot::OFFHAND;
@@ -821,7 +827,7 @@ void Engine::renderTutorials(u32 sw, u32 sh) {
     }
 
     // Dodge roll tutorial — shown after shield tutorial is completed, until player dodges
-    if (m_shieldBlockedOnce && !m_dodgeRolledOnce) {
+    if (!m_recordActive && m_shieldBlockedOnce && !m_dodgeRolledOnce) {
         bool keyLit = (sinf(m_tutorialPulseTimer * 6.0f) > 0.0f);
         bool cp = Input::activeDeviceIsGamepad();
         const char* text = "Dodge Roll";
