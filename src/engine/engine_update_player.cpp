@@ -778,7 +778,49 @@ void Engine::tickMiscTimers(f32 dt) {
     // stay untouched: they were written at the top of this function from the LAST tick's pose, so
     // the render interpolation glides along the path instead of smearing from the player's eye.
     if (m_cinePath.mode != CineCam::Mode::OFF && m_localPlayerIndex == 0) {
-        const CineCam::Pose pose = CineCam::eval(m_cinePath, m_cineTick++);
+        CineCam::Pose pose;
+        if (m_cinePath.mode == CineCam::Mode::FOLLOW) {
+            // FOLLOW: trail the first live player projectile — the user's shot is a thrown chakram
+            // with the camera on its tail, through the wall bounce, into the kill. The chase EASES
+            // (fixed per-tick lerp, still deterministic) because a ricochet flips the velocity and
+            // the trail point jumps to the disc's other side: the half-second swing the ease makes
+            // of that IS the drama; a hard cut there reads as a glitch.
+            const Projectile* subject = nullptr;
+            for (u32 i = 0; i < MAX_PROJECTILES; i++) {
+                const Projectile& pr = m_projectiles.projectiles[i];
+                if (pr.active && pr.fromPlayer) { subject = &pr; break; }
+            }
+            if (subject) {
+                // 1 Hz flight telemetry: the room's disc is SEEDED, so one real-time probe run
+                // charts the exact bounce path — that is how the follow-kill shot's extras get
+                // placed ON the path instead of guessed at (two guessed takes missed entirely).
+                if (m_cineTick % 60 == 0)
+                    LOG_INFO("[FOLLOW] t=%us disc=(%.1f, %.1f) h=%.2f", m_cineTick / 60,
+                             (f64)subject->position.x, (f64)subject->position.z,
+                             (f64)subject->position.y);
+                Vec3 v = subject->velocity;
+                const f32 vl = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
+                if (vl > 0.01f) v = v * (1.0f / vl); else v = Vec3{0, 0, -1};
+                const Vec3 want = subject->position - v * m_cinePath.followDist
+                                + Vec3{0.0f, m_cinePath.followHeight, 0.0f};
+                if (!m_cineFollowSeeded) { m_cineFollowPos = want; m_cineFollowSeeded = true; }
+                m_cineFollowPos = m_cineFollowPos + (want - m_cineFollowPos) * 0.12f;
+                pose.position = m_cineFollowPos;
+                // Gaze at the DISC itself, not ahead of it: the ease lets the chase lag ~2 m
+                // extra at full flight speed, and an ahead-biased gaze then drops the subject
+                // below the frame — the first take followed an invisible protagonist.
+                CineCam::gaze(pose.position, subject->position, pose.yaw, pose.pitch);
+                m_cineFollowYaw = pose.yaw; m_cineFollowPitch = pose.pitch;
+            } else {
+                // Subject gone (it hit its target): HOLD the last pose. The kill lands, the camera
+                // stays on the aftermath, the cut decides when to leave.
+                pose.position = m_cineFollowPos;
+                pose.yaw = m_cineFollowYaw; pose.pitch = m_cineFollowPitch;
+            }
+            m_cineTick++;
+        } else {
+            pose = CineCam::eval(m_cinePath, m_cineTick++);
+        }
         m_camera.position = pose.position;
         m_camera.yaw      = pose.yaw;
         m_camera.pitch    = pose.pitch;

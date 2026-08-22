@@ -35,6 +35,26 @@ card() {
   echo "file '$out'" >> "$LIST"
 }
 
+# pngcard <png> <dur> [fade=in|out|both|none] — a still card from store/trailer/, the OLD title
+# sequence's own look (user call: those overlays were cooler than the drawtext-on-black v1 cards).
+pngcard() {
+  next_seg; local out="$OUT" fade="${3:-none}" filt="scale=1280:720,fps=60"
+  case "$fade" in
+    in)   filt="$filt,fade=t=in:st=0:d=0.6";;
+    out)  filt="$filt,fade=t=out:st=$(echo "$2-0.8"|bc):d=0.8";;
+    both) filt="$filt,fade=t=in:st=0:d=0.6,fade=t=out:st=$(echo "$2-0.8"|bc):d=0.8";;
+  esac
+  ffmpeg -hide_banner -loglevel error -y -loop 1 -t "$2" -i "$1"     -vf "$filt,format=yuv420p" -an -c:v libx264 -preset fast -crf 18 "$out"
+  echo "file '$out'" >> "$LIST"
+}
+
+# mp4seg <file> — a ready-made video segment (the animated logo walk), normalised to 720p60.
+mp4seg() {
+  next_seg; local out="$OUT"
+  ffmpeg -hide_banner -loglevel error -y -i "$1"     -vf "scale=1280:720,fps=60,format=yuv420p" -an -c:v libx264 -preset fast -crf 18 "$out"
+  echo "file '$out'" >> "$LIST"
+}
+
 # finish <out.mp4> — concat + placeholder music (afaded to the video length) + 1080p master
 finish() {
   local silent="$WORK/silent.mp4"

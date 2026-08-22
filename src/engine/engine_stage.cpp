@@ -113,8 +113,12 @@ void Engine::enterChakramRoom(u32 discs) {
         // Ring positions between the pillars, heights scattered through the camera band.
         const f32 ang = rng.frac() * 6.2831853f;
         const f32 rad = 3.0f + rng.frac() * 8.0f;
+        // A SINGLE disc is the follow-kill shot (camera on its tail, wall bounce, kill): pin it
+        // to torso height, where a grounded extra's hitbox actually lives — the scattered band
+        // (0.8-2.4 m) flew the lone protagonist straight over every head in the room.
+        const f32 discY = (discs == 1) ? 1.0f : 0.8f + rng.frac() * 1.6f;
         const Vec3 pos = { center.x + std::cos(ang) * rad,
-                           0.8f + rng.frac() * 1.6f,
+                           discY,
                            center.z + std::sin(ang) * rad };
         // Flat flight, tangential-ish scatter so the first seconds already cross paths.
         const f32 dirA = ang + 1.5707963f + (rng.frac() - 0.5f) * 1.2f;
@@ -212,9 +216,15 @@ void Engine::runStageFile() {
                 e->enemyDefIdx  = static_cast<u8>(defIdx);
                 e->baseMoveSpeed      = e->moveSpeed;
                 e->baseAttackCooldown = e->attackCooldown;
-                // Docile = a zero detection bubble: it never aggros, never flees, just exists on
-                // camera. Per-entity, so one stage can mix a docile crowd with an aggro pack.
-                if (docile) e->detectionRange = 0.0f;
+                // Docile = a zero detection bubble AND zero legs: it never aggros, never flees,
+                // and never idle-wanders off its mark. The follow-kill shot found the second half
+                // the hard way — extras placed ON the disc's measured path had strolled clear by
+                // the time it arrived, and the deterministic take missed by exactly their wander.
+                if (docile) {
+                    e->detectionRange = 0.0f;
+                    e->moveSpeed = 0.0f;
+                    e->baseMoveSpeed = 0.0f;
+                }
                 placed++;
             }
             LOG_INFO("--stage:%u: spawned %u/%u '%s' (%s) at (%.1f, %.1f)",

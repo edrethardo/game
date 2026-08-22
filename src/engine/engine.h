@@ -673,6 +673,10 @@ private:
     // and a hand-jitter or a hit-shake on a dolly shot would defeat its whole purpose.
     CineCam::Path m_cinePath;
     u32           m_cineTick = 0;
+    // FOLLOW-mode chase state (eased camera + last pose held after the subject despawns).
+    Vec3          m_cineFollowPos{};
+    f32           m_cineFollowYaw = 0.0f, m_cineFollowPitch = 0.0f;
+    bool          m_cineFollowSeeded = false;
     // --stage <file>: shot-dressing script, run once on the first IN_GAME frame then cleared.
     char          m_stageFile[200] = "";
     void runStageFile();

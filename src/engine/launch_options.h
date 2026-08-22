@@ -62,6 +62,10 @@ struct LaunchOptions {
     // "glide:ax,ay,az:bx,by,bz:secs[:lx,ly,lz]". Parsed by CineCam::parse at APPLY time (a
     // malformed spec refuses the launch rather than arming a wrong shot). Empty = off.
     char camera[160] = "";
+    // --hidehud: start with the HUD hidden (the F10 flag) — cinematic biome takes are bot-played
+    // dungeon runs, and without this the only HUD-free route was --camera, which replaces the
+    // player camera entirely.
+    bool hideHud = false;
     // --stage <file>: shot-dressing script (spawn/loot/equip lines) run at the first IN_GAME
     // frame. Composes with every world door. Empty = off.
     char stageFile[200] = "";

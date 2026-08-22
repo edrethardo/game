@@ -21,7 +21,10 @@ namespace CineCam {
 // The engine ticks at 60 Hz; a path's clock is the tick count since it was armed.
 inline constexpr f32 TICK_DT = 1.0f / 60.0f;
 
-enum struct Mode : u8 { OFF, ORBIT, GLIDE };
+enum struct Mode : u8 { OFF, ORBIT, GLIDE, FOLLOW };
+// FOLLOW has no pure eval(): its subject is a LIVE projectile, so the engine computes the pose
+// (engine_update_player.cpp) — trail distance/height parsed here, chase logic there. The user's
+// shot: a thrown chakram, camera on its tail, wall bounce, kill.
 
 struct Path {
     Mode mode = Mode::OFF;
@@ -34,6 +37,9 @@ struct Path {
     Vec3 a{}, b{}, look{};
     f32  secs = 8.0f;
     bool hasLook = false;
+    // FOLLOW: camera trails the newest player projectile at `followDist` behind and
+    // `followHeight` above, gazing along its flight.
+    f32  followDist = 2.6f, followHeight = 0.7f;
 };
 
 // The camera pose eval() answers with. Forward/right use the engine's own convention
@@ -111,6 +117,16 @@ inline bool parse(const char* spec, Path& out) {
             return false;   // trailing garbage is a typo, not an intention
         }
         p.mode = Mode::GLIDE;
+    } else if (std::strncmp(spec, "follow", 6) == 0) {
+        // "follow" or "follow:<dist>[,<height>]"
+        const char* rest = spec + 6;
+        if (rest[0] == ':') {
+            const int n = std::sscanf(rest + 1, "%f,%f", &p.followDist, &p.followHeight);
+            if (n < 1 || p.followDist <= 0.0f) return false;
+        } else if (rest[0] != '\0') {
+            return false;
+        }
+        p.mode = Mode::FOLLOW;
     } else {
         return false;
     }

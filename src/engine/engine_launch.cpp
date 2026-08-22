@@ -144,6 +144,8 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     // script dresses does not exist yet.
     std::snprintf(m_stageFile, sizeof(m_stageFile), "%s", opt.stageFile);
 
+    if (opt.hideHud) m_hideHud = true;   // --hidehud: clean takes without the F10 keypress
+
     // --camera: arm the cinematic path. Parsed HERE so a typo refuses the launch loudly —
     // discovered any later, it would have cost a whole capture run pointed the wrong way.
     if (opt.camera[0]) {
