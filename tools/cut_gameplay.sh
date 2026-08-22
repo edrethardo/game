@@ -12,7 +12,7 @@ ST="$(dirname "$0")/../store/trailer"
 pngcard "$ST/card_actual_gameplay.png" 1.6 in
 # Opener: the sorcerer's frozen-orb window — trim rides the peak-blue frames
 # (tools/scan_take.py --blue), not sampling luck.
-clip g_orb        ORBTRIM 4.0
+clip g_orb        4.2 4.0
 clip g_lava       8.5 3.5
 clip g_vhall      21.3 3.5
 pngcard "$ST/card_9_classes.png" 1.3
@@ -27,7 +27,7 @@ clip g_diabro     6.4 3.0
 clip g_ygara      13.2 3.0
 clip g_chakram    4.0 4.5
 pngcard "$ST/card_couch.png" 1.3
-clip g_couch      15.0 3.5
+clip g_couch      16.0 3.5
 clip g_death      8.5 1.5
 pngcard "$ST/card_out_now.png" 2.5 out
 finish "$TAKES/trailer_gameplay_v6.mp4"
