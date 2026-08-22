@@ -35,11 +35,13 @@ def main():
         img = gtf.draw_word(base.copy(), lines, width_frac=wf, cy_frac=0.5)
         img.convert("RGB").save(os.path.join(outdir, name))
         print("wrote", name)
-    # End card: the real full-logo frame + the wishlist line low in frame.
+    # End card: the real full-logo frame + the call to action. OUT NOW, not "wishlist" — the game
+    # is already in Early Access (user, 2026-08-22), and a trailer asking people to wishlist a
+    # game they can buy is the one mistake a store page cannot afford.
     logo = Image.open(os.path.join(outdir, "frame_5_logo.png")).convert("RGBA")
-    end = gtf.draw_word(logo, [("WISHLIST ON STEAM", SUB)], width_frac=0.42, cy_frac=0.88)
-    end.convert("RGB").save(os.path.join(outdir, "card_wishlist.png"))
-    print("wrote card_wishlist.png")
+    end = gtf.draw_word(logo, [("OUT NOW IN EARLY ACCESS", GOLD)], width_frac=0.5, cy_frac=0.88)
+    end.convert("RGB").save(os.path.join(outdir, "card_out_now.png"))
+    print("wrote card_out_now.png")
 
 if __name__ == "__main__":
     main()

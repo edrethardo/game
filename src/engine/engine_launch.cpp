@@ -402,7 +402,6 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         // Gear BEFORE arming the bot: enterAutoplayRun seeds the build cell from the class, and
         // autoEquipBackpack should run against that cell rather than re-gearing a moment later.
         if (opt.endgame) equipEndgameLoadout(0);
-        if (opt.endgame) equipEndgameLoadout(0);
         if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
         if (opt.endgame) autoEquipBackpack(0);   // re-pick under the class's own build cell
         // --quests-done: hand the hero a finished act chain. Applied AFTER enterAutoplayRun (which
@@ -433,6 +432,12 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
     // cell it saved (which may be a build the player deliberately picked).
     if (opt.endgame) equipEndgameLoadout(0);
     if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
+    // Re-pick under the class's OWN build cell — the same line the --zone branch carries, missing
+    // here for the whole life of the door. equipEndgameLoadout gears BEFORE enterAutoplayRun seeds
+    // the cell from the class, so a Tinkerer or Sorcerer walked out wearing whatever scored best
+    // under the DEFAULT cell (Moderate/Melee): a caster with a sword. Found by the user reviewing
+    // trailer takes — "dann tragen die auch die richtigen Waffen".
+    if (opt.endgame && opt.autoplay) autoEquipBackpack(0);
     LOG_INFO("Launch: entered game (%s, %s)",
              opt.role == LaunchOptions::Role::HOST ? "host" : "single-player",
              mode == GameStart::CONTINUE ? "continue" : "new");
