@@ -59,6 +59,11 @@ every dev-door hero is fresh, and the bot may never perform the action that dism
 
 ## 3. Title cards & music
 
+- BOTH trailers end on the OUT NOW card followed by the CREDITS card (user, 2026-08-23:
+  direction & editing = Ed Rethardo & Claude; music = "CLAUDE — ORIGINAL SCORE"). The score
+  is the SYNTHESIZED bed — seed-fixed and bit-reproducible from tools/gen_placeholder_music.py
+  (provenance: game_takes/SCORE.md); there is NO external CC author to credit. Never render
+  the two cut scripts in parallel — they share .cut_work and clobber each other's segments.
 - Cards are the OLD title art (gold/red wordmark over the stairs scene) — **never drawtext**:
   `store/trailer/frame_1..5` (word-by-word intro), `logo_walk.mp4` (animated outro),
   `tools/gen_trailer_cards.py` regenerates mid-cards (reuses `gen_trailer_frames.py`'s

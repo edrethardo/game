@@ -43,6 +43,16 @@ def main():
     # game they can buy is the one mistake a store page cannot afford.
     logo = Image.open(os.path.join(outdir, "frame_5_logo.png")).convert("RGBA")
     end = gtf.draw_word(logo, [("OUT NOW IN EARLY ACCESS", GOLD)], width_frac=0.5, cy_frac=0.88)
+    # End credits (user, 2026-08-23): direction & editing = Aaron + Claude; the music bed is
+    # the SYNTHESIZED placeholder (gen_placeholder_music.py) — no external CC author exists,
+    # so the score is honestly credited as an original. Two draw_word blocks with their own
+    # cy_frac: four lines in ONE call stack with no leading and overlap.
+    cred = gtf.draw_word(base.copy(), [("DIRECTED & EDITED BY", SUB),
+                                       ("ED RETHARDO  &  CLAUDE", GOLD)], width_frac=0.40, cy_frac=0.40)
+    cred = gtf.draw_word(cred,        [("MUSIC", SUB),
+                                       ("CLAUDE  -  ORIGINAL SCORE", GOLD)], width_frac=0.34, cy_frac=0.62)
+    cred.convert("RGB").save(os.path.join(outdir, "card_credits.png"))
+    print("wrote card_credits.png")
     end.convert("RGB").save(os.path.join(outdir, "card_out_now.png"))
     print("wrote card_out_now.png")
 

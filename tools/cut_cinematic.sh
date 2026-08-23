@@ -45,5 +45,6 @@ clip take_stage       1.5 3.0
 clip chakram_follow   0.0 4.5
 clip chakram_orbit    0.5 6.5
 mp4seg "$ST/logo_walk.mp4"
-pngcard "$ST/card_out_now.png" 3.0 out
-finish "$TAKES/trailer_cinematic_v7.mp4"
+pngcard "$ST/card_out_now.png" 3.0
+pngcard "$ST/card_credits.png" 3.0 both
+finish "$TAKES/trailer_cinematic_v8.mp4"

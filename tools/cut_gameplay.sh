@@ -37,5 +37,8 @@ clip g_nyx        28.2 2.0
 clip g_chakram    4.0 3.5
 clip g_couch      16.0 2.5
 clip g_death      8.5 1.5
-pngcard "$ST/card_out_now.png" 2.5 out
-finish "$TAKES/trailer_gameplay_v9.mp4"
+pngcard "$ST/card_out_now.png" 2.5
+# End credits (user): direction & editing Aaron + Claude, the score credited as the
+# original it is (synthesized, seed-fixed, reproducible — see game_takes/SCORE.md).
+pngcard "$ST/card_credits.png" 3.0 both
+finish "$TAKES/trailer_gameplay_v10.mp4"

@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """gen_placeholder_music.py — a LONG provisional music bed for the trailer cuts (WB-273).
 
+THIS SCRIPT IS THE SAVED SCORE (user, 2026-08-23): the RNG seed is FIXED (0xC4A6), so a
+re-run reproduces the shipped bed BIT-IDENTICALLY (verified by md5 against
+game_takes/PLACEHOLDER_music_bed.wav — e366a18cc61866b1333154a408905ca8). Do not change
+the seed, the BPM, or the section layout without minting a NEW filename: the trailers'
+credits name this exact piece ("CLAUDE — ORIGINAL SCORE"), and game_takes/SCORE.md
+documents its provenance. Pure synthesis (numpy sine/noise) — no samples, no external
+work, no CC author.
+
 PLACEHOLDER by design: the real track is the user's pick via the music picker (WB-274);
 this exists so the cuts can be timed against something with a pulse today. Synthesized from
 scratch (sine/noise only), so there is no licence question — it is ours by construction.
