@@ -282,6 +282,9 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         equipFreshLane(1);
         m_splitPlayerCount = 2;
         Input::setSplitScreen(true);
+        // --arena-couch --autoplay = a LOCAL bot-vs-bot duel — the cheapest arena-bot smoke
+        // (one process, no networking) and the fastest way to watch a map change play out.
+        if (opt.autoplay) enterAutoplayRun(/*freshCharacter=*/true);
         enterArena();
         LOG_INFO("Launch: entered the ARENA (local versus, --arena-couch)");
         return;
@@ -327,6 +330,10 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         if (Net::connectToServer(opt.address, opt.port)) {
             m_gameState = GameState::CONNECTING;
             m_connectingElapsed = 0.0f;
+            // Arm the bot for a JOINING client too — the arena soak's N-1 combatants are
+            // exactly this launch shape (--join --new <class> --autoplay), and the driver
+            // ticks in the shared gameUpdate regardless of net role once armed.
+            if (opt.autoplay) enterAutoplayRun(opt.save != LaunchOptions::Save::LOAD);
             LOG_INFO("Launch: joining %s:%u as class %u...",
                      opt.address, opt.port, static_cast<u32>(m_playerClasses[0]));
         } else {
@@ -375,7 +382,10 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         // Dev door (--arena): straight into the PvP arena (optionally hosting — the HOST
         // block above already brought the listen-server up, and enterArena broadcasts the
         // sentinel seed so joiners follow).
-        (void)mode;
+        // Arm the PvP bot BEFORE the transition (the --town pattern): this branch returns
+        // before the generic arming below, so `--arena --autoplay` used to land an unarmed
+        // hero in the one world the arena bots exist to play.
+        if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
         enterArena();
         LOG_INFO("Launch: entered the ARENA (--arena)");
         return;

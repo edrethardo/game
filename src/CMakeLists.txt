@@ -15,6 +15,7 @@ add_executable(DungeonEngine
     engine/engine_death.cpp
     engine/engine_world.cpp
     engine/engine_autoplay_zone.cpp
+    engine/engine_autoplay_arena.cpp
     engine/engine_zone.cpp
     engine/engine_town.cpp
     engine/engine_arena.cpp

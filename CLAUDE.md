@@ -1724,7 +1724,26 @@ Ground truth for a leak is process **RSS sampled against a progress counter**; C
 
 **Arena mode (PvP).** A main-menu "Arena Mode" starts an FFA deathmatch (first to 10, 3 s auto-respawn)
 on a deterministic floor-97 colosseum (`engine_arena.cpp`, town rails; rules in `game/arena.h`,
-tested). The layout is a **two-story Quake / MPH Combat Hall** (44×44, 4-fold symmetric): a ground pit
+tested). **36×36 since 2026-08-23** (was 44×44 — Aaron: smaller; −33% floor area) and the layout is
+PARAMETERIZED on `ARENA_W`: every placement (tower, ramps, pads, columns, crates, spawn pads) derives
+from the size, because the 44-era hand-written literals were all W-relative facts and shrinking by
+editing fifteen literals is how a pad ends up inside a ramp. `ARENA_SIZE` (env, even 36–44) overrides
+it for the one-binary A/B the bot soak runs — ship behaviour is the constant.
+**ARENA BOTS (2026-08-23, Aaron: "Bau bots für Arena Multiplayer um sie evaluieren zu können").**
+`--arena --autoplay` (host), `--join … --autoplay` (client bots) and `--arena-couch --autoplay`
+(local bot duel) drive every lane through the exact human input path (engine_autoplay_arena.cpp:
+a driver branch that REPLACES the PvE target list with the live combatants and re-enables the brain;
+buildBotView still supplies weapon/skills/HP). THREE target sources, one per net role — SERVER reads
+m_players[], CLIENT reads the snapshot-interpolation mirror m_renderInterp (m_players is never
+activated client-side; the first MP soak had every client bot blind on the crown), NONE reads
+m_localPlayers[]. `tools/arena_soak.py` launches host + N bot clients and reduces the logs
+([ARENA-BOT] 1 Hz per lane, [ARENA] death/over) to match duration, first blood, kill cadence,
+engagement range and high-ground share. Measured (2 matches per size, 4 mixed-class bots): 36×36
+median kill gap **4 s** vs 44×44's **5–7 s**, engagement 2.8 vs 3.2–3.6 m — the smaller map is
+measurably denser, matches decide inside 6 min on both. KNOWN BOT BIAS: the host slot won every
+match (zero-latency aim vs the clients' ~100 ms interpolated view + warrior's 150 HP) — constant
+across sizes, so map A/Bs are fair, but read absolute per-slot scores with that in mind.
+The layout is a **two-story Quake / MPH Combat Hall** (36×36, 4-fold symmetric): a ground pit
 (crates, wall-midpoint jump pads, central 1.5 m tower via four ramps) under TWO dueling 3.0 m
 vantages — a **perimeter sniper balcony** you stand on AND walk under (covered arcade beneath
 holds the spawn bays; corner slab **stairwells** + pads go up; open inner edge to drop/fire),

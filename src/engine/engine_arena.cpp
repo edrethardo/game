@@ -30,6 +30,7 @@
 #include "net/server.h"
 #include "core/log.h"
 #include <cmath>
+#include <cstdlib>   // getenv — the ARENA_SIZE A/B override
 
 // The pure rules assume exactly MAX_PLAYERS combatants — pin it here, at the engine boundary.
 static_assert(Arena::MAX_COMBATANTS == MAX_PLAYERS,
@@ -37,18 +38,39 @@ static_assert(Arena::MAX_COMBATANTS == MAX_PLAYERS,
 
 // Arena layout constants — one place, shared by build + spawn placement so they can't drift.
 namespace {
-    constexpr u32 ARENA_W = 44, ARENA_D = 44;
+    // 36x36 since the bot-evaluation pass (was 44x44 — Aaron: "mach die Arena-Maps kleiner";
+    // -33% floor area). EVERY placement below derives from ARENA_W, so the size is one knob:
+    // the 44-era literals (tower 19..24, pads at 21/38, columns {10,16,27,33}) were all
+    // W-relative facts written out by hand, and shrinking by editing fifteen literals is how
+    // a pad ends up inside a ramp.
+    // ARENA_SIZE env override (even values 36..44) exists ONLY for the one-binary A/B the
+    // bot soak runs — a sequential two-build comparison measures the build, not the map
+    // (the project's measured A/B rule). Ship behaviour is the constant below.
+    u32 arenaSizeFromEnv() {
+        if (const char* e = std::getenv("ARENA_SIZE")) {
+            int v = std::atoi(e);
+            if (v >= 36 && v <= 44 && (v % 2) == 0) return static_cast<u32>(v);
+        }
+        return 36;
+    }
+    const u32 ARENA_W = arenaSizeFromEnv(), ARENA_D = ARENA_W;
     constexpr f32 ARENA_CS = 1.0f;
+    const u32 HALF  = ARENA_W / 2;       // tower/pad axis
+    const u32 COL_A = ARENA_W / 4 - 1;   // first balcony column (44: 10, 36: 8)
+    const u32 COL_B = COL_A + 6;         // second column; mirrors complete the four
 
     // Spawn pads live in the ARCADE — the covered ground story under the perimeter balcony — one
-    // per wall, rotationally symmetric ((x,z) -> (43-z, x)), each tucked beside a support column
+    // per wall, rotationally symmetric ((x,z) -> (W-1-z, x)), each tucked beside a support column
     // and near a corner stairwell: you respawn in cover, out of every balcony sightline, with the
     // stairs and the pit both a few steps away.
-    constexpr Vec3 kArenaPads[MAX_PLAYERS] = {
-        { 1.5f, 0.0f, 10.5f},   // west arcade,  beside the column at (2,10)
-        {33.5f, 0.0f,  1.5f},   // north arcade, beside the column at (33,2)
-        {42.5f, 0.0f, 33.5f},   // east arcade,  beside the column at (41,33)
-        {10.5f, 0.0f, 42.5f},   // south arcade, beside the column at (10,41)
+    // One authored pad (west arcade, beside the first column), the rest by the same quarter
+    // turn the geometry uses: (x,z) -> (W - z, x) on cell-centre positions.
+    const f32 PAD_X = 1.5f, PAD_Z = COL_A + 0.5f;
+    const Vec3 kArenaPads[MAX_PLAYERS] = {
+        {PAD_X,                     0.0f, PAD_Z},                    // west arcade
+        {ARENA_W * ARENA_CS - PAD_Z, 0.0f, PAD_X},                   // north arcade
+        {ARENA_W * ARENA_CS - PAD_X, 0.0f, ARENA_W * ARENA_CS - PAD_Z}, // east arcade
+        {PAD_Z,                     0.0f, ARENA_W * ARENA_CS - PAD_X},  // south arcade
     };
 
     // Yaw that faces the arena center from a pad. Forward is {-sin(yaw), 0, -cos(yaw)}
@@ -167,10 +189,10 @@ Vec3 Engine::buildArenaLevel() {
     // --- SECOND STORY: the perimeter SNIPER BALCONY @ 3.0 m (the Combat-Hall signature) --------
     // A 2-cell walkway hugging every wall; open inner edge (drop off / fire into the pit
     // anywhere), covered arcade beneath (underside 2.5 m — 0.7 m of headroom over a body).
-    plat(1,  1, 42,  2, 12);   // north band (z 1..2)
-    plat(1, 41, 42,  2, 12);   // south band
-    plat(1,  3,  2, 38, 12);   // west band  (x 1..2)
-    plat(41, 3,  2, 38, 12);   // east band
+    plat(1,  1,           ARENA_W - 2, 2,           12);   // north band (z 1..2)
+    plat(1,  ARENA_D - 3,  ARENA_W - 2, 2,           12);   // south band
+    plat(1,  3,            2,           ARENA_D - 6, 12);   // west band  (x 1..2)
+    plat(ARENA_W - 3, 3,   2,           ARENA_D - 6, 12);   // east band
 
     // Corner STAIRWELLS: an L-switchback of graduated slabs (0.25 m steps — walkable under
     // STEP_UP_HEIGHT), arcade -> balcony, overwriting band cells. The quiet route up; the pads
@@ -198,7 +220,7 @@ Vec3 Engine::buildArenaLevel() {
     // below, pillars to strafe around above (the walkway narrows to one cell at each), and the
     // structure that visually carries the slab. Mirror-symmetric pairs (10,33) and (16,27).
     {
-        static constexpr u32 kColX[4] = {10, 16, 27, 33};
+        const u32 kColX[4] = {COL_A, COL_B, ARENA_W - 1 - COL_B, ARENA_W - 1 - COL_A};
         for (u32 k = 0; k < 4; k++)
             for (u32 ci = 0; ci < 4; ci++) {
                 u32 ox, oz;
@@ -209,22 +231,22 @@ Vec3 Engine::buildArenaLevel() {
 
     // Wall-midpoint JUMP PADS: pit -> balcony (launch apex 3.6 m; air-steer onto the 3.0 m band
     // edge). Never ON or UNDER a slab — a pad launch must own its full arc.
-    pad(21,  4, 2, 2, 0); pad(38, 21, 2, 2, 0);
-    pad(21, 38, 2, 2, 0); pad( 4, 21, 2, 2, 0);
+    pad(HALF - 1, 4, 2, 2, 0);          pad(ARENA_W - 6, HALF - 1, 2, 2, 0);
+    pad(HALF - 1, ARENA_D - 6, 2, 2, 0); pad(4, HALF - 1, 2, 2, 0);
 
     // --- CENTER: tower + crown (solid-riser tiers, as before, shifted to the 44x44 centre).
     // The crown now sits at BALCONY height so the two commanding vantages duel across the map.
-    raise(19, 19, 6, 6, 6);            // tower @ 1.5 m, reached by the four ramps
-    pad(20, 20, 4, 4, 6);              // crown launch-ring (12 pad cells after the crown overwrite)
-    raise(21, 21, 2, 2, 12);           // crown @ 3.0 m — level with the sniper balcony
-    ramp(25, 21,  1,  0, 0,  1, 6, 6); // east  (x 25..30)
-    ramp(18, 21, -1,  0, 0,  1, 6, 6); // west  (x 18..13)
-    ramp(21, 18,  0, -1, 1,  0, 6, 6); // north (z 18..13)
-    ramp(21, 25,  0,  1, 1,  0, 6, 6); // south (z 25..30)
+    raise(HALF - 3, HALF - 3, 6, 6, 6);    // tower @ 1.5 m, reached by the four ramps
+    pad(HALF - 2, HALF - 2, 4, 4, 6);      // crown launch-ring (12 pad cells after the crown overwrite)
+    raise(HALF - 1, HALF - 1, 2, 2, 12);   // crown @ 3.0 m — level with the sniper balcony
+    ramp(HALF + 3, HALF - 1,  1,  0, 0,  1, 6, 6); // east
+    ramp(HALF - 4, HALF - 1, -1,  0, 0,  1, 6, 6); // west
+    ramp(HALF - 1, HALF - 4,  0, -1, 1,  0, 6, 6); // north
+    ramp(HALF - 1, HALF + 3,  0,  1, 1,  0, 6, 6); // south
 
     // --- Pit cover: one crate cluster per diagonal quadrant (mirror pairs 10 <-> 32) -----------
-    solid(10, 10, 2, 2, plank); solid(32, 10, 2, 2, plank);
-    solid(10, 32, 2, 2, plank); solid(32, 32, 2, 2, plank);
+    solid(COL_A, COL_A, 2, 2, plank); solid(ARENA_W - 2 - COL_A, COL_A, 2, 2, plank);
+    solid(COL_A, ARENA_D - 2 - COL_A, 2, 2, plank); solid(ARENA_W - 2 - COL_A, ARENA_D - 2 - COL_A, 2, 2, plank);
 
     m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid,
                              0xA12E7Au,    // constant seed — deterministic tile shading on every peer
@@ -384,6 +406,12 @@ void Engine::arenaSendScores(u8 toSlot) {
 // respawn clock, and ends the match on the KILL_TARGET-th kill. Death sites (the serverNetPost
 // remote check and the local-lane death path) call this exactly once per death.
 void Engine::arenaHandleDeath(u8 victimSlot, u8 killerSlot) {
+    // One parseable line per death: the arena soak's primary dataset (kill cadence,
+    // per-slot totals). Logged before the early-outs so environmental deaths show too.
+    LOG_INFO("[ARENA] death: victim=%u killer=%u scores=%u/%u/%u/%u",
+             victimSlot, killerSlot,
+             m_arenaScore.kills[0], m_arenaScore.kills[1],
+             m_arenaScore.kills[2], m_arenaScore.kills[3]);
     if (!m_level.inArena || m_arenaOverTimer > 0.0f) return;
     m_arenaRespawn[victimSlot] = Arena::RESPAWN_DELAY;
     arenaPushFeed(killerSlot, victimSlot);
@@ -498,6 +526,9 @@ void Engine::arenaTick(f32 dt) {
 // Match decided. Broadcast FIRST, then flip local state — the CREDITS ordering rule: a
 // host-local flip that stops the world before the packet leaves is how clients hang.
 void Engine::beginArenaOver(u8 winner) {
+    LOG_INFO("[ARENA] over: winner=%u scores=%u/%u/%u/%u",
+             winner, m_arenaScore.kills[0], m_arenaScore.kills[1],
+             m_arenaScore.kills[2], m_arenaScore.kills[3]);
     if (m_netRole == NetRole::SERVER) {
         u8 buf[sizeof(PacketHeader) + 2 + MAX_PLAYERS];
         PacketHeader* hdr = reinterpret_cast<PacketHeader*>(buf);

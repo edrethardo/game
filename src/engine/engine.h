@@ -307,6 +307,8 @@ private:
     // latch + handoff grace (there is one human), the run/floor telemetry timers and death
     // counters, and the pad-cell cache (floor geometry, identical for both lanes).
     struct AutoplayLane {
+        // 1 Hz [ARENA-BOT] telemetry clock (per lane — a couch match runs two bots).
+        f32 arenaTelemTimer = 0.0f;
         // Seconds this lane has been dead while the bot holds control. Split-screen has no GAME_OVER
         // screen — a dead lane sits in its own branch waiting for a JUMP press, and gameUpdate (which
         // runs updateAutoplay) is SKIPPED for it, so the bot can never press anything. Without this a
@@ -1931,6 +1933,7 @@ private:
     // the view/brain chain has nothing to say there. This beelines to the to-dungeon portal and
     // pulses the interact instead of idling (the arena / Source chamber keep idling).
     void autoplayTownStep(f32 dt, bool uiOpen);
+    void autoplayArenaStep(f32 dt, bool uiOpen);   // PvP bot: targets are PLAYERS (engine_autoplay_arena.cpp)
     Autoplay::BotView buildBotView();
     // Runs the melee ranged-sidearm state machine (equip a ranged weapon from the bag when a melee
     // build can only reach a target by falling off its VHALL balcony; switch back when it clears).

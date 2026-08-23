@@ -258,6 +258,12 @@ void Engine::updateAutoplay(f32 dt) {
     // flat-floor pure — no town concept ever reaches it.
     if (m_level.inTown) { autoplayTownStep(dt, uiOpen); return; }
 
+    // ARENA: the bot fights PLAYERS (engine_autoplay_arena.cpp). Until this branch the arena
+    // deliberately idled ("a progression firewall the bot does not play") — it now plays so a
+    // soak can EVALUATE the map: four bot lanes produce kill cadence, engagement range and
+    // vertical-occupancy telemetry no human playtest session can match for repeatability.
+    if (m_level.inArena) { autoplayArenaStep(dt, uiOpen); return; }
+
     // THE OVERWORLD IS PLAYED, NOT REFUSED. The bot used to end its run on entering a zone, because
     // an act has no descent objective and a bot standing in one would idle forever — the town and
     // credits strands in a new costume. It now has an objective: the quest chain (game/zone_route.h),
