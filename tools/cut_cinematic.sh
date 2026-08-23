@@ -26,13 +26,17 @@ clip biome_void2      2.8 4.2
 # IN ACTION on staged --hidehud bot runs: claymore sweep, scythe, bow, revolver, hellfire
 # launcher, void flask fire, staff bolts. Trim windows sit inside each take's longest clean
 # stretch (transition slates mapped by frame size — the couch lesson, third appearance).
+# v7 of the montage (user: "abwechslungsreicher — mehr Biome"): every weapon fights in its
+# OWN look — stone 3, catacombs 18, caverns 25, the two-story hall 8, the molten sea 33, the
+# void 47, the Descent maze 9. The wpn3 takes stage the weapon PLUS a legendary armor kit
+# (the orb recipe's survivability trick — a fresh unarmored hero dies in seconds past ~12).
 clip wpn_claymore     4.2 2.2
-clip wpn_scythe       8.0 2.2
-clip wpn_bow          3.0 2.2
-clip wpn_revolver     3.4 2.2
-clip wpn_launcher     1.2 2.2
-clip wpn_flask        1.5 2.2
-clip wpn_staff        1.5 2.2
+clip wpn3_scythe      9.0 2.2
+clip wpn3_bow         4.0 2.2
+clip wpn3_revolver    7.0 2.2
+clip wpn3_launcher    2.3 2.2
+clip wpn3_flask       6.3 2.2
+clip wpn3_staff       1.0 2.2
 clip loot_shower      1.0 6.0
 clip take_stage       1.5 3.0
 # No INFINITE CHAKRAMS card (user: "bewerbe sie nicht — zeig sie in Action"): the weapon sells
@@ -42,4 +46,4 @@ clip chakram_follow   0.0 4.5
 clip chakram_orbit    0.5 6.5
 mp4seg "$ST/logo_walk.mp4"
 pngcard "$ST/card_out_now.png" 3.0 out
-finish "$TAKES/trailer_cinematic_v6.mp4"
+finish "$TAKES/trailer_cinematic_v7.mp4"

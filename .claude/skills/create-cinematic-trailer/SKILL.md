@@ -39,11 +39,16 @@ flyover → void) → **weapon montage** (7 legendaries, ~2.2 s each) → loot s
   defends the cameraman.
 - **Town reveal**: `--new warrior --town --camera "glide:22,4.5,40:22,2.2,6:11:22,1.5,2"`,
   trim the early high sweep (~2.0–7.0) before the camera sinks into empty grass.
-- **Weapon montage**: `--new warrior --floor 3 --autoplay --hidehud --stage stages/eq_<w>.txt`
-  (fresh hero so the staged legendary is never displaced). Seeds differ per launch — a take
-  whose best frame is the inside of a loot crate gets RE-ROLLED, not re-trimmed. Note: in the
-  sealed chakram room the bot does NOT fight (stage worlds give the brain no floor), so
-  weapon demos must run on real floors.
+- **Weapon montage**: every weapon fights in its OWN biome (v7, Aaron: "abwechslungsreicher —
+  mehr Biome"): stone 3, catacombs 18, caverns 25, `--vhall` 8, `--lava` 33, void 47,
+  `--fourstory` 9. `--new warrior --floor <n> [style] --autoplay --hidehud --stage
+  stages/eq3_<w>.txt` — the eq3 stages carry the weapon PLUS the legendary armor kit (the orb
+  recipe's survivability trick; a fresh unarmored hero dies in seconds past floor ~12; one
+  death per deep take is fine — trim inside the clean windows). Fresh hero so nothing in the
+  bag displaces the staged gear. Seeds differ per launch — a take whose best frame is the
+  inside of a loot crate gets RE-ROLLED, not re-trimmed. Note: in the sealed chakram room the
+  bot does NOT fight (stage worlds give the brain no floor), so weapon demos must run on real
+  floors.
 - **Loot shower**: `--new warrior --town --stage stages/stage_loot.txt --camera
   "orbit:22,20,6,12,2.6,0.6"` — 56 drops (near the 64-slot world-item cap), every 6th roll
   forced legendary.
