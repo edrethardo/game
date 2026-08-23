@@ -14,6 +14,17 @@ namespace Arena {
     // == MAX_PLAYERS. Kept as a local constant so this header stays engine-free; the
     // engine boundary static_assert's the two are equal (engine.h).
     constexpr u32 MAX_COMBATANTS = 4;
+    // The map roster. The id travels in the SV_LEVEL_SEED broadcast's seed byte (levelSeed %
+    // MAP_COUNT), so adding a map costs no protocol change — both peers carve from the id.
+    constexpr u32 MAP_COUNT = 4;
+    inline const char* mapName(u32 id) {
+        switch (id % MAP_COUNT) {
+            case 1:  return "The Crucible";     // lava cross: four causeways over a molten sea
+            case 2:  return "The Pit";          // inverted amphitheatre: gravity is the funnel
+            case 3:  return "The Motherboard";  // circuit-board alleys around a defended die
+            default: return "Combat Hall";      // the original two-story colosseum
+        }
+    }
     constexpr u32 KILL_TARGET    = 10;     // first to 10 wins (v1 fixed; lobby config parked)
     constexpr f32 RESPAWN_DELAY  = 3.0f;   // seconds dead before the auto-respawn
 

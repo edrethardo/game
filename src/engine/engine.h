@@ -1029,6 +1029,11 @@ private:
     // --- Arena mode (PvP deathmatch, engine_arena.cpp) -----------------------------------
     // Authoritative on the host/SP; clients mirror score + match-end via ARENA_* events.
     Arena::Score m_arenaScore;                      // kills per net slot
+    // Spawn pads + centre of the CURRENT arena map — written by its builder (the maps differ,
+    // so a constexpr table can no longer carry them). Consumers: lane placement, seating,
+    // respawn's farthestPad, and the face-the-centre spawn yaw.
+    Vec3 m_arenaPads[MAX_PLAYERS] = {};
+    Vec3 m_arenaCenter = {};
     f32          m_arenaRespawn[MAX_PLAYERS] = {};  // >0 = that slot is dead, counting down to auto-respawn
     f32          m_arenaOverTimer = 0.0f;           // >0 = match decided, winner banner running
     u8           m_arenaWinner    = 0xFF;           // valid while m_arenaOverTimer > 0
@@ -1517,7 +1522,11 @@ private:
     void enterTownClient();
     // PvP arena (engine_arena.cpp): deterministic colosseum on sentinel floor 97 — same rails
     // as the town (host broadcasts the sentinel seed, clients build the identical level).
-    Vec3 buildArenaLevel();
+    Vec3 buildArenaLevel();                 // dispatcher: levelSeed % Arena::MAP_COUNT picks the map
+    Vec3 buildArenaCombatHall();            // map 0: the original two-story colosseum (36x36)
+    Vec3 buildArenaCrucible();              // map 1: lava cross (30x30)
+    Vec3 buildArenaPit();                   // map 2: inverted amphitheatre (24x24)
+    Vec3 buildArenaMotherboard();           // map 3: circuit board (40x40)
     void spawnArenaContents(Vec3 center);
     void enterArenaCommon();          // shared host/client body (build + reset + local placement)
     void enterArena();                // host/SP entry (seats NetPlayers, broadcasts the seed)

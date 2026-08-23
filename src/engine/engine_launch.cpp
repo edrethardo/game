@@ -285,6 +285,9 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         // --arena-couch --autoplay = a LOCAL bot-vs-bot duel — the cheapest arena-bot smoke
         // (one process, no networking) and the fastest way to watch a map change play out.
         if (opt.autoplay) enterAutoplayRun(/*freshCharacter=*/true);
+        // The map id RIDES levelSeed (buildArenaLevel: seed % MAP_COUNT) — setting the seed is
+        // the whole selection mechanism, and the broadcast carries it to any joiner for free.
+        if (opt.arenaMap != 0xFF) m_level.levelSeed = opt.arenaMap;
         enterArena();
         LOG_INFO("Launch: entered the ARENA (local versus, --arena-couch)");
         return;
@@ -386,6 +389,7 @@ void Engine::applyLaunchOptions(const LaunchOptions& opt) {
         // before the generic arming below, so `--arena --autoplay` used to land an unarmed
         // hero in the one world the arena bots exist to play.
         if (opt.autoplay) enterAutoplayRun(mode == GameStart::NEW_GAME);
+        if (opt.arenaMap != 0xFF) m_level.levelSeed = opt.arenaMap;   // map id rides the seed
         enterArena();
         LOG_INFO("Launch: entered the ARENA (--arena)");
         return;

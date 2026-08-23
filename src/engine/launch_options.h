@@ -76,6 +76,9 @@ struct LaunchOptions {
 
     bool town = false;                         // --town: after --load/--new, enter the TOWN hub
     bool arena = false;                        // --arena: after --load/--new, enter the PvP ARENA
+    // --arena-map <0-3>: pick the arena map (0 Combat Hall, 1 Crucible, 2 Pit, 3 Motherboard).
+    // 0xFF = not requested (the map then falls out of levelSeed % MAP_COUNT — random-ish).
+    u8   arenaMap = 0xFF;
     // --source: after --load/--new, go straight into The Source (the secret Engine fight). Normally
     // it costs a full 50-floor run with all ten shards, which made the one world an autoplay bot can
     // enter but not play effectively untestable — a 3 h soak reached it three times by accident.

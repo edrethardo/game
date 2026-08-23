@@ -261,6 +261,12 @@ LaunchOptions parseLaunchArgs(int argc, char** argv) {
             opt.upnp = false;
         } else if (ieq(a, "--fullscreen")) {
             opt.fullscreen = true;          // display modifier — not a game-jump directive
+        } else if (ieq(a, "--arena-map")) {
+            const char* v = nextVal(i); if (!v) break;
+            long n; if (!parseInt(v, n) || n < 0 || n > 3) {
+                LOG_WARN("--arena-map expects 0-3 (got '%s')", v); opt.valid = false; break;
+            }
+            opt.arenaMap = (u8)n;
         } else if (ieq(a, "--res")) {
             // WxH creation size, e.g. --res 1920x1080. Bounded to keep a typo from asking SDL for
             // a 100000-pixel surface; the small end refuses sizes the HUD layout can't survive.

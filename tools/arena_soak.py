@@ -33,6 +33,7 @@ def main():
     ap.add_argument("--bots", type=int, default=4)
     ap.add_argument("--minutes", type=float, default=6.0)
     ap.add_argument("--classes", default="warrior,marksman,ranger,sorcerer")
+    ap.add_argument("--map", type=int, default=None, help="0 Hall, 1 Crucible, 2 Pit, 3 Motherboard")
     ap.add_argument("--outdir", default="/tmp/claude-1000/arena_soak")
     a = ap.parse_args()
     classes = a.classes.split(",")
@@ -42,7 +43,10 @@ def main():
     logs = []
     host_log = os.path.join(a.outdir, "host.log")
     logs.append(host_log)
-    procs.append(launch(["--host", "--lan", "--new", classes[0], "--arena", "--autoplay"], host_log))
+    host_args = ["--host", "--lan", "--new", classes[0], "--arena", "--autoplay"]
+    if a.map is not None:
+        host_args += ["--arena-map", str(a.map)]   # joiners inherit via the seed broadcast
+    procs.append(launch(host_args, host_log))
     time.sleep(6)   # server up before the joiners knock
     for i in range(1, a.bots):
         lg = os.path.join(a.outdir, f"client{i}.log")
