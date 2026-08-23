@@ -38,13 +38,12 @@ clip wpn3_launcher    2.3 2.2
 clip wpn3_flask       6.3 2.2
 clip wpn3_staff       1.0 2.2
 clip loot_shower      1.0 6.0
-clip take_stage       1.5 3.0
-# No INFINITE CHAKRAMS card (user: "bewerbe sie nicht — zeig sie in Action"): the weapon sells
-# itself — one thrown disc, camera on its tail, a wall bounce, a kill (chakram_follow), then the
-# full storm from the orbit.
-clip chakram_follow   0.0 4.5
-clip chakram_orbit    0.5 6.5
+# The chakram beat is the FOLLOW-KILL alone (user, 2026-08-23: both room-full-of-discs shots
+# — take_stage and the storm orbit — are OUT; the kill shot stays and gets the room to
+# breathe): one thrown disc, camera on its tail, the wall bounce, the 70-crit kill, and the
+# hold on the victim's glowing drop.
+clip chakram_follow   0.0 6.0
 mp4seg "$ST/logo_walk.mp4"
 pngcard "$ST/card_out_now.png" 3.0
 pngcard "$ST/card_credits.png" 3.0 both
-finish "$TAKES/trailer_cinematic_v8.mp4"
+finish "$TAKES/trailer_cinematic_v9.mp4"

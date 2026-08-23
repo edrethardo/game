@@ -57,9 +57,9 @@ flyover → void) → **weapon montage** (7 legendaries, ~2.2 s each, EACH IN IT
   disc to torso height; the extras stand ON the measured path (probe run + `[FOLLOW]`
   telemetry charted it; the room is deterministic, so the kill reproduces — verify it did:
   the disc despawns and telemetry stops at the hit, ~2.3 s).
-- **Storm orbit**: `--new warrior --endgame --chakram-room 55 --camera
-  "orbit:14,14,11.5,13,3.2,1.3"` — single frames undersell it, the motion carries; judge in
-  video, not stills.
+- **Storm orbit** (CUT from the trailer since v9, kept here as a recipe): `--new warrior
+  --endgame --chakram-room 55 --camera "orbit:14,14,11.5,13,3.2,1.3"` — single frames
+  undersell it, the motion carries; judge in video, not stills.
 
 ## Trims and QC
 
