@@ -23,14 +23,15 @@ gameplay-specific layer on top.
 - Tutorial hints (Attack/Skill, Block, Dodge Roll) auto-suppress while `--record` is armed —
   every dev-door hero is fresh, and the bot may never do the action that dismisses a hint.
 
-## The beat structure (v7 EDL, `tools/cut_gameplay.sh`)
+## The beat structure (v8 EDL, `tools/cut_gameplay.sh`)
 
-**NO text cards mid-stream** (Aaron's call, v7) — hard cuts only; the OUT NOW end card is the
-one survivor (it is the sender and the CTA, not a caption). Orb opener → lava → VHALL brawl →
-**four class-skill showcases** (drone army, turret squad, Divine Judgment — plus the orb
-opener itself) → descent crits → **six-boss reel** (2 s each, ascending floors: the Butcher
-DUEL, Ygara, Malachar, Azhar, DiaBRO, Nyx) → chakram storm → couch split → death beat →
-OUT NOW. ~47 s. Every beat is dense combat; a quiet beat is the first thing to cut.
+**NO text cards mid-stream** (v7) and **the cut walks the EQUIPMENT spectrum** (v8, Aaron:
+"fast nur melee — ich brauche die volle Equipment variety" / "mehr skills"): staff → bow →
+revolver → launcher → meteor wand → drones → turrets → paladin hammer → flask → hitscan →
+sword duel → discs, and every class beat is a SKILL showcase with its cast window pinned by
+log_time.py. Orb opener → ranger-over-lava (Volley/Barrage) → gw weapon beats → meteor storm
+→ tinkerer/engineer/paladin → flask → descent → six-boss reel → chakram storm → couch →
+death → OUT NOW. ~50 s. A new beat that reads as one more melee swing is the wrong beat.
 
 ## Per-beat recipes (each earned by a measured failure)
 
@@ -59,7 +60,20 @@ OUT NOW. ~47 s. Every beat is dense combat; a quiet beat is the first thing to c
   "Swarm ..."). Paladin needs floor 30+ so Divine Judgment (unlock {1,10,20,30}) is the
   biggest slot the dump picks — measured 3 casts in 3.5 s at floor 31. The tinkerer's swarm
   tag reaches x28 by ~19 s on floor 15; floor 15 is a BOSS floor, so the drone army fights
-  Sethrak for free.
+  Sethrak for free. **Grep the CLASS's REAL kit** (class_defs.cpp) before hunting casts: the
+  ranger's kit is Volley/Piercing Shot/Barrage/Mark Prey — a log_time on "Multi Shot|Rain of
+  Arrows" (legacy skill names) returns silence and reads as "the ranger never casts".
+- **Ranger over the lava sea**: `--new ranger --floor 33 --lava --autoplay --stage
+  stages/eq3_bow.txt` — staged Void Bow + armor kit, NO --endgame: the endgame roll handed
+  the ranger a WAND (the ranged column holds guns and bows, but the roll can score a caster
+  weapon higher), and no bow grants a legendary skill, so the class kit gets the whole
+  energy pool: Volley (80 arrows), Piercing Shot and Barrage land back to back.
+- **Meteor storm**: `--new sorcerer --floor 45 --endgame --autoplay` — the endgame wand's
+  granted meteor_strike IS the beat here (the same spam that ruins the orb take makes this
+  one); impacts rain from ~3 s ("Meteor/pillar struck" lines, ~2 per second).
+- **gw_* weapon beats**: HUD-ON twins of the cinematic's biome-weapon takes (same eq3
+  stages, damage numbers visible) — revolver on the two-story hall, launcher over the lava,
+  flask in the void.
 - **Chakram storm**: `--new rogue --endgame --chakram-room 55 --stage stages/stage_storm3.txt`
   — docile extras CLOSE to the player spawn at (14,22) so the discs shred them on camera.
   AGGRO tier-5 packs one-shot even the endgame rogue (a whole retake was one long YOU DIED);
