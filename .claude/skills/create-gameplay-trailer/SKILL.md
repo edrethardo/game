@@ -23,12 +23,14 @@ gameplay-specific layer on top.
 - Tutorial hints (Attack/Skill, Block, Dodge Roll) auto-suppress while `--record` is armed —
   every dev-door hero is fresh, and the bot may never do the action that dismisses a hint.
 
-## The beat structure (v6 EDL, `tools/cut_gameplay.sh`)
+## The beat structure (v7 EDL, `tools/cut_gameplay.sh`)
 
-card ACTUAL GAMEPLAY → **orb opener** → lava → VHALL brawl → card 9 CLASSES → tinkerer swarm →
-engineer tesla → descent crits → card 11 BOSSES → three bosses → chakram storm → card COUCH
-CO-OP → splitscreen → death beat → card OUT NOW. ~48 s. Every beat is dense combat; a quiet
-beat (the v5 menu pan) is the first thing to cut.
+**NO text cards mid-stream** (Aaron's call, v7) — hard cuts only; the OUT NOW end card is the
+one survivor (it is the sender and the CTA, not a caption). Orb opener → lava → VHALL brawl →
+**four class-skill showcases** (drone army, turret squad, Divine Judgment — plus the orb
+opener itself) → descent crits → **six-boss reel** (2 s each, ascending floors: the Butcher
+DUEL, Ygara, Malachar, Azhar, DiaBRO, Nyx) → chakram storm → couch split → death beat →
+OUT NOW. ~47 s. Every beat is dense combat; a quiet beat is the first thing to cut.
 
 ## Per-beat recipes (each earned by a measured failure)
 
@@ -42,11 +44,22 @@ beat (the v5 menu pan) is the first thing to cut.
   build-cell re-pick in engine_launch.cpp keeps casters off swords — if a class carries the
   wrong weapon family, that fix regressed. Find tesla casts etc. with
   `log_time.py <log> "Tesla Coil hit"` — the frame-line interleave is a framegenaue sim clock.
-- **Boss beats**: milestone floors (`--floor 45/40/10 --difficulty 2 --endgame --autoplay`,
+- **Boss beats**: milestone floors (`--floor N --difficulty 2 --endgame --autoplay`,
   class marksman survives where wanderer died on 45). The bot + endgame gear melts a boss in
   seconds: find the kill via the NEXT floor's `"Floor N+1 exit portal"` build line in the log,
   then contact-sheet the seconds before it — pick the moment nameplate + body + numbers
   coincide. Never the Dungeon Engine (Aaron: show OTHER bosses, e.g. the teleporter Nyx).
+  TWO measured boundaries: an EARLY boss (the Butcher, floor 5) dies OFFSCREEN in ~4 s to
+  endgame gear — shoot him as a DUEL instead (`--new warrior --floor 5 --autoplay --stage
+  stages/eq_armor.txt`: armor-only kit + starter sword keeps the DPS low, so he stays alive
+  and on camera ~10 s). And Inferno floor 50 (Grim Reaper) is UNREACHABLE — the marksman died
+  three times and the boss never entered the frame; Azhar (35) is the deep-end substitute.
+- **Class-skill showcases** (Aaron: turret squad / drone army / Divine Judgment / frozen
+  orbs): `log_time.py` finds every cast ("Turret requested", "Divine Judgment: ... pillars",
+  "Swarm ..."). Paladin needs floor 30+ so Divine Judgment (unlock {1,10,20,30}) is the
+  biggest slot the dump picks — measured 3 casts in 3.5 s at floor 31. The tinkerer's swarm
+  tag reaches x28 by ~19 s on floor 15; floor 15 is a BOSS floor, so the drone army fights
+  Sethrak for free.
 - **Chakram storm**: `--new rogue --endgame --chakram-room 55 --stage stages/stage_storm3.txt`
   — docile extras CLOSE to the player spawn at (14,22) so the discs shred them on camera.
   AGGRO tier-5 packs one-shot even the endgame rogue (a whole retake was one long YOU DIED);
