@@ -72,8 +72,17 @@ death → OUT NOW. ~50 s. A new beat that reads as one more melee swing is the w
   granted meteor_strike IS the beat here (the same spam that ruins the orb take makes this
   one); impacts rain from ~3 s ("Meteor/pillar struck" lines, ~2 per second).
 - **gw_* weapon beats**: HUD-ON twins of the cinematic's biome-weapon takes (same eq3
-  stages, damage numbers visible) — revolver on the two-story hall, launcher over the lava,
-  flask in the void.
+  stages, damage numbers visible) — and each weapon rides ITS class's hands (v9, Aaron:
+  "jede Klasse ihre klassentypischen Waffen"): marksman/revolver (his START weapon per
+  class_defs), combat engineer/launcher, tinkerer/flask. The class kit casts beside the
+  staged weapon for free.
+- **All NINE classes must appear** (v9 — the rogue and wanderer were missing from every
+  cut before): g_rogue = staged Shadow Stiletto + armor kit on floor 22 (Fan of Knives'
+  144-knife burst every ~1.5 s, and the Stiletto's shadow_ricochet procs show as bonus);
+  g_wanderer = `--floor 8 --vhall --endgame` (top-DPS evasive melee — Adrenaline Surge /
+  Death's Dance labels, group-massacre window via sheet, his skills barely log). NB the
+  class COUNT: kClassDefs lists 9 (the Wanderer entry is formatted multi-line — a
+  one-line grep counts 8 and reads as a missing class).
 - **Chakram storm**: `--new rogue --endgame --chakram-room 55 --stage stages/stage_storm3.txt`
   — docile extras CLOSE to the player spawn at (14,22) so the discs shred them on camera.
   AGGRO tier-5 packs one-shot even the endgame rogue (a whole retake was one long YOU DIED);
