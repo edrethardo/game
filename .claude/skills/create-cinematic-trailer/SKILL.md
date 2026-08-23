@@ -1,6 +1,6 @@
 ---
 name: create-cinematic-trailer
-description: Produce or update the CINEMATIC trailer — HUD-free camera-path takes (orbit/glide/follow), the biome tour on deep floors, weapon montage, loot shower, chakram follow-kill and storm orbit, word-by-word title intro and logo-walk outro; tools/cut_cinematic.sh is the EDL. Trigger for "Cinematic-Trailer", "cinematic trailer neu", "Kamerafahrt", "Biome-Tour".
+description: Produce or update the CINEMATIC trailer — HUD-free camera-path takes (orbit/glide/follow), the biome tour on deep floors, the seven-biome weapon montage, loot shower, chakram follow-kill and storm orbit, word-by-word title intro and logo-walk outro; tools/cut_cinematic.sh is the EDL. Trigger for "Cinematic-Trailer", "cinematic trailer neu", "Kamerafahrt", "Biome-Tour".
 ---
 
 # Create / update the CINEMATIC trailer
@@ -25,7 +25,7 @@ layer on top.
 ## The beat structure (v6 EDL, `tools/cut_cinematic.sh`)
 
 Word intro → town glide → **biome tour** (dungeon → catacombs → caverns → descent → lava
-flyover → void) → **weapon montage** (7 legendaries, ~2.2 s each) → loot shower → stage beat →
+flyover → void) → **weapon montage** (7 legendaries, ~2.2 s each, EACH IN ITS OWN BIOME — the standing rule since v7) → loot shower → stage beat →
 **chakram follow-kill** → storm orbit → logo walk → OUT NOW. ~77 s.
 
 ## Per-beat recipes
