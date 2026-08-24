@@ -102,11 +102,35 @@ def main():
                 if nr > 20.0:
                     nocontact += 1
 
+    # --- mode metrics (WB-300): the loot economy's footprint on the match -----------------
+    def tsec(line):
+        m = re.match(r"\[\w+\] (\d+):(\d+):(\d+)", line)
+        return (int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) - (t0 or 0)) if m else None
+    waves = sum(1 for l in open(host_log, errors="replace") if "[ARENA] loot: wave" in l)
+    monster_drops = sum(1 for l in open(host_log, errors="replace") if "monster drop" in l)
+    monsters = sum(1 for l in open(host_log, errors="replace") if "[ARENA] monster:" in l)
+    first_loot = None
+    pickups = 0
+    for lg in logs:
+        for l in open(lg, errors="replace"):
+            if "AutoEquip" in l or "pickup result" in l and "accept=1" in l:
+                pickups += 1
+                t = tsec(l)
+                if t is not None and (first_loot is None or t < first_loot):
+                    first_loot = t
+    match_end = None
+    for l in open(host_log, errors="replace"):
+        if "[ARENA] over" in l:
+            match_end = tsec(l); break
+
     print(f"== ARENA SOAK: {a.bots} bots, cap {a.minutes} min ==")
     if winner:
-        print(f"match decided: winner slot {winner[0]}, scores {winner[1]}")
+        print(f"match decided: winner slot {winner[0]}, scores {winner[1]}"
+              + (f"  duration {match_end} s" if match_end else ""))
     else:
         print("match NOT decided inside the cap")
+    print(f"loot: {waves} waves  {pickups} pickups/equips  first loot at {first_loot} s  "
+          f"monsters {monsters} spawned / {monster_drops} killed+dropped")
     if deaths:
         gaps = [b[0] - x[0] for x, b in zip(deaths, deaths[1:])]
         print(f"deaths: {len(deaths)}  first blood at {deaths[0][0]} s  "

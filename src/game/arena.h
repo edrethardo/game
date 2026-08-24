@@ -16,12 +16,13 @@ namespace Arena {
     constexpr u32 MAX_COMBATANTS = 4;
     // The map roster. The id travels in the SV_LEVEL_SEED broadcast's seed byte (levelSeed %
     // MAP_COUNT), so adding a map costs no protocol change — both peers carve from the id.
-    constexpr u32 MAP_COUNT = 4;
+    constexpr u32 MAP_COUNT = 5;
     inline const char* mapName(u32 id) {
         switch (id % MAP_COUNT) {
-            case 1:  return "The Crucible";     // lava cross: four causeways over a molten sea
-            case 2:  return "The Pit";          // inverted amphitheatre: gravity is the funnel
+            case 1:  return "The Crucible";     // molten ring road: causeways + loop over lava
+            case 2:  return "The Pit";          // inverted amphitheatre with a rim-deck arcade
             case 3:  return "The Motherboard";  // circuit-board alleys around a defended die
+            case 4:  return "The Mainframe";    // WB-303: balcony ring + the mega-item vault
             default: return "Combat Hall";      // the original two-story colosseum
         }
     }

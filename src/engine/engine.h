@@ -1535,6 +1535,7 @@ private:
     Vec3 buildArenaCrucible();              // map 1: lava cross (30x30)
     Vec3 buildArenaPit();                   // map 2: inverted amphitheatre (24x24)
     Vec3 buildArenaMotherboard();           // map 3: circuit board (40x40)
+    Vec3 buildArenaMainframe();             // map 4: balcony ring + mega-item vault (48x48)
     void spawnArenaContents(Vec3 center);
     void enterArenaCommon();          // shared host/client body (build + reset + local placement)
     void enterArena();                // host/SP entry (seats NetPlayers, broadcasts the seed)

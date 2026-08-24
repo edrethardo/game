@@ -82,6 +82,7 @@ Vec3 Engine::buildArenaLevel() {
         case 1:  center = buildArenaCrucible();    break;
         case 2:  center = buildArenaPit();         break;
         case 3:  center = buildArenaMotherboard(); break;
+        case 4:  center = buildArenaMainframe();   break;
         default: center = buildArenaCombatHall();  break;
     }
     m_arenaCenter = center;
@@ -286,14 +287,14 @@ Vec3 Engine::buildArenaCombatHall() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// THE CRUCIBLE (map 1, 30x30) — four narrow stone causeways over a MOLTEN SEA meet on a centre
-// island. The lava is the funnel: there is no floor to strafe onto, so every route to a fight
-// is a bridge, and every bridge leads to the middle. Each causeway carries a staggered one-cell
-// lava gap (jump-or-detour skill check under fire — staggered across the two lanes, so the bot
-// travel veto always finds the sibling lane instead of parking at the hole). The island's pad
-// throws onto a 3 m crow's-nest slab BESIDE it (never above a pad — the launch owns its arc).
+// THE CRUCIBLE (map 1, 44x44 since WB-302 — "keine kleinen Maps mehr") — a molten LOOP, not a
+// star: four spawn causeways feed a square RING ROAD over the lava, the ring's corners widen
+// into fighting plateaus with cover, and four inner causeways continue to the centre island
+// (pad + 3 m crow's nest). Every route still ends in the middle, but the ring gives the map
+// real rotation — you can flank a held island instead of queueing on one bridge. Causeway
+// lava gaps stay staggered per lane (jump or slalom, never a dead stop for the bot veto).
 Vec3 Engine::buildArenaCrucible() {
-    constexpr u32 W = 30; constexpr f32 CS = 1.0f;
+    constexpr u32 W = 44; constexpr f32 CS = 1.0f;
     LevelGridSystem::init(m_level.grid, W, W, CS);
     const u8 brick = MaterialSystem::getIdByName("brick_wall");
     const u8 sand  = MaterialSystem::getIdByName("arena_sand");
@@ -303,7 +304,6 @@ Vec3 Engine::buildArenaCrucible() {
     const u8 padM  = MaterialSystem::getIdByName("arena_pad");
 
     auto cellAt = [&](u32 x, u32 z) -> GridCell& { return LevelGridSystem::getCell(m_level.grid, x, z); };
-    // Everything starts as SEA: walkable lava (burns players only), 5 m sky walls at the border.
     for (u32 z = 0; z < W; z++)
         for (u32 x = 0; x < W; x++) {
             GridCell& c = cellAt(x, z);
@@ -323,53 +323,73 @@ Vec3 Engine::buildArenaCrucible() {
     auto stoneRect = [&](u32 sx, u32 sz, u32 w, u32 d) {
         for (u32 z = sz; z < sz + d; z++) for (u32 x = sx; x < sx + w; x++) stoneCell(x, z);
     };
-    const u32 C = W / 2;                       // 15
-    // Centre island (9x9) + the four spawn aprons at the wall midpoints (4x3 against the wall).
-    stoneRect(C - 4, C - 4, 9, 9);
-    stoneRect(C - 2, 1, 5, 3);  stoneRect(C - 2, W - 4, 5, 3);   // north / south aprons
-    stoneRect(1, C - 2, 3, 5);  stoneRect(W - 4, C - 2, 3, 5);   // west / east aprons
-    // Causeways, 2 lanes wide, apron -> island. The GAP: one lava cell per lane, staggered one
-    // cell apart so the crossing is jump-the-hole or slalom-the-lanes, never a dead stop.
-    for (u32 z = 4; z < C - 4; z++) { stoneCell(C - 1, z); stoneCell(C, z); }
-    for (u32 z = C + 5; z < W - 4; z++) { stoneCell(C - 1, z); stoneCell(C, z); }
-    for (u32 x = 4; x < C - 4; x++) { stoneCell(x, C - 1); stoneCell(x, C); }
-    for (u32 x = C + 5; x < W - 4; x++) { stoneCell(x, C - 1); stoneCell(x, C); }
+    const u32 C = W / 2;   // 22
+    // Chebyshev distance from the centre seam (even grid — same measure as The Pit).
+    auto cheb = [&](u32 x, u32 z) -> u32 {
+        const s32 dx = (2 * (s32)x <= (s32)W - 1) ? ((s32)C - 1 - (s32)x) : ((s32)x - (s32)C);
+        const s32 dz = (2 * (s32)z <= (s32)W - 1) ? ((s32)C - 1 - (s32)z) : ((s32)z - (s32)C);
+        const s32 d  = (dx > dz) ? dx : dz;
+        return static_cast<u32>(d < 0 ? 0 : d);
+    };
+    // THE RING ROAD: a two-cell square band at radius 12..13.
+    for (u32 z = 1; z < W - 1; z++)
+        for (u32 x = 1; x < W - 1; x++) {
+            const u32 d = cheb(x, z);
+            if (d >= 12 && d <= 13) stoneCell(x, z);
+        }
+    // Ring-corner PLATEAUS (4x4, widened outward) with a cover crate each — the ring's own
+    // fighting grounds and loot stops.
+    stoneRect(7, 7, 5, 5);           stoneRect(W - 12, 7, 5, 5);
+    stoneRect(7, W - 12, 5, 5);      stoneRect(W - 12, W - 12, 5, 5);
+    auto crate = [&](u32 x, u32 z) { GridCell& c = cellAt(x, z); c.flags = CELL_SOLID; c.wallMaterialId = plank; };
+    crate(8, 8); crate(W - 9, 8); crate(8, W - 9); crate(W - 9, W - 9);
+    // Centre island 10x10 + crown furniture.
+    stoneRect(C - 5, C - 5, 10, 10);
+    crate(C - 4, C - 4); crate(C + 3, C - 4); crate(C - 4, C + 3); crate(C + 3, C + 3);
+    // Spawn aprons at the wall midpoints.
+    stoneRect(C - 2, 1, 5, 3);  stoneRect(C - 2, W - 4, 5, 3);
+    stoneRect(1, C - 2, 3, 5);  stoneRect(W - 4, C - 2, 3, 5);
+    // OUTER causeways (apron -> ring) and INNER causeways (ring -> island), two lanes each.
+    for (u32 z = 4; z < C - 13; z++)  { stoneCell(C - 1, z); stoneCell(C, z); }
+    for (u32 z = C + 14; z < W - 4; z++) { stoneCell(C - 1, z); stoneCell(C, z); }
+    for (u32 x = 4; x < C - 13; x++)  { stoneCell(x, C - 1); stoneCell(x, C); }
+    for (u32 x = C + 14; x < W - 4; x++) { stoneCell(x, C - 1); stoneCell(x, C); }
+    for (u32 z = C - 11; z < C - 5; z++) { stoneCell(C - 1, z); stoneCell(C, z); }
+    for (u32 z = C + 5; z < C + 12; z++) { stoneCell(C - 1, z); stoneCell(C, z); }
+    for (u32 x = C - 11; x < C - 5; x++) { stoneCell(x, C - 1); stoneCell(x, C); }
+    for (u32 x = C + 5; x < C + 12; x++) { stoneCell(x, C - 1); stoneCell(x, C); }
+    // The staggered lava gaps: one per lane on every INNER causeway (the contested stretch).
     auto lavaGap = [&](u32 x, u32 z) {
         GridCell& c = cellAt(x, z);
         c.flags = static_cast<u8>(CELL_FLOOR | CELL_LAVA); c.floorMaterialId = lava;
     };
-    lavaGap(C - 1, 7); lavaGap(C, 8);          // north causeway, staggered
-    lavaGap(C - 1, W - 8); lavaGap(C, W - 9);  // south
-    lavaGap(7, C - 1); lavaGap(8, C);          // west
-    lavaGap(W - 8, C - 1); lavaGap(W - 9, C);  // east
-    // Island furniture: a plank crate pair per diagonal (cover on the open plate), the centre
-    // JUMP PAD, and the 3 m crow's nest slab on the island's north edge (reached by pad + steer).
-    auto crate = [&](u32 x, u32 z) { GridCell& c = cellAt(x, z); c.flags = CELL_SOLID; c.wallMaterialId = plank; };
-    crate(C - 3, C - 3); crate(C + 3, C - 3); crate(C - 3, C + 3); crate(C + 3, C + 3);
+    lavaGap(C - 1, C - 8); lavaGap(C, C - 9);
+    lavaGap(C - 1, C + 8); lavaGap(C, C + 7);
+    lavaGap(C - 8, C - 1); lavaGap(C - 9, C);
+    lavaGap(C + 8, C - 1); lavaGap(C + 7, C);
+    // Island centre pad + the 3 m crow's nest on the north edge.
     for (u32 z = C; z <= C + 1; z++)
         for (u32 x = C; x <= C + 1; x++) {
             GridCell& c = cellAt(x, z);
             c.flags = static_cast<u8>(CELL_FLOOR | CELL_JUMPPAD);
             c.floorMaterialId = padM; c.wallMaterialId = stone;
         }
-    for (u32 z = C - 3; z <= C - 1; z++)
-        for (u32 x = C - 1; x <= C + 1; x++) {
-            GridCell& c = cellAt(x, z);
-            LevelGridSystem::setPlatform(c, 12, plank);   // 3 m nest: commanding, but exposed
-        }
-    // Spawns on the aprons, facing the centre down their causeway.
+    for (u32 z = C - 4; z <= C - 2; z++)
+        for (u32 x = C - 1; x <= C + 1; x++)
+            LevelGridSystem::setPlatform(cellAt(x, z), 12, plank);
+    // Spawns on the aprons.
     m_arenaPads[0] = {C + 0.5f, 0.0f, 2.0f};
     m_arenaPads[1] = {W - 2.0f, 0.0f, C + 0.5f};
     m_arenaPads[2] = {C + 0.5f, 0.0f, W - 2.0f};
     m_arenaPads[3] = {2.0f,     0.0f, C + 0.5f};
-    // Loot anchors: the island's four corners and the crow's nest — every drop is either on
-    // the contested plate or three metres above it.
-    m_arenaLootAnchorCount = 5;
-    m_arenaLootAnchors[0] = {C - 3.0f, 0.0f, C - 3.0f};
-    m_arenaLootAnchors[1] = {C + 4.0f, 0.0f, C - 3.0f};
-    m_arenaLootAnchors[2] = {C - 3.0f, 0.0f, C + 4.0f};
-    m_arenaLootAnchors[3] = {C + 4.0f, 0.0f, C + 4.0f};
-    m_arenaLootAnchors[4] = {C + 0.5f, 3.0f, C - 2.0f};            // crow's nest
+    // Loot anchors: nest, island centre-south, and the four ring plateaus.
+    m_arenaLootAnchorCount = 6;
+    m_arenaLootAnchors[0] = {C + 0.5f, 3.0f, C - 3.0f};
+    m_arenaLootAnchors[1] = {C + 0.5f, 0.0f, C + 3.5f};
+    m_arenaLootAnchors[2] = {9.5f, 0.0f, 9.5f};
+    m_arenaLootAnchors[3] = {W - 9.5f, 0.0f, 9.5f};
+    m_arenaLootAnchors[4] = {W - 9.5f, 0.0f, W - 9.5f};
+    m_arenaLootAnchors[5] = {9.5f, 0.0f, W - 9.5f};
 
     m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, 0xA12E7Bu,
                              m_level.sections, MAX_LEVEL_SECTIONS);
@@ -381,71 +401,93 @@ Vec3 Engine::buildArenaCrucible() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// THE PIT (map 2, 24x24) — an INVERTED amphitheatre: three concentric tiers falling toward the
-// centre, every step 0.75 m and LEDGE-flagged. Down is always free (walk off the edge), up is a
-// commitment (a jump exactly clears one 0.75 m ledge, or the four corner stairs, or the centre
-// pads) — so gravity itself is the funnel, and holding the rim means actively defending the
-// stairs. The middle is one open bowl: everyone sees everyone, all the time.
+// THE PIT (map 2, 40x40 since WB-302) — the inverted amphitheatre grown to Quake size, with a
+// COVERED ARCADE under the rim deck (the Combat Hall's signature slab trick): three LEDGE tiers
+// still fall toward the bowl, but the outer band is now a 3.5 m walkway you stand ON — with a
+// 1.5 m-floored tunnel UNDERNEATH that the spawns hide in. Down remains free everywhere; up is
+// the corner stairs (bowl->tiers) and the corner stairwells (arcade->deck), or the bowl pads.
+// Gravity still funnels the fight; the deck gives snipers a ring and the tunnel gives everyone
+// a protected rotation lane.
 Vec3 Engine::buildArenaPit() {
-    constexpr u32 W = 24; constexpr f32 CS = 1.0f;
+    constexpr u32 W = 40; constexpr f32 CS = 1.0f;
     LevelGridSystem::init(m_level.grid, W, W, CS);
     const u8 brick = MaterialSystem::getIdByName("brick_wall");
     const u8 sand  = MaterialSystem::getIdByName("arena_sand");
     const u8 stone = MaterialSystem::getIdByName("stone_wall");
+    const u8 plank = MaterialSystem::getIdByName("wood_plank");
     const u8 padM  = MaterialSystem::getIdByName("arena_pad");
     auto cellAt = [&](u32 x, u32 z) -> GridCell& { return LevelGridSystem::getCell(m_level.grid, x, z); };
-    const s32 C2 = W - 1;   // for the mirrored Chebyshev ring measure below
+    auto cheb = [&](u32 x, u32 z) -> u32 {
+        const s32 dx = (2 * (s32)x <= (s32)W - 1) ? ((s32)W / 2 - 1 - (s32)x) : ((s32)x - (s32)W / 2);
+        const s32 dz = (2 * (s32)z <= (s32)W - 1) ? ((s32)W / 2 - 1 - (s32)z) : ((s32)z - (s32)W / 2);
+        const s32 d  = (dx > dz) ? dx : dz;
+        return static_cast<u32>(d < 0 ? 0 : d);
+    };
     for (u32 z = 0; z < W; z++)
         for (u32 x = 0; x < W; x++) {
             GridCell& c = cellAt(x, z);
             if (x == 0 || z == 0 || x == W - 1 || z == W - 1) {
                 c.flags = CELL_SOLID; c.wallMaterialId = brick; continue;
             }
-            // Chebyshev distance from the exact centre seam (the grid is even, so measure to the
-            // nearer of the two central cells — keeps the rings 4-fold symmetric).
-            const s32 dx = (2 * (s32)x <= C2) ? ((s32)W / 2 - 1 - (s32)x) : ((s32)x - (s32)W / 2);
-            const s32 dz = (2 * (s32)z <= C2) ? ((s32)W / 2 - 1 - (s32)z) : ((s32)z - (s32)W / 2);
-            const s32 d  = (dx > dz) ? dx : dz;
-            u8 qh = (d <= 3) ? 0 : (d <= 6) ? 3 : 6;   // bowl 0 m, mid tier 0.75 m, rim 1.5 m
-            c.flags = static_cast<u8>((qh > 0) ? (CELL_FLOOR | CELL_LEDGE) : CELL_FLOOR);
-            c.floorHeight = qh; c.ceilingHeight = 24;   // 6 m walls over a 1.5 m rim
+            const u32 d = cheb(x, z);
+            c.ceilingHeight = 28;                       // 7 m walls over the 3.5 m deck
             c.floorMaterialId = sand; c.wallMaterialId = stone;
+            if (d <= 5) {                               // the bowl
+                c.flags = CELL_FLOOR; c.floorHeight = 0;
+            } else if (d <= 10) {                       // tier 1 @ 0.75 m (jumpable ledge)
+                c.flags = static_cast<u8>(CELL_FLOOR | CELL_LEDGE); c.floorHeight = 3;
+            } else if (d <= 14) {                       // tier 2 @ 1.5 m
+                c.flags = static_cast<u8>(CELL_FLOOR | CELL_LEDGE); c.floorHeight = 6;
+            } else if (d <= 16) {                       // the rim walkway @ 1.5 m (the 24-map's rim)
+                c.flags = static_cast<u8>(CELL_FLOOR | CELL_LEDGE); c.floorHeight = 6;
+            } else {                                    // the WALL-WALK @ 3.5 m: sniper ring,
+                // entered only via the corner stairs. A RAISED LEDGE floor, not a platform —
+                // slab-over-raised-floor is a combination no shipped level ever used, and
+                // both attempts at it froze every bot dead on its spawn cell (116 samples,
+                // 2 distinct positions). The proven vocabulary does the same job.
+                c.flags = static_cast<u8>(CELL_FLOOR | CELL_LEDGE); c.floorHeight = 14;
+            }
         }
-    // Corner STAIRS: a 2-cell 0.25 m-step run per corner, rim -> mid tier -> bowl, walkable both
-    // ways (the ONLY free way up, so they are the map's chokepoints — defend them or lose the rim).
+    // Corner stairs bowl -> tier2 (0.25 m steps, the free way up the tiers).
     auto step = [&](u32 x, u32 z, u8 qh) {
         GridCell& c = cellAt(x, z);
         c.flags = static_cast<u8>(CELL_FLOOR | CELL_LEDGE);
         c.floorHeight = qh; c.floorMaterialId = sand; c.wallMaterialId = stone;
     };
-    // Diagonal stair runs (qh 6..1 in 1q steps = walkable under STEP_UP_HEIGHT), all four corners.
     for (u32 i = 0; i < 6; i++) {
         const u8 qh = static_cast<u8>(6 - i);
-        step(4 + i, 4 + i, qh);            step(W - 5 - i, 4 + i, qh);
-        step(4 + i, W - 5 - i, qh);        step(W - 5 - i, W - 5 - i, qh);
+        step(9 + i, 9 + i, qh);            step(W - 10 - i, 9 + i, qh);
+        step(9 + i, W - 10 - i, qh);       step(W - 10 - i, W - 10 - i, qh);
     }
-    // Centre pads: the loud way out of the bowl — a 2x2 launcher straight up (default strength
-    // clears the 1.5 m rim with the 3.6 m apex and plenty of air-steer).
+    // Corner STAIRS rim -> wall-walk: 0.25 m raised steps along the walls (walkable both
+    // ways under STEP_UP_HEIGHT), so the 3.5 m ring is earned at the corners.
+    for (u32 i = 0; i < 8; i++) {
+        const u8 qh = static_cast<u8>(7 + i);          // 1.75 m .. 3.5 m
+        step(4 + i, 2, qh); step(4 + i, 1, qh);        // north wall, from the west corner
+        step(W - 5 - i, W - 3, qh); step(W - 5 - i, W - 2, qh);   // south, from the east
+        step(1, 4 + i, qh); step(2, 4 + i, qh);        // west wall
+        step(W - 2, W - 5 - i, qh); step(W - 3, W - 5 - i, qh);   // east wall
+    }
+    // Bowl pads: the loud way out — the 3.6 m apex clears even the 3.5 m deck with steer.
     for (u32 z = W / 2 - 1; z <= W / 2; z++)
         for (u32 x = W / 2 - 1; x <= W / 2; x++) {
             GridCell& c = cellAt(x, z);
             c.flags = static_cast<u8>(CELL_FLOOR | CELL_JUMPPAD);
             c.floorHeight = 0; c.floorMaterialId = padM;
         }
-    // Spawns on the rim, one per corner, clear of the stair heads.
-    m_arenaPads[0] = {2.5f,     0.0f, 2.5f};
-    m_arenaPads[1] = {W - 2.5f, 0.0f, 2.5f};
-    m_arenaPads[2] = {W - 2.5f, 0.0f, W - 2.5f};
-    m_arenaPads[3] = {2.5f,     0.0f, W - 2.5f};
-    for (u32 i = 0; i < MAX_PLAYERS; i++) m_arenaPads[i].y = 1.5f;   // rim height
-    // Loot anchors: the bowl centre (everyone sees it, everyone can fall onto it) and the
-    // four mid-tier sides — the drop is always downhill of somebody.
-    m_arenaLootAnchorCount = 5;
+    // Spawns on the rim walkway, wall midpoints (the 24-map's proven spawn story).
+    m_arenaPads[0] = {W * 0.5f + 0.5f, 1.5f, 16.5f - 1.0f};
+    m_arenaPads[1] = {W - 15.5f, 1.5f, W * 0.5f + 0.5f};
+    m_arenaPads[2] = {W * 0.5f + 0.5f, 1.5f, W - 15.5f};
+    m_arenaPads[3] = {15.5f, 1.5f, W * 0.5f + 0.5f};
+    // Loot anchors: the bowl (all eyes on it), the four tier-2 sides, one deck corner.
+    m_arenaLootAnchorCount = 6;
     m_arenaLootAnchors[0] = {W * 0.5f, 0.0f, W * 0.5f};
-    m_arenaLootAnchors[1] = {W * 0.5f, 0.75f, 6.5f};
-    m_arenaLootAnchors[2] = {W - 6.5f, 0.75f, W * 0.5f};
-    m_arenaLootAnchors[3] = {W * 0.5f, 0.75f, W - 6.5f};
-    m_arenaLootAnchors[4] = {6.5f,     0.75f, W * 0.5f};
+    m_arenaLootAnchors[1] = {W * 0.5f, 1.5f, 8.5f};
+    m_arenaLootAnchors[2] = {W - 8.5f, 1.5f, W * 0.5f};
+    m_arenaLootAnchors[3] = {W * 0.5f, 1.5f, W - 8.5f};
+    m_arenaLootAnchors[4] = {8.5f, 1.5f, W * 0.5f};
+    m_arenaLootAnchors[5] = {11.5f, 3.5f, 1.5f};       // the north wall-walk
 
     m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, 0xA12E7Cu,
                              m_level.sections, MAX_LEVEL_SECTIONS);
@@ -570,6 +612,114 @@ Vec3 Engine::buildArenaMotherboard() {
     m_arenaLootAnchors[5] = {11.0f, 0.0f, W - 11.0f};
 
     m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, 0xA12E7Du,
+                             m_level.sections, MAX_LEVEL_SECTIONS);
+    LevelGridSystem::buildClearanceField(m_level.grid);
+    Minimap::init(m_level.grid.width, m_level.grid.depth);
+    Vec3 center = {C * CS, 0.0f, C * CS};
+    LevelGridSystem::buildFlowField(m_level.grid, center);
+    return center;
+}
+
+// ---------------------------------------------------------------------------------------------
+// THE MAINFRAME (map 4, 48x48 — WB-303, the Quake-DM signature map). Two storeys of loops
+// around ONE prize: a walled 10x10 VAULT in the centre — four door chokepoints, the mega loot
+// anchor inside, and a walkable roof reached by the courtyard pads (king of the vault). A
+// 3-cell BALCONY ring runs the whole perimeter at 3 m (corner stairwells up, open inner edge
+// to drop anywhere), the arcade under it carries the spawns, and server-rack rows break the
+// courtyard sightlines. Every loop — balcony, courtyard, vault roof — orbits the same prize.
+Vec3 Engine::buildArenaMainframe() {
+    constexpr u32 W = 48; constexpr f32 CS = 1.0f;
+    LevelGridSystem::init(m_level.grid, W, W, CS);
+    const u8 brick = MaterialSystem::getIdByName("brick_wall");
+    const u8 sand  = MaterialSystem::getIdByName("arena_sand");
+    const u8 stone = MaterialSystem::getIdByName("stone_wall");
+    const u8 plank = MaterialSystem::getIdByName("wood_plank");
+    const u8 padM  = MaterialSystem::getIdByName("arena_pad");
+    auto cellAt = [&](u32 x, u32 z) -> GridCell& { return LevelGridSystem::getCell(m_level.grid, x, z); };
+    for (u32 z = 0; z < W; z++)
+        for (u32 x = 0; x < W; x++) {
+            GridCell& c = cellAt(x, z);
+            if (x == 0 || z == 0 || x == W - 1 || z == W - 1) {
+                c.flags = CELL_SOLID; c.wallMaterialId = brick;
+            } else {
+                c.flags = CELL_FLOOR; c.floorHeight = 0; c.ceilingHeight = 24;
+                c.floorMaterialId = sand; c.wallMaterialId = brick;
+            }
+        }
+    // BALCONY RING @ 3 m: three cells deep along every wall, arcade beneath (spawn cover).
+    auto plat = [&](u32 sx, u32 sz, u32 w, u32 d, u8 topQ) {
+        for (u32 z = sz; z < sz + d; z++)
+            for (u32 x = sx; x < sx + w; x++)
+                LevelGridSystem::setPlatform(cellAt(x, z), topQ, plank);
+    };
+    plat(1, 1, W - 2, 3, 12);  plat(1, W - 4, W - 2, 3, 12);
+    plat(1, 4, 3, W - 8, 12);  plat(W - 4, 4, 3, W - 8, 12);
+    // Corner stairwells (graduated slabs, ground -> balcony), one per corner.
+    for (u32 i = 0; i < 12; i++) {
+        const u8 topQ = static_cast<u8>(1 + i);
+        plat(15 - i, 1, 1, 1, topQ); plat(15 - i, 2, 1, 1, topQ);            // north-west run
+        plat(W - 16 + i, W - 2, 1, 1, topQ); plat(W - 16 + i, W - 3, 1, 1, topQ); // south-east
+        plat(1, W - 16 + i, 1, 1, topQ); plat(2, W - 16 + i, 1, 1, topQ);    // west-south
+        plat(W - 2, 15 - i, 1, 1, topQ); plat(W - 3, 15 - i, 1, 1, topQ);    // east-north
+    }
+    // THE VAULT: a walled 10x10 room dead centre, one 2-wide DOOR per side, roof at 3 m
+    // (walkable: the raise is plain floor on top of solid walls? No — the walls are SOLID
+    // full-height cells, so the roof is a PLATFORM slab spanning the room: stand on it, and
+    // the room below keeps its interior).
+    const u32 C = W / 2;   // 24
+    auto solidRect = [&](u32 sx, u32 sz, u32 w, u32 d, u8 mat) {
+        for (u32 z = sz; z < sz + d; z++)
+            for (u32 x = sx; x < sx + w; x++) {
+                GridCell& c = cellAt(x, z); c.flags = CELL_SOLID; c.wallMaterialId = mat;
+            }
+    };
+    // Vault walls (ring of solid), then punch the four doors, then slab the roof.
+    solidRect(C - 5, C - 5, 10, 1, stone);  solidRect(C - 5, C + 4, 10, 1, stone);
+    solidRect(C - 5, C - 4, 1, 8, stone);   solidRect(C + 4, C - 4, 1, 8, stone);
+    auto door = [&](u32 x, u32 z) {
+        GridCell& c = cellAt(x, z);
+        c.flags = CELL_FLOOR; c.floorHeight = 0; c.floorMaterialId = sand; c.wallMaterialId = stone;
+    };
+    door(C - 1, C - 5); door(C, C - 5); door(C - 1, C + 4); door(C, C + 4);
+    door(C - 5, C - 1); door(C - 5, C); door(C + 4, C - 1); door(C + 4, C);
+    // The roof: platform slabs over the vault INTERIOR (walls are full-height solid — the
+    // slab spans the open room and rests visually on the walls).
+    plat(C - 4, C - 4, 8, 8, 12);
+    // Courtyard PADS: four launchers midway between vault and balcony — the fast way onto
+    // the roof or the ring (3.6 m apex, air-steer).
+    auto pad2 = [&](u32 sx, u32 sz) {
+        for (u32 z = sz; z < sz + 2; z++)
+            for (u32 x = sx; x < sx + 2; x++) {
+                GridCell& c = cellAt(x, z);
+                c.flags = static_cast<u8>(CELL_FLOOR | CELL_JUMPPAD);
+                c.floorHeight = 0; c.floorMaterialId = padM;
+            }
+    };
+    pad2(C - 1, 9); pad2(W - 12, C - 1); pad2(C - 1, W - 11); pad2(9, C - 1);
+    // SERVER RACKS: 1x5 solid rows in the quadrants — courtyard cover, mirrored.
+    solidRect(11, 13, 1, 5, plank);  solidRect(W - 12, 13, 1, 5, plank);
+    solidRect(11, W - 18, 1, 5, plank); solidRect(W - 12, W - 18, 1, 5, plank);
+    solidRect(13, 11, 5, 1, plank);  solidRect(W - 18, 11, 5, 1, plank);
+    solidRect(13, W - 12, 5, 1, plank); solidRect(W - 18, W - 12, 5, 1, plank);
+    // Spawns in the arcade, one per wall, tucked at the quarter points.
+    // Clear of the stairwell runs (x 4..15 hug the walls): a spawn under a 0.25 m stair
+    // slab pins the body from second zero — measured as four bots farmed by monsters while
+    // standing still (69 environmental deaths in one soak).
+    m_arenaPads[0] = {20.5f, 0.0f, 2.0f};
+    m_arenaPads[1] = {W - 2.0f, 0.0f, 20.5f};
+    m_arenaPads[2] = {W - 20.5f, 0.0f, W - 2.0f};
+    m_arenaPads[3] = {2.0f, 0.0f, W - 20.5f};
+    // Loot anchors: the VAULT INTERIOR (the mega spot — four doors between you and out),
+    // the roof, and the four pad courts.
+    m_arenaLootAnchorCount = 6;
+    m_arenaLootAnchors[0] = {C * CS, 0.0f, C * CS};        // inside the vault
+    m_arenaLootAnchors[1] = {C * CS, 3.0f, C * CS};        // the roof
+    m_arenaLootAnchors[2] = {C * CS, 0.0f, 10.0f};
+    m_arenaLootAnchors[3] = {W - 10.0f, 0.0f, C * CS};
+    m_arenaLootAnchors[4] = {C * CS, 0.0f, W - 10.0f};
+    m_arenaLootAnchors[5] = {10.0f, 0.0f, C * CS};
+
+    m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, 0xA12E7Eu,
                              m_level.sections, MAX_LEVEL_SECTIONS);
     LevelGridSystem::buildClearanceField(m_level.grid);
     Minimap::init(m_level.grid.width, m_level.grid.depth);
@@ -885,9 +1035,16 @@ void Engine::arenaTick(f32 dt) {
         m_arenaMonsterTimer += dt;
         if (m_arenaMonsterTimer >= Arena::MONSTER_INTERVAL) {
             m_arenaMonsterTimer -= Arena::MONSTER_INTERVAL;
+            // Cap the pack: unkilled monsters ACCUMULATE (measured: nine of them farming
+            // four wedged bots), and a match with more monsters than players is a PvE mode.
+            u32 aliveMonsters = 0;
+            for (u32 i = 0; i < MAX_ENTITIES; i++)
+                if (m_entities.entities[i].flags & ENT_ACTIVE) aliveMonsters++;
             static const char* kMonsters[4] = {"Revenant", "Ghoul", "Bone Archer", "Tomb Wraith"};
             const char* want = kMonsters[m_arenaLootWave % 4];
+            if (aliveMonsters >= 3) want = nullptr;   // pack full: skip this interval
             s32 defIdx = -1;
+            if (want)
             for (u32 i = 0; i < m_enemyDefs.count; i++)
                 if (std::strcmp(m_enemyDefs.defs[i].name, want) == 0) { defIdx = (s32)i; break; }
             if (defIdx >= 0) {

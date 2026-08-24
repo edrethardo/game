@@ -1724,8 +1724,31 @@ Ground truth for a leak is process **RSS sampled against a progress counter**; C
 
 **Arena mode (PvP).** A main-menu "Arena Mode" starts an FFA deathmatch (first to 10, 3 s auto-respawn)
 on a deterministic floor-97 colosseum (`engine_arena.cpp`, town rails; rules in `game/arena.h`,
-tested). **36×36 since 2026-08-23** (was 44×44 — Aaron: smaller; −33% floor area) and the layout is
-PARAMETERIZED on `ARENA_W`: every placement (tower, ramps, pads, columns, crates, spawn pads) derives
+tested). **FIVE MAPS since WB-301/302/303 (2026-08-24)** behind a seed-riding dispatcher (map id =
+levelSeed % Arena::MAP_COUNT — no protocol change; `--arena-map <0-4>` pins it): Combat Hall
+(36×36, the original two-story colosseum), The Crucible (44×44 — a molten RING ROAD: causeways
+feed a square ring with corner plateaus, inner causeways continue to the island + crow's nest;
+staggered per-lane lava gaps), The Pit (40×40 — inverted amphitheatre, LEDGE tiers falling to
+the bowl, plus a 3.5 m WALL-WALK ring entered only by corner stairs), The Motherboard (40×40
+circuit board), The Mainframe (48×48 — balcony ring + arcade, server-rack cover, and the
+walled centre VAULT with four door chokepoints, mega loot anchor inside, walkable slab roof).
+Every map writes its own spawn pads + loot anchors (m_arenaPads/m_arenaLootAnchors).
+**ENGINE LIMITATION, measured twice:** a CELL_PLATFORM slab over a RAISED floor
+(floorHeight > 0) FREEZES bodies on those cells (116 telemetry samples, 2 distinct positions;
+with and without LEDGE) — no shipped level ever combined the two. Slabs only over floor 0.
+**THE QUAKE MODE (WB-295..300):** arena entry wipes every lane to a NAKED CLASS
+(equipFreshLane; save untouched — no save exists in-arena), first to FIVE kills; every 15 s
+one loot drop on a rotating anchor (never the same twice), ilvl 6→50 in ~2 min, legendary
+forced on late even waves (pure rules in arena.h, test-pinned); every 40 s a monster interlude
+(cap 3 alive, HP ×1..×4 with the wave) whose death drops GUARANTEED wave-level equipment via
+an early-out at the head of handleFirstKillDrop — no kill tracking, no XP, no loot tables:
+the firewall stays sealed. Arena bots run the loot (nearest drop = travel goal without LOS;
+feet-to-loot with aim-on-target when a drop is much nearer than the enemy). Client-side find
+with reach beyond the mode: an Auto-mode CLIENT could bag world loot but never wear it
+(onPickupResult's accept path ended "nothing to do") — fixed with the lane from the pending
+ring. Measured across all five maps (arena_soak --map): matches decide in 37–114 s, first
+blood 11–37 s, loot pickups on every map.
+The Combat Hall layout is PARAMETERIZED on `ARENA_W`: every placement (tower, ramps, pads, columns, crates, spawn pads) derives
 from the size, because the 44-era hand-written literals were all W-relative facts and shrinking by
 editing fifteen literals is how a pad ends up inside a ramp. `ARENA_SIZE` (env, even 36–44) overrides
 it for the one-binary A/B the bot soak runs — ship behaviour is the constant.
