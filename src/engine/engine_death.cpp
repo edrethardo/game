@@ -474,6 +474,30 @@ void Engine::handleDeathPreamble(EntityPool& pool, u16 idx, Vec3 pos) {
 // Returns true if the first-kill guarantee fired — caller must return immediately
 // to skip boss and normal loot paths (matches original `return; // skip normal drop logic`).
 bool Engine::handleFirstKillDrop(EntityPool& pool, u16 idx, Vec3 pos) {
+    // ARENA MONSTER (WB-298): a GUARANTEED equipment drop at the corpse, levelled to the
+    // match's loot wave — and then the whole ordinary chain is skipped (kill tracking,
+    // first-kill guarantee, boss/normal loot tables, on-kill ring passives). The arena is a
+    // progression firewall: its monsters must feed the MATCH, never the character.
+    if (m_level.inArena) {
+        if (!(pool.entities[idx].flags & ENT_FRIENDLY)) {
+            const u8 ilvl = Arena::lootItemLevel(m_arenaLootWave);
+            for (u32 attempt = 0; attempt < 3; attempt++) {   // rollItem may whiff; the drop must not
+                ItemInstance it = ItemGen::rollItem(ilvl, m_itemDefs, m_itemDefCount,
+                                                    m_affixDefs, m_affixDefCount);
+                if (isItemEmpty(it)) continue;
+                const Vec3 lootPos = pos + Vec3{0.0f, 0.3f, 0.0f};
+                if (WorldItemSystem::spawn(m_worldItems, it, lootPos, &m_level.grid) != 0xFFFF) {
+                    broadcastLootSpawn(m_worldItems, it.uid, lootPos,
+                                       it.defId < m_itemDefCount ? it.defId : 0xFFFF);
+                    LOG_INFO("[ARENA] monster drop: %s (ilvl %u)",
+                             m_itemDefs[it.defId].name, ilvl);
+                }
+                break;
+            }
+        }
+        return true;
+    }
+
     // Track hostile kills for the floor transition screen. Each player tallies their OWN kills:
     // only deaths credited to a local lane count (killerSlot is stamped by Combat::killEntity;
     // 0xFF = environmental/AI, and a remote guest's slot is not a local lane). The guest tallies

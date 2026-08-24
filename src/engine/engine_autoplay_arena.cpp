@@ -42,10 +42,16 @@ void Engine::autoplayArenaStep(f32 dt, bool uiOpen) {
     // same world-only slab-aware DDA the PvE scan uses — a body must never make geometry
     // disappear, and the arena's platform slabs must block sightlines or balcony players would
     // be "visible" through the floor.
-    static Autoplay::BotTarget s_tgts[MAX_PLAYERS];
+    // Players AND the WB-298 monster interludes share this list (merged nearest-first):
+    // buildBotView already produced the entity targets, and replacing them outright made
+    // every monster invisible to the bots the moment the mode gained PvE.
+    static Autoplay::BotTarget s_tgts[MAX_PLAYERS + 8];
     const u8  self = activeNetSlot();
     const Vec3 eye = m_localPlayer.position + Vec3{0.0f, m_localPlayer.eyeHeight, 0.0f};
     u32 n = 0;
+    const u32 kCap = MAX_PLAYERS + 8;
+    // Seed the list with the entity targets buildBotView found (the arena monsters).
+    for (u32 i = 0; i < v.targetCount && n < kCap; i++) s_tgts[n++] = v.targets[i];
     // One combatant -> one BotTarget, whatever array it lives in. slotId keys the identity
     // and the respawn-grace lookup; nearest-first insertion because the brain and target
     // stickiness assume the list is sorted by distance.
@@ -73,6 +79,7 @@ void Engine::autoplayArenaStep(f32 dt, bool uiOpen) {
         } else {
             t.hasLOS = true;
         }
+        if (n >= kCap) return;
         u32 slot = n++;
         while (slot > 0 && s_tgts[slot - 1].dist > t.dist) {
             s_tgts[slot] = s_tgts[slot - 1];

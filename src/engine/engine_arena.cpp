@@ -24,6 +24,8 @@
 #include "world/level_mesh.h"
 #include "game/game_constants.h"
 #include "game/enemy_ai.h"
+#include "game/entity.h"     // EntitySystem::spawn — the WB-298 monster interludes
+#include <cstring>           // strcmp — monster def lookup by name
 #include "renderer/material.h"
 #include "renderer/minimap.h"
 #include "net/net.h"
@@ -603,6 +605,8 @@ void Engine::enterArenaCommon() {
     m_arenaLootTimer = 0.0f;
     m_arenaLootWave  = 0;
     m_arenaLootLast  = -1;
+    m_arenaMonsterTimer = 0.0f;
+    m_arenaMonsterLast  = -1;
     for (u32 i = 0; i < MAX_PLAYERS; i++) m_arenaRespawn[i] = 0.0f;
     for (u32 i = 0; i < ARENA_FEED_LINES; i++) m_arenaFeed[i] = ArenaFeedEntry{};
 
@@ -866,6 +870,58 @@ void Engine::arenaTick(f32 dt) {
                     LOG_INFO("[ARENA] loot: wave=%u anchor=%u ilvl=%u rarity=%u name=%s",
                              wave + 1, pick, ilvl, static_cast<u32>(it.rarity), d.name);
                 }
+            }
+        }
+    }
+
+    // --- MONSTER INTERLUDES (WB-298): the second loot source. ------------------------------
+    // A monster crawls out at an anchor every MONSTER_INTERVAL, scaled to the wave, and drops
+    // equipment on death (handleFirstKillDrop's arena branch — guaranteed, and it EARLY-OUTS
+    // the whole PvE loot/kill-tracking chain, so the progression firewall stays sealed:
+    // no lifetime kills, no XP-adjacent passives, no floor loot table). Entity replication
+    // is the ordinary snapshot; a monster death never records an arena kill (recordKill is
+    // only wired to PLAYER deaths).
+    if (m_netRole != NetRole::CLIENT && m_arenaLootAnchorCount > 0) {
+        m_arenaMonsterTimer += dt;
+        if (m_arenaMonsterTimer >= Arena::MONSTER_INTERVAL) {
+            m_arenaMonsterTimer -= Arena::MONSTER_INTERVAL;
+            static const char* kMonsters[4] = {"Revenant", "Ghoul", "Bone Archer", "Tomb Wraith"};
+            const char* want = kMonsters[m_arenaLootWave % 4];
+            s32 defIdx = -1;
+            for (u32 i = 0; i < m_enemyDefs.count; i++)
+                if (std::strcmp(m_enemyDefs.defs[i].name, want) == 0) { defIdx = (s32)i; break; }
+            if (defIdx >= 0) {
+                const EnemyDef& d = m_enemyDefs.defs[defIdx];
+                const u32 pick = Arena::nextLootAnchor(static_cast<u32>(std::rand()),
+                                                       m_arenaMonsterLast, m_arenaLootAnchorCount);
+                m_arenaMonsterLast = static_cast<s8>(pick);
+                const u32 howMany = Arena::monsterCountForWave(m_arenaLootWave);
+                const f32 hpMult  = Arena::monsterHealthMult(m_arenaLootWave);
+                for (u32 k = 0; k < howMany; k++) {
+                    Vec3 pos = m_arenaLootAnchors[pick];
+                    pos.x += (k == 0) ? 0.0f : 1.2f;
+                    pos.y += 0.5f;
+                    EntityHandle h = EntitySystem::spawn(m_entities, pos, d.halfExtents, d.flying,
+                                                         d.health * hpMult, d.moveSpeed,
+                                                         d.detectionRange, d.attackRange,
+                                                         d.attackCooldown, d.damage);
+                    Entity* e = handleGet(m_entities, h);
+                    if (!e) break;
+                    e->meshId       = d.meshId;
+                    e->materialId   = d.materialId;
+                    e->enemyType    = d.enemyType;
+                    e->enemyRole    = d.role;
+                    e->aiPreference = d.aiPreference;
+                    e->enemyDefIdx  = static_cast<u8>(defIdx);
+                    e->baseMoveSpeed      = e->moveSpeed;
+                    e->baseAttackCooldown = e->attackCooldown;
+                }
+                char line[96];
+                std::snprintf(line, sizeof(line), "%s%s crawls out at the loot ground!",
+                              want, howMany > 1 ? "s" : "");
+                addChatMessage(nullptr, line, {1.0f, 0.5f, 0.35f});
+                LOG_INFO("[ARENA] monster: %s x%u anchor=%u hpMult=%.2f",
+                         want, howMany, pick, hpMult);
             }
         }
     }

@@ -49,6 +49,18 @@ namespace Arena {
     // From wave 4 on (60 s in), every second wave is FORCED legendary-or-better: the late
     // drops must be worth sprinting across the map into a fight for.
     inline bool lootWaveForcesLegendary(u32 wave) { return wave >= 4 && (wave % 2) == 0; }
+    // --- MONSTER INTERLUDES (WB-298): the second loot source. -----------------------------
+    // Every MONSTER_INTERVAL a monster (later: two) crawls out at an anchor and drops
+    // equipment on death — a PvE objective both players want, i.e. another fight magnet.
+    constexpr f32 MONSTER_INTERVAL = 40.0f;
+    inline u32 monsterCountForWave(u32 wave) { return wave >= 6 ? 2u : 1u; }
+    // Monsters scale WITH the loot they guard: naked players meet base stats, geared ones
+    // meet a beefed copy. Capped so a late monster is a fight, not a raid boss.
+    inline f32 monsterHealthMult(u32 wave) {
+        const f32 m = 1.0f + 0.25f * static_cast<f32>(wave);
+        return m > 4.0f ? 4.0f : m;
+    }
+
     // Anchor pick: any anchor but the previous one. `roll` is the server's random draw —
     // the rule stays pure/testable, the entropy stays at the engine boundary.
     inline u32 nextLootAnchor(u32 roll, s32 last, u32 count) {
