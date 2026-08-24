@@ -25,10 +25,38 @@ namespace Arena {
             default: return "Combat Hall";      // the original two-story colosseum
         }
     }
-    constexpr u32 KILL_TARGET    = 10;     // first to 10 wins (v1 fixed; lobby config parked)
+    // First to FIVE since the Quake-mode redesign (WB-296) — matches are meant to be short,
+    // loot-escalation rounds, not attrition ladders. Was 10.
+    constexpr u32 KILL_TARGET    = 5;
     constexpr f32 RESPAWN_DELAY  = 3.0f;   // seconds dead before the auto-respawn
 
     struct Score { u16 kills[MAX_COMBATANTS] = {}; };
+
+    // --- THE LOOT ESCALATION (WB-297): the thing players fight OVER -----------------------
+    // Every LOOT_INTERVAL seconds the server drops ONE item on one of the map's loot anchors
+    // (never the same anchor twice in a row — "immer woanders"), and every wave is stronger
+    // than the last. Pure so the curve is pinned by test.
+    constexpr f32 LOOT_INTERVAL = 15.0f;
+    constexpr u32 LOOT_MAX_ANCHORS = 8;
+
+    // Item level of wave N (0-based): a steep ramp — naked classes fight over the drops, so
+    // wave 0 already matters (ilvl 6 beats a starting weapon) and the cap is the game's own
+    // ladder end. ~2 minutes to reach the top: matches are first-to-5, not marathons.
+    inline u8 lootItemLevel(u32 wave) {
+        const u32 lvl = 6 + wave * 6;
+        return static_cast<u8>(lvl > 50 ? 50 : lvl);
+    }
+    // From wave 4 on (60 s in), every second wave is FORCED legendary-or-better: the late
+    // drops must be worth sprinting across the map into a fight for.
+    inline bool lootWaveForcesLegendary(u32 wave) { return wave >= 4 && (wave % 2) == 0; }
+    // Anchor pick: any anchor but the previous one. `roll` is the server's random draw —
+    // the rule stays pure/testable, the entropy stays at the engine boundary.
+    inline u32 nextLootAnchor(u32 roll, s32 last, u32 count) {
+        if (count <= 1) return 0;
+        u32 pick = roll % count;
+        if (static_cast<s32>(pick) == last) pick = (pick + 1) % count;
+        return pick;
+    }
 
     // Credit a kill. killerSlot 0xFF (environmental / unknown attacker) or any out-of-range
     // slot records nothing — a death must never invent credit. Returns true and sets

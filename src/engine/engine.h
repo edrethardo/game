@@ -1034,6 +1034,12 @@ private:
     // respawn's farthestPad, and the face-the-centre spawn yaw.
     Vec3 m_arenaPads[MAX_PLAYERS] = {};
     Vec3 m_arenaCenter = {};
+    // Loot-escalation state (WB-297; anchors are map data written by each builder — WB-304).
+    Vec3 m_arenaLootAnchors[Arena::LOOT_MAX_ANCHORS] = {};
+    u8   m_arenaLootAnchorCount = 0;
+    f32  m_arenaLootTimer = 0.0f;   // counts up to Arena::LOOT_INTERVAL
+    u32  m_arenaLootWave  = 0;      // completed waves — drives the ilvl/rarity ramp
+    s8   m_arenaLootLast  = -1;     // previous anchor ("immer woanders")
     f32          m_arenaRespawn[MAX_PLAYERS] = {};  // >0 = that slot is dead, counting down to auto-respawn
     f32          m_arenaOverTimer = 0.0f;           // >0 = match decided, winner banner running
     u8           m_arenaWinner    = 0xFF;           // valid while m_arenaOverTimer > 0

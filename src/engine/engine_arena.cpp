@@ -30,7 +30,8 @@
 #include "net/server.h"
 #include "core/log.h"
 #include <cmath>
-#include <cstdlib>   // getenv — the ARENA_SIZE A/B override
+#include <cstdlib>   // getenv — the ARENA_SIZE A/B override; rand — the loot-anchor draw
+#include <cstdio>    // snprintf — the loot announce line
 
 // The pure rules assume exactly MAX_PLAYERS combatants — pin it here, at the engine boundary.
 static_assert(Arena::MAX_COMBATANTS == MAX_PLAYERS,
@@ -97,6 +98,18 @@ Vec3 Engine::buildArenaCombatHall() {
         m_arenaPads[1] = {ARENA_W * ARENA_CS - PAD_Z,   0.0f, PAD_X};
         m_arenaPads[2] = {ARENA_W * ARENA_CS - PAD_X,   0.0f, ARENA_W * ARENA_CS - PAD_Z};
         m_arenaPads[3] = {PAD_Z,                        0.0f, ARENA_W * ARENA_CS - PAD_X};
+    }
+    // Loot anchors (WB-304): the crown (the contested vantage), the tower top, and the four
+    // wall-midpoint pad aprons — never near a spawn bay.
+    {
+        const f32 H = HALF * ARENA_CS;
+        m_arenaLootAnchorCount = 6;
+        m_arenaLootAnchors[0] = {H, 3.0f, H};                       // tower crown
+        m_arenaLootAnchors[1] = {H, 1.5f, H - 2.5f};                // tower plate, north lip
+        m_arenaLootAnchors[2] = {H, 0.0f, 6.5f};                    // north pad apron
+        m_arenaLootAnchors[3] = {ARENA_W - 6.5f, 0.0f, H};          // east
+        m_arenaLootAnchors[4] = {H, 0.0f, ARENA_D - 6.5f};          // south
+        m_arenaLootAnchors[5] = {6.5f, 0.0f, H};                    // west
     }
 
     u8 sand   = MaterialSystem::getIdByName("arena_sand");
@@ -347,6 +360,14 @@ Vec3 Engine::buildArenaCrucible() {
     m_arenaPads[1] = {W - 2.0f, 0.0f, C + 0.5f};
     m_arenaPads[2] = {C + 0.5f, 0.0f, W - 2.0f};
     m_arenaPads[3] = {2.0f,     0.0f, C + 0.5f};
+    // Loot anchors: the island's four corners and the crow's nest — every drop is either on
+    // the contested plate or three metres above it.
+    m_arenaLootAnchorCount = 5;
+    m_arenaLootAnchors[0] = {C - 3.0f, 0.0f, C - 3.0f};
+    m_arenaLootAnchors[1] = {C + 4.0f, 0.0f, C - 3.0f};
+    m_arenaLootAnchors[2] = {C - 3.0f, 0.0f, C + 4.0f};
+    m_arenaLootAnchors[3] = {C + 4.0f, 0.0f, C + 4.0f};
+    m_arenaLootAnchors[4] = {C + 0.5f, 3.0f, C - 2.0f};            // crow's nest
 
     m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, 0xA12E7Bu,
                              m_level.sections, MAX_LEVEL_SECTIONS);
@@ -415,6 +436,14 @@ Vec3 Engine::buildArenaPit() {
     m_arenaPads[2] = {W - 2.5f, 0.0f, W - 2.5f};
     m_arenaPads[3] = {2.5f,     0.0f, W - 2.5f};
     for (u32 i = 0; i < MAX_PLAYERS; i++) m_arenaPads[i].y = 1.5f;   // rim height
+    // Loot anchors: the bowl centre (everyone sees it, everyone can fall onto it) and the
+    // four mid-tier sides — the drop is always downhill of somebody.
+    m_arenaLootAnchorCount = 5;
+    m_arenaLootAnchors[0] = {W * 0.5f, 0.0f, W * 0.5f};
+    m_arenaLootAnchors[1] = {W * 0.5f, 0.75f, 6.5f};
+    m_arenaLootAnchors[2] = {W - 6.5f, 0.75f, W * 0.5f};
+    m_arenaLootAnchors[3] = {W * 0.5f, 0.75f, W - 6.5f};
+    m_arenaLootAnchors[4] = {6.5f,     0.75f, W * 0.5f};
 
     m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, 0xA12E7Cu,
                              m_level.sections, MAX_LEVEL_SECTIONS);
@@ -528,6 +557,15 @@ Vec3 Engine::buildArenaMotherboard() {
     m_arenaPads[1] = {W - 3.5f, 0.5f, 3.5f};
     m_arenaPads[2] = {W - 3.5f, 0.5f, W - 3.5f};
     m_arenaPads[3] = {3.5f,     0.5f, W - 3.5f};
+    // Loot anchors: the die (the hill worth being king of), the heatsink crown above it, and
+    // the four quadrant alleys between the capacitors and the RAM banks.
+    m_arenaLootAnchorCount = 6;
+    m_arenaLootAnchors[0] = {C * CS, 1.5f, C * CS};
+    m_arenaLootAnchors[1] = {C * CS, 3.5f, C * CS};                // heatsink
+    m_arenaLootAnchors[2] = {11.0f, 0.0f, 11.0f};
+    m_arenaLootAnchors[3] = {W - 11.0f, 0.0f, 11.0f};
+    m_arenaLootAnchors[4] = {W - 11.0f, 0.0f, W - 11.0f};
+    m_arenaLootAnchors[5] = {11.0f, 0.0f, W - 11.0f};
 
     m_level.sectionCount = LevelMeshSystem::buildAll(m_level.grid, 0xA12E7Du,
                              m_level.sections, MAX_LEVEL_SECTIONS);
@@ -562,8 +600,25 @@ void Engine::enterArenaCommon() {
     m_arenaScore     = Arena::Score{};
     m_arenaWinner    = 0xFF;
     m_arenaOverTimer = 0.0f;
+    m_arenaLootTimer = 0.0f;
+    m_arenaLootWave  = 0;
+    m_arenaLootLast  = -1;
     for (u32 i = 0; i < MAX_PLAYERS; i++) m_arenaRespawn[i] = 0.0f;
     for (u32 i = 0; i < ARENA_FEED_LINES; i++) m_arenaFeed[i] = ArenaFeedEntry{};
+
+    // THE NAKED SPAWN (WB-296, the Quake-mode rule): whatever hero walked in — a Continue
+    // character in full mythics included — fights as a BARE CLASS: starting weapon, empty bag,
+    // no armor, class-base stats. equipFreshLane is exactly that wipe. The save is untouched
+    // (saveCharacter hard-refuses in-arena and arenaLeaveToMenu never saves), so the hero's
+    // real gear is back on the next Continue; only the ARENA never sees it.
+    //
+    // ORDER IS LOAD-BEARING: the wipe writes m_localPlayers[lane], but the placement loop
+    // below writes the ALIAS for the active lane and the function ends by persisting the
+    // alias over the array — so without adopting the wipe into the alias first, the active
+    // lane would keep its old HP/gear-derived stats (the enterTown alias rule, in reverse).
+    for (u8 lane = 0; lane < m_splitPlayerCount && lane < MAX_LOCAL_PLAYERS; lane++)
+        equipFreshLane(lane);
+    m_localPlayer = m_localPlayers[m_localPlayerIndex];
 
     // Local lanes onto their pads (lane index == net slot for host/SP locals). The alias write
     // happens OUTSIDE the per-player swap at every call site, so persist the lane array
@@ -644,6 +699,10 @@ void Engine::enterArenaClient() {
     // SV_EVENT, clock sync) must happen here or this client is connected but deaf.
     wireClientNet();
     enterArenaCommon();
+    // The naked-spawn wipe above changed this client's inventory AFTER the join-time
+    // CL_INVENTORY_SYNC — re-sync, or the server keeps deriving PvP stats (ccResist,
+    // armor) from the gear the wipe just removed.
+    sendInventorySync(0, activeNetSlot());
     LOG_INFO("Entered the ARENA (client).");
 }
 
@@ -774,6 +833,41 @@ void Engine::arenaTick(f32 dt) {
         m_arenaOverTimer -= dt;
         if (m_arenaOverTimer <= 0.0f) arenaLeaveToMenu();
         return;   // match decided: no respawns, scores frozen
+    }
+
+    // --- THE LOOT ESCALATION (WB-297): the thing the players fight over. -------------------
+    // Authority-side only (host/SP): every LOOT_INTERVAL a single item drops on one of the
+    // map's anchors (WB-304, never the same twice in a row), and every wave rolls stronger
+    // (Arena::lootItemLevel ramp; late waves force legendary — the pure rules are pinned in
+    // test_arena.cpp). Replication is free: world items already ride the snapshot, and the
+    // pickup is the ordinary server-validated CL_PICKUP path.
+    if (m_netRole != NetRole::CLIENT && m_arenaLootAnchorCount > 0) {
+        m_arenaLootTimer += dt;
+        if (m_arenaLootTimer >= Arena::LOOT_INTERVAL) {
+            m_arenaLootTimer -= Arena::LOOT_INTERVAL;
+            const u32 wave = m_arenaLootWave++;
+            const u32 pick = Arena::nextLootAnchor(static_cast<u32>(std::rand()),
+                                                   m_arenaLootLast, m_arenaLootAnchorCount);
+            m_arenaLootLast = static_cast<s8>(pick);
+            const u8 ilvl = Arena::lootItemLevel(wave);
+            const Rarity floorR = Arena::lootWaveForcesLegendary(wave) ? Rarity::LEGENDARY
+                                                                       : Rarity::COMMON;
+            ItemInstance it = ItemGen::rollItem(ilvl, m_itemDefs, m_itemDefCount,
+                                                m_affixDefs, m_affixDefCount, floorR);
+            if (!isItemEmpty(it)) {
+                Vec3 pos = m_arenaLootAnchors[pick];
+                pos.y += 0.4f;
+                if (WorldItemSystem::spawn(m_worldItems, it, pos, &m_level.grid) != 0xFFFF) {
+                    const ItemDef& d = m_itemDefs[it.defId];
+                    char line[96];
+                    std::snprintf(line, sizeof(line), "Loot wave %u: %s (ilvl %u)",
+                                  wave + 1, d.name, ilvl);
+                    addChatMessage(nullptr, line, {1.0f, 0.85f, 0.3f});   // gold: loot news
+                    LOG_INFO("[ARENA] loot: wave=%u anchor=%u ilvl=%u rarity=%u name=%s",
+                             wave + 1, pick, ilvl, static_cast<u32>(it.rarity), d.name);
+                }
+            }
+        }
     }
 
     if (m_netRole == NetRole::CLIENT) {

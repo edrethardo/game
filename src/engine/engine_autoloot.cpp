@@ -250,7 +250,11 @@ void Engine::updateAutoLoot(f32 dt) {
     const u8 lane = m_localPlayerIndex;
     PlayerInventory& inv = m_inventories[lane];
     if (!inv.autoMode) return;
-    if (m_level.inArena) return;                           // no loot exists in the arena; stay inert
+    // The arena HAS loot since the Quake-mode redesign (WB-297: escalating wave drops are
+    // what the match is fought over), so the old "no loot exists here" early-out would make
+    // Auto-mode players and every arena bot ignore the entire mode. Progression stays
+    // firewalled the same way it always was: saveCharacter refuses in-arena, so picked-up
+    // arena gear dies with the match.
 
     // Slow housekeeping: discard dominated gear, and nudge when another build's achievable total
     // pulls ahead. Also runs right after every pickup (below), so a big drop reacts immediately.

@@ -60,3 +60,34 @@ TEST_CASE("Arena: farthestPad ignores Y (pads and players share the floor plane)
     const Vec3 foe[1]  = {{1, 50.0f, 0}};            // absurd Y must not matter
     CHECK(Arena::farthestPad(pads, 2, foe, 1) == 1);
 }
+
+// --- WB-297: the loot-escalation rules are the mode's economy — pin the curve. -------------
+TEST_CASE("Arena loot: the wave ramp is monotonic and capped at the ladder end") {
+    u8 prev = 0;
+    for (u32 w = 0; w < 20; w++) {
+        const u8 lvl = Arena::lootItemLevel(w);
+        CHECK(lvl >= prev);          // never weaker than the wave before
+        CHECK(lvl <= 50);            // the game's own ladder end is the cap
+        prev = lvl;
+    }
+    CHECK(Arena::lootItemLevel(0) >= 6);    // wave 0 already beats a starting weapon
+    CHECK(Arena::lootItemLevel(8) == 50);   // ~2 minutes to the top: first-to-5, not a marathon
+}
+
+TEST_CASE("Arena loot: late waves force legendary, early waves never do") {
+    for (u32 w = 0; w < 4; w++) CHECK_FALSE(Arena::lootWaveForcesLegendary(w));
+    bool any = false;
+    for (u32 w = 4; w < 12; w++) any = any || Arena::lootWaveForcesLegendary(w);
+    CHECK(any);
+}
+
+TEST_CASE("Arena loot: the anchor pick never repeats the previous anchor") {
+    for (u32 roll = 0; roll < 40; roll++)
+        for (s32 last = 0; last < 6; last++) {
+            const u32 pick = Arena::nextLootAnchor(roll, last, 6);
+            CHECK(pick < 6);
+            CHECK(static_cast<s32>(pick) != last);
+        }
+    // Degenerate single-anchor map: the rule must still terminate (repeat allowed there).
+    CHECK(Arena::nextLootAnchor(7, 0, 1) == 0);
+}
