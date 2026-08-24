@@ -1881,7 +1881,21 @@ void Engine::onPickupResult(u8 accept, u32 itemUid) {
         // First WORLD pickup, guest edition (the SP/host lane unlocks at its local pickup
         // site). slot >= 0 = a real predicted bag add — shrine activations ride the same
         // packet but never enter the pending ring, so they can't count as an "item".
-        if (slot >= 0) Steam::unlockAchievement("ACH_FIRST_ITEM");
+        if (slot >= 0) {
+            Steam::unlockAchievement("ACH_FIRST_ITEM");
+            // The EQUIP half the client path never had: the SP/host pickup calls
+            // autoEquipIfUpgrade right at its pickup site, but a guest's accept ended here
+            // with "nothing to do" — so an Auto-mode CLIENT collected world loot forever
+            // and never wore any of it (found by the arena bots: clients ran the wave
+            // drops, bagged them, and kept fighting with the starting weapon). Lane must
+            // come from the pending ring — this fires during Net::poll, where
+            // m_localPlayerIndex is whatever lane was swapped in last (the couch rule the
+            // reject branch above already follows).
+            u8 lane = PendingPickupRingOps::findLaneByUid(s_engine->m_pendingPickups, itemUid);
+            if (lane >= MAX_LOCAL_PLAYERS) lane = 0;
+            if (s_engine->m_inventories[lane].autoMode)
+                s_engine->autoEquipIfUpgrade(lane, static_cast<u8>(slot));
+        }
     } else {
         // Server rejected — roll back the predicted inventory add, in the LANE that predicted
         // it. This handler fires during Net::poll, so m_localPlayerIndex is just whatever lane

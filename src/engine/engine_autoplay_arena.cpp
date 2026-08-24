@@ -20,6 +20,7 @@
 #include "platform/input.h"    // Input::clearBotHeld — release synthetic holds on a dead lane
 #include "game/autoplay_brain.h"
 #include "game/autoplay_combat.h"
+#include "game/autoplay_nav.h"    // Autoplay::stepAllowed — the loot-run heading rides the same veto as travel
 #include "world/raycast.h"
 #include "core/log.h"
 #include <cmath>
@@ -112,18 +113,85 @@ void Engine::autoplayArenaStep(f32 dt, bool uiOpen) {
     v.targets     = s_tgts;
     v.targetCount = n;
 
+    // --- THE LOOT RUN (WB-299): the mode's economy needs runners. -------------------------
+    // The nearest live drop is always scanned (telemetry needs it every tick — the first
+    // version only looked when nothing was visible, which read as "clients never see loot"
+    // while they were actually plinking at 22 m the whole match). The run itself fires in
+    // two shapes:
+    //  - NO line of sight to anyone: the drop replaces the map centre as the travel goal.
+    //  - VISIBLE enemy but the drop is much closer (under 12 m and well inside the enemy
+    //    distance): keep shooting, but WALK to the loot — the FEET are overridden after
+    //    decide() (the boss-movement-fill pattern), because FIGHT's kite/strafe movement
+    //    ignores flowDir entirely. Without this, two ranged bots plink forever and the
+    //    wave economy never touches the match.
+    f32  lootD = -1.0f;
+    Vec3 lootPos{};
+    {
+        f32 bestD2 = 1e30f;
+        for (u32 i = 0; i < MAX_WORLD_ITEMS; i++) {
+            const WorldItem& wi = m_worldItems.items[i];
+            if (!wi.active) continue;
+            const f32 d2 = lengthSq(wi.position - m_localPlayer.position);
+            if (d2 < bestD2) { bestD2 = d2; lootPos = wi.position; }
+        }
+        if (bestD2 < 1e29f) lootD = std::sqrt(bestD2);
+    }
+    bool anyLOS = false;
+    f32  nearestVis = 1e30f;
+    for (u32 i = 0; i < n; i++)
+        if (s_tgts[i].hasLOS) { anyLOS = true; if (s_tgts[i].dist < nearestVis) nearestVis = s_tgts[i].dist; }
+    // The vetoed heading toward the drop (lava maps: a straight line can cross a trace).
+    Vec3 lootDir{0, 0, 0};
+    if (lootD > 1.0f) {
+        Vec3 dir = lootPos - m_localPlayer.position;
+        dir.y = 0.0f;
+        if (lengthSq(dir) > 1e-4f) {
+            dir = normalize(dir);
+            const f32 feetY = m_localPlayer.position.y;
+            if (!Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, dir, false)) {
+                const f32 c = 0.70710678f;
+                const Vec3 l{dir.x * c - dir.z * c, 0.0f, dir.x * c + dir.z * c};
+                const Vec3 r{dir.x * c + dir.z * c, 0.0f, -dir.x * c + dir.z * c};
+                if      (Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, l, false)) dir = l;
+                else if (Autoplay::stepAllowed(m_level.grid, m_localPlayer.position, feetY, r, false)) dir = r;
+                else dir = {0, 0, 0};
+            }
+            lootDir = dir;
+        }
+    }
+    if (!anyLOS && lengthSq(lootDir) > 1e-4f) {
+        v.flowDir = lootDir; v.flowValid = true; v.atExit = false;   // travel goal = the drop
+    }
+
     Autoplay::BotIntent in = Autoplay::decide(v);
+
+    // Feet-to-loot override DURING a fight: shooting continues (aim/fire untouched), but the
+    // walk goes to the nearby drop. Same shape as the boss-floor movement fill — FIGHT's own
+    // movement never reads flowDir, so a flowDir override alone cannot move a fighting bot.
+    if (anyLOS && lengthSq(lootDir) > 1e-4f && lootD > 1.0f &&
+        lootD < 12.0f && lootD < nearestVis * 0.75f) {
+        // Decompose the world heading into the player's forward/right basis (player.cpp's
+        // own convention: forward = {-sin(yaw), 0, -cos(yaw)}).
+        const f32 sy = std::sin(m_localPlayer.yaw), cy = std::cos(m_localPlayer.yaw);
+        const f32 fwd   = lootDir.x * -sy + lootDir.z * -cy;
+        const f32 right = lootDir.x * -cy + lootDir.z *  sy;
+        in.moveFwd = in.moveBack = in.moveLeft = in.moveRight = false;
+        if (fwd   >  0.38f) in.moveFwd   = true;
+        if (fwd   < -0.38f) in.moveBack  = true;
+        if (right >  0.38f) in.moveRight = true;
+        if (right < -0.38f) in.moveLeft  = true;
+    }
 
     // 1 Hz telemetry, per lane — the soak's dataset. y carries the VERTICAL story (pit vs
     // balcony occupancy), tgtDist the engagement range; kills come from the shared scoreboard.
     ap().arenaTelemTimer += dt;
     if (ap().arenaTelemTimer >= 1.0f) {
         ap().arenaTelemTimer = 0.0f;
-        LOG_INFO("[ARENA-BOT] slot=%u pos=(%.1f,%.1f,%.1f) hp=%.0f tgts=%u nearest=%.1f fire=%d kills=%u",
+        LOG_INFO("[ARENA-BOT] slot=%u pos=(%.1f,%.1f,%.1f) hp=%.0f tgts=%u nearest=%.1f fire=%d kills=%u loot=%.1f",
                  self, m_localPlayer.position.x, m_localPlayer.position.y,
                  m_localPlayer.position.z, m_localPlayer.health, n,
                  (n > 0) ? s_tgts[0].dist : -1.0f,
-                 in.fire ? 1 : 0, m_arenaScore.kills[self]);
+                 in.fire ? 1 : 0, m_arenaScore.kills[self], lootD);
     }
 
     applyBotIntent(in, uiOpen, dt, v.weaponIsMelee);
